@@ -1,0 +1,56 @@
+{
+  "case_id": "CLM-0001",
+  "generated_at": "2026-06-18T15:12:27.972884+00:00",
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Santé MVP testing"
+  },
+  "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+  "source_claim_id": "c2bdae5f-4f81-abc3-89d1-a0cc481b8f5d",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "3666.69",
+    "amount_requested": "2933.35",
+    "patient_share": "733.34"
+  },
+  "files": [
+    {
+      "filename": "case_data.json",
+      "size_bytes": 27565,
+      "sha256": "6cd9d5fac215c1150184479361966a4ade26e8bce024764067ab88d7ceb5a215",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 4091,
+      "sha256": "640833c964d8d33d2a4e7681d1b50dc24dcc0c4b6013ba8c27c5d91941fab1c9",
+      "required": true
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 1473,
+      "sha256": "a5e81bab21a2bd2bd311b030f232ca16153a95151b3ab56b82d4c40d701b5f8d",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3923,
+      "sha256": "e25c59355e09997e88261c31d0b97ed706a9bcfadf7be447bd0d4c9431a32182",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 34870,
+      "sha256": "91287e2333ce4f77bcd5f12306de9a018dcaacdc54eea7ef74d89ea188196da6",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2884,
+      "sha256": "cc290e93e702d8203ef495fb9dd7bf62a10263175ef160afb08dd49949bbac05",
+      "required": true
+    }
+  ]
+}

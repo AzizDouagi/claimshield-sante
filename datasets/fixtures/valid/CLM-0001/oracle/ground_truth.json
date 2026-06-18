@@ -1,0 +1,44 @@
+{
+  "case_id": "CLM-0001",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Tresa661 Taunya970 Sawayn19",
+    "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "payer_name": "Cigna Health",
+    "service_date": "03/06/2026",
+    "claim_reference": "CLM-0001",
+    "invoice_number": "INV-CLM-0001",
+    "prescription_number": "RX-CLM-0001",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "total_billed": "3666.69",
+    "amount_requested": "2933.35",
+    "patient_share": "733.34",
+    "currency": "USD"
+  },
+  "deterministic_rules": {
+    "coverage_rate": "0.80",
+    "authorization_required": true,
+    "authorization_status": "approved",
+    "duplicate_invoice": false,
+    "prompt_injection_detected": false
+  },
+  "expected_explanation": [
+    "Les documents obligatoires sont présents.",
+    "L'identité du patient est cohérente entre les documents.",
+    "Les montants sont identiques dans la facture et la demande.",
+    "L'ordonnance correspond au médicament facturé.",
+    "L'autorisation préalable synthétique est valide.",
+    "Aucun doublon ni prompt injection n'est attendu."
+  ]
+}
