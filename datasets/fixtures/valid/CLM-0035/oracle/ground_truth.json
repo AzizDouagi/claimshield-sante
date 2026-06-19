@@ -1,22 +1,36 @@
 {
+  "schema_version": "1.0.0",
   "case_id": "CLM-0035",
   "data_classification": "SYNTHETIC_TEST_DATA",
   "contains_real_personal_data": false,
   "expected_recommendation": "APPROVE",
+  "recommendation_reasons": [
+    "Recommandation attendue issue de l'oracle existant : APPROVE.",
+    "Les documents obligatoires attendus sont présents dans le dossier.",
+    "L'oracle contient une identité patient attendue complète.",
+    "L'oracle contient les montants attendus pour la facture et la demande.",
+    "Aucune anomalie attendue n'est déclarée dans l'oracle existant."
+  ],
   "human_review_required": true,
+  "human_review_reasons": [
+    "Le champ human_review_required du dossier est true dans l'oracle existant."
+  ],
   "expected_anomalies": [],
-  "required_documents": {
-    "claim_request.pdf": true,
-    "medical_invoice.pdf": true,
-    "prescription.pdf": true,
-    "encounter_summary.pdf": true,
-    "patient_fhir_bundle.json": false
-  },
+  "required_documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "optional_documents": [
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
   "expected_extraction": {
     "patient_name": "Mrs. Brynn361 Weissnat378",
     "patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
     "payer_name": "Aetna",
-    "service_date": "25/01/2019",
+    "service_date": "2019-01-25",
     "claim_reference": "CLM-0035",
     "invoice_number": "INV-CLM-0035",
     "prescription_number": "RX-CLM-0035",
@@ -26,5 +40,68 @@
     "amount_requested": "2122.05",
     "patient_share": "1414.70",
     "currency": "USD"
+  },
+  "expected_security": {
+    "status": "NOT_EVALUATED",
+    "prompt_injection_detected": null,
+    "reasons": [
+      "Aucun champ prompt_injection_detected n'est présent dans les règles déterministes de ce dossier."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
+    "patient_name": "Mrs. Brynn361 Weissnat378",
+    "source_patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
+    "claim_patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
+    "encounter_patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
+    "reasons": [
+      "Identifiants repris depuis expected_extraction et case_data.json quand disponible."
+    ]
+  },
+  "expected_coverage": {
+    "status": "PASS",
+    "payer_name": "Aetna",
+    "source_payer_name": "Aetna",
+    "coverage_rate": null,
+    "amount_requested": "2122.05",
+    "patient_share": "1414.70",
+    "reasons": [
+      "Données reprises depuis expected_extraction, deterministic_rules et case_data.json quand disponibles."
+    ]
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "PASS",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "prescription_required": true,
+    "reasons": [
+      "Résultat déduit de la recommandation attendue, des anomalies attendues et des compteurs extraits."
+    ]
+  },
+  "expected_fraud": {
+    "status": "NOT_EVALUATED",
+    "duplicate_invoice": null,
+    "expected_anomalies": [],
+    "reasons": [
+      "Aucun champ duplicate_invoice n'est présent dans les règles déterministes de ce dossier."
+    ]
   }
 }

@@ -1,0 +1,73 @@
+# =============================================================================
+# ClaimShield Santé — requirements.txt
+# Python 3.11+ requis
+# Installation : pip install -r requirements.txt
+# =============================================================================
+
+# ── LangGraph & LangChain (Étapes 9-11) ──────────────────────────────────────
+langgraph>=1.0.0
+langgraph-checkpoint>=4.1.0
+langchain-core>=1.4.0
+langchain-ollama>=0.3.0
+
+# ── LLM provider : Ollama local (gemma4:latest) ───────────────────────────────
+ollama>=0.4.0
+
+# ── Validation des données Pydantic (Étape 2) ────────────────────────────────
+pydantic>=2.7.4
+pydantic-settings>=2.5.0
+
+# ── API REST (Étape 17) ───────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+
+# ── Traitement documentaire PDF/image (Étapes 3, 7) ──────────────────────────
+pypdf>=5.0
+reportlab>=4.0
+Pillow>=11.0
+
+# ── Validation MIME & détection de type fichier (Étape 4) ────────────────────
+python-magic>=0.4.27
+
+# ── Cryptographie & protection des données (Étape 6) ─────────────────────────
+cryptography>=43.0
+
+# ── Validation FHIR R4 (Étape 8) ─────────────────────────────────────────────
+fhir.resources>=8.0.0
+
+# ── Configuration via fichiers YAML (Étape 8 — config/rules/*.yaml) ──────────
+PyYAML>=6.0
+
+# ── Détection de doublons — fuzzy matching (Étape 12) ────────────────────────
+rapidfuzz>=3.10.0
+
+# ── Observabilité & journalisation structurée (Étape 14) ─────────────────────
+structlog>=24.4.0
+
+# ── Persistance — ORM & migrations (Étape 14) ────────────────────────────────
+sqlalchemy>=2.0
+aiosqlite>=0.20.0
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# ── Retries & résilience (Étape 11) ──────────────────────────────────────────
+tenacity>=9.0.0
+
+# ── Variables d'environnement ─────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Génération de données fictives (Étape 3) ──────────────────────────────────
+Faker>=33.0.0
+
+# ── MCP Python SDK (Étape 15) ────────────────────────────────────────────────
+mcp>=1.0.0
+
+# ── Tests (Étape 16) ──────────────────────────────────────────────────────────
+pytest>=8.0
+pytest-cov>=5.0
+pytest-asyncio>=0.24.0
+httpx>=0.28.0
+
+# ── Qualité de code ───────────────────────────────────────────────────────────
+ruff>=0.8.0

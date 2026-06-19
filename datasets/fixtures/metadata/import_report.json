@@ -1,7 +1,7 @@
 {
-  "imported_at": "2026-06-18T19:43:34.986105+00:00",
-  "source_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases",
-  "source_generated_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases/generated",
+  "imported_at": "2026-06-19T13:07:20.332806+00:00",
+  "source_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/synthea/claimshield_cases",
+  "source_generated_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/synthea/claimshield_cases/generated",
   "destination_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/datasets/fixtures/valid",
   "dry_run": false,
   "validate_only": true,

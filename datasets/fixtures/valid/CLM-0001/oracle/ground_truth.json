@@ -1,21 +1,36 @@
 {
+  "schema_version": "1.0.0",
   "case_id": "CLM-0001",
   "data_classification": "SYNTHETIC_TEST_DATA",
   "contains_real_personal_data": false,
   "expected_recommendation": "APPROVE",
+  "recommendation_reasons": [
+    "Les documents obligatoires sont présents.",
+    "L'identité du patient est cohérente entre les documents.",
+    "Les montants sont identiques dans la facture et la demande.",
+    "L'ordonnance correspond au médicament facturé.",
+    "L'autorisation préalable synthétique est valide.",
+    "Aucun doublon ni prompt injection n'est attendu."
+  ],
   "human_review_required": true,
+  "human_review_reasons": [
+    "Le champ human_review_required du dossier est true dans l'oracle existant."
+  ],
   "expected_anomalies": [],
-  "required_documents": {
-    "claim_request.pdf": true,
-    "medical_invoice.pdf": true,
-    "prescription.pdf": true,
-    "patient_fhir_bundle.json": false
-  },
+  "required_documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf"
+  ],
+  "optional_documents": [
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
   "expected_extraction": {
     "patient_name": "Mrs. Tresa661 Taunya970 Sawayn19",
     "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
     "payer_name": "Cigna Health",
-    "service_date": "03/06/2026",
+    "service_date": "2026-06-03",
     "claim_reference": "CLM-0001",
     "invoice_number": "INV-CLM-0001",
     "prescription_number": "RX-CLM-0001",
@@ -40,5 +55,68 @@
     "L'ordonnance correspond au médicament facturé.",
     "L'autorisation préalable synthétique est valide.",
     "Aucun doublon ni prompt injection n'est attendu."
-  ]
+  ],
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Résultat repris depuis deterministic_rules.prompt_injection_detected."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "patient_name": "Mrs. Tresa661 Taunya970 Sawayn19",
+    "source_patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "claim_patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "encounter_patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "reasons": [
+      "Identifiants repris depuis expected_extraction et case_data.json quand disponible."
+    ]
+  },
+  "expected_coverage": {
+    "status": "PASS",
+    "payer_name": "Cigna Health",
+    "source_payer_name": "Cigna Health",
+    "coverage_rate": "0.80",
+    "amount_requested": "2933.35",
+    "patient_share": "733.34",
+    "reasons": [
+      "Données reprises depuis expected_extraction, deterministic_rules et case_data.json quand disponibles."
+    ]
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "PASS",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "prescription_required": true,
+    "reasons": [
+      "Résultat déduit de la recommandation attendue, des anomalies attendues et des compteurs extraits."
+    ]
+  },
+  "expected_fraud": {
+    "status": "PASS",
+    "duplicate_invoice": false,
+    "expected_anomalies": [],
+    "reasons": [
+      "Résultat repris depuis deterministic_rules.duplicate_invoice."
+    ]
+  }
 }

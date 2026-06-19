@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -13,6 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config.settings import get_settings  # noqa: E402
 
 
 CASE_PATTERN = re.compile(r"^CLM-\d{4}$")
@@ -103,10 +110,11 @@ class ImportStats:
 
 class ClaimshieldImporter:
     def __init__(self, project_root: Path) -> None:
+        settings = get_settings()
         self.project_root = project_root
-        self.source_root = Path("/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases")
+        self.source_root = settings.claimshield_source_root
         self.source_generated = self.source_root / "generated"
-        self.fixtures_root = project_root / "datasets" / "fixtures"
+        self.fixtures_root = settings.datasets_dir / "fixtures"
         self.valid_root = self.fixtures_root / "valid"
         self.backups_root = self.fixtures_root / "backups"
         self.metadata_root = self.fixtures_root / "metadata"
@@ -272,7 +280,6 @@ class ClaimshieldImporter:
                 errors.append("audit/manifest.json invalide")
 
         patient_data = None
-        claim_data = None
         case_data = None
 
         patient_json_path = input_dir / "patient.json"
@@ -285,12 +292,9 @@ class ClaimshieldImporter:
             case_data = read_json(case_data_path)
             patient_data = case_data.get("patient")
 
-        if claim_json_path.exists():
-            claim_data = read_json(claim_json_path)
-        elif case_data_path.exists():
+        if not claim_json_path.exists() and case_data_path.exists():
             if case_data is None:
                 case_data = read_json(case_data_path)
-            claim_data = case_data.get("claim")
 
         if case_data_path.exists() and case_data is None:
             case_data = read_json(case_data_path)
@@ -346,8 +350,6 @@ class ClaimshieldImporter:
     def run(self, case_id: str | None, dry_run: bool, force: bool, validate_only: bool) -> ImportStats:
         self.ensure_directories()
         stats = ImportStats()
-        source_cases = self.list_source_cases(case_id)
-        stats.found_cases = len(source_cases)
 
         if validate_only:
             destination_cases = [
@@ -372,6 +374,9 @@ class ClaimshieldImporter:
                     stats.errors += 1
             self.write_report(stats, dry_run, validate_only)
             return stats
+
+        source_cases = self.list_source_cases(case_id)
+        stats.found_cases = len(source_cases)
 
         for source_case_dir in source_cases:
             case_name = source_case_dir.name
@@ -457,8 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    project_root = Path(__file__).resolve().parents[1]
-    importer = ClaimshieldImporter(project_root)
+    importer = ClaimshieldImporter(PROJECT_ROOT)
     stats = importer.run(
         case_id=args.case_id,
         dry_run=args.dry_run,

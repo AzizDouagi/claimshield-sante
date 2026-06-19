@@ -201,7 +201,7 @@ print("=" * 70)
 print("DOSSIER CLAIMSHIELD CRÉÉ")
 print("=" * 70)
 
-print(f"Identifiant du dossier : CLM-0001")
+print("Identifiant du dossier : CLM-0001")
 print(f"Demande Synthea        : {claim.get('Id')}")
 print(
     "Patient                : "

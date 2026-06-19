@@ -21,6 +21,8 @@ lib64/
 
 # Virtual environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -46,14 +48,29 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ovpn
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.secret
+secrets.*
 secrets.json
 credentials.json
+*.credentials.json
+token.json
+*.token
+oauth.json
+service-account.json
 
-# Storage / state
+# Storage runtime (jamais committer)
 storage/
-state/
 
 # Docker
 .dockerenv
-
 
