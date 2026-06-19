@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0014",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Kathaleen265 Ying817 Haag279",
+    "patient_id": "1dcebbcb-c045-80be-d457-1560474db202",
+    "payer_name": "Medicare",
+    "service_date": "26/03/2004",
+    "claim_reference": "CLM-0014",
+    "invoice_number": "INV-CLM-0014",
+    "prescription_number": "RX-CLM-0014",
+    "procedure_count": 6,
+    "medication_count": 3,
+    "total_billed": "10394.55",
+    "amount_requested": "8440.40",
+    "patient_share": "1954.15",
+    "currency": "USD"
+  }
+}

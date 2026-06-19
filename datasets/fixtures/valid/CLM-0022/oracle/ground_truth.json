@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0022",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Eleanore671 Pok428 Koch169",
+    "patient_id": "949e8034-faae-6ffa-e7ec-3afc5f58ab71",
+    "payer_name": "NO_INSURANCE",
+    "service_date": "31/08/2021",
+    "claim_reference": "CLM-0022",
+    "invoice_number": "INV-CLM-0022",
+    "prescription_number": "RX-CLM-0022",
+    "procedure_count": 5,
+    "medication_count": 3,
+    "total_billed": "704.20",
+    "amount_requested": "563.36",
+    "patient_share": "140.84",
+    "currency": "USD"
+  }
+}

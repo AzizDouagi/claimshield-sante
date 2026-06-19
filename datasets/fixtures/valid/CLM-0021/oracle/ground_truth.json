@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0021",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Ricardo560 Ignacio928 Gaona896",
+    "patient_id": "5aee6c1f-1511-3ab8-c684-9520d251bf7f",
+    "payer_name": "Medicare",
+    "service_date": "12/04/2026",
+    "claim_reference": "CLM-0021",
+    "invoice_number": "INV-CLM-0021",
+    "prescription_number": "RX-CLM-0021",
+    "procedure_count": 8,
+    "medication_count": 2,
+    "total_billed": "1623.03",
+    "amount_requested": "1452.53",
+    "patient_share": "170.50",
+    "currency": "USD"
+  }
+}

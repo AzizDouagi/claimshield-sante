@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0006",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Reynaldo722 Lind531",
+    "patient_id": "34d5c7ef-017e-1487-d241-36ccdc4c0d91",
+    "payer_name": "Medicare",
+    "service_date": "11/09/2019",
+    "claim_reference": "CLM-0006",
+    "invoice_number": "INV-CLM-0006",
+    "prescription_number": "RX-CLM-0006",
+    "procedure_count": 7,
+    "medication_count": 1,
+    "total_billed": "3105.35",
+    "amount_requested": "2484.28",
+    "patient_share": "621.07",
+    "currency": "USD"
+  }
+}

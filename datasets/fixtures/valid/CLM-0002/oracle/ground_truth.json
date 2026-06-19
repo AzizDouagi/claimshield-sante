@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0002",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Marcel580 Darnell564 Terry864",
+    "patient_id": "68cab8e3-3514-4bae-0e9c-1e0fcaf96c52",
+    "payer_name": "Cigna Health",
+    "service_date": "14/03/2019",
+    "claim_reference": "CLM-0002",
+    "invoice_number": "INV-CLM-0002",
+    "prescription_number": "RX-CLM-0002",
+    "procedure_count": 9,
+    "medication_count": 1,
+    "total_billed": "3968.15",
+    "amount_requested": "2777.70",
+    "patient_share": "1190.45",
+    "currency": "USD"
+  }
+}

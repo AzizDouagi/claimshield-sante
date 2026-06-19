@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0037",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Lady554 Aubrey96 Mohr916",
+    "patient_id": "9e396f9a-bc04-baca-845e-6cc9ee8b102c",
+    "payer_name": "Medicare",
+    "service_date": "06/01/2017",
+    "claim_reference": "CLM-0037",
+    "invoice_number": "INV-CLM-0037",
+    "prescription_number": "RX-CLM-0037",
+    "procedure_count": 4,
+    "medication_count": 4,
+    "total_billed": "704.20",
+    "amount_requested": "496.28",
+    "patient_share": "207.92",
+    "currency": "USD"
+  }
+}

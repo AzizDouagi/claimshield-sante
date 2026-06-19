@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0004",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Ms. Rhona164 Kimber624 Mertz280",
+    "patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "payer_name": "Anthem",
+    "service_date": "06/06/2023",
+    "claim_reference": "CLM-0004",
+    "invoice_number": "INV-CLM-0004",
+    "prescription_number": "RX-CLM-0004",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "total_billed": "8881.04",
+    "amount_requested": "5972.17",
+    "patient_share": "2908.87",
+    "currency": "USD"
+  }
+}

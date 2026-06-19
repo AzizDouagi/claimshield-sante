@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0011",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Ana Luisa894 Luz785 Atencio773",
+    "patient_id": "8ebf88af-316a-abca-55f2-7da147460637",
+    "payer_name": "Medicare",
+    "service_date": "03/12/2011",
+    "claim_reference": "CLM-0011",
+    "invoice_number": "INV-CLM-0011",
+    "prescription_number": "RX-CLM-0011",
+    "procedure_count": 8,
+    "medication_count": 4,
+    "total_billed": "4056.73",
+    "amount_requested": "3370.14",
+    "patient_share": "686.59",
+    "currency": "USD"
+  }
+}

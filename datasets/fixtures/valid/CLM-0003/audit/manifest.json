@@ -1,0 +1,167 @@
+{
+  "case_id": "CLM-0003",
+  "claimshield_id": "CLM-0003",
+  "generated_at": "2026-06-18T19:31:16.454227+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "9b0c96a9-9c81-1e7a-1e0f-c2dea518e789",
+  "encounter_id": "9b0c96a9-9c81-1e7a-2957-5d50ef1c7953",
+  "claim_id": "9b0c96a9-9c81-1e7a-9bc6-774f9c2ed3ac",
+  "provider_id": "af3b4d34-dce4-3144-9f9d-a67062c147d8",
+  "organization_id": "b574fc4f-313c-38a4-9baf-7e12e431a499",
+  "payer_id": "e03e23c9-4df1-3eb6-a62d-f70f02301496",
+  "source_claim_id": "9b0c96a9-9c81-1e7a-9bc6-774f9c2ed3ac",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "704.20",
+    "amount_covered": "563.36",
+    "amount_requested": "563.36",
+    "patient_share": "140.84"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 1314617,
+      "sha256": "aefa945e6243fa5f58c0c51b805c8ce80e86cfa77cd34141150e1f873df93a96",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 50855,
+      "sha256": "04a99ad23777aed2819427d561b931c63917b851536fd4b2cbd6ac642aacd2ef",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1048,
+      "sha256": "99a7b739d87f3c9417747898489ae6e405b7dfac757ccb1c2ea936ee5e7bb901",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2827,
+      "sha256": "d6e2560ef492427ad5e1691a755f1ce351deb6a5dcf4b0cf3c1977443dc77013",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3152,
+      "sha256": "a884c9545178717efe13e2db485fc90b38d29df92758cdbea0732151ea714d06",
+      "required": true
+    },
+    {
+      "filename": "fhir/Tammera223_Leila837_Kutch271_9b0c96a9-9c81-1e7a-1e0f-c2dea518e789.json",
+      "size_bytes": 1314617,
+      "sha256": "aefa945e6243fa5f58c0c51b805c8ce80e86cfa77cd34141150e1f873df93a96",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 914,
+      "sha256": "824e32cc68375a8c3ffe4de4e60d644bb0be18a55f711d26531c19a4e92bda03",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3521,
+      "sha256": "4a3379e7b478102a2e740a3a68f502ddc0c1de4b9c3a5e69fe5f16663ba60e8f",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 754,
+      "sha256": "526440645d8d5388f6a64a2053e248232cca8d868883a5d18e34bdd34bcef2f5",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 101166,
+      "sha256": "018e28b0f91a78a0fcd0cad7615de4c5e8597fc2d7d72b2d95c89847da65a27a",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2977,
+      "sha256": "2f69fbb8ac7706a569aba10108d64e97dd4bf5c6bba5f58e330b6548e9b8e123",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Tammera223_Leila837_Kutch271_9b0c96a9-9c81-1e7a-1e0f-c2dea518e789.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "310798",
+      "description": "Hydrochlorothiazide 25 MG Oral Tablet"
+    },
+    {
+      "code": "314076",
+      "description": "lisinopril 10 MG Oral Tablet"
+    },
+    {
+      "code": "308136",
+      "description": "amLODIPine 2.5 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "80583007",
+      "description": "Severe anxiety (panic) (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

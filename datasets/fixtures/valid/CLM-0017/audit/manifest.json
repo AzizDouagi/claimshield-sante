@@ -1,0 +1,173 @@
+{
+  "case_id": "CLM-0017",
+  "claimshield_id": "CLM-0017",
+  "generated_at": "2026-06-18T19:32:57.601230+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "667c4f9b-d19c-6e62-56c9-1252dd20f841",
+  "encounter_id": "667c4f9b-d19c-6e62-f314-a3cb38f044ad",
+  "claim_id": "667c4f9b-d19c-6e62-1fa3-4f37e59b81fd",
+  "provider_id": "08968588-43b9-3193-a023-19b8336ff111",
+  "organization_id": "901c2d40-1ca3-3879-9a20-c663b8adc0a9",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "667c4f9b-d19c-6e62-1fa3-4f37e59b81fd",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "4140.89",
+    "amount_covered": "3312.71",
+    "amount_requested": "3312.71",
+    "patient_share": "828.18"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3369405,
+      "sha256": "18813e3ba8b355d10cbc2783717e5b84d5f3ca7d9f12295b94a335d16fbbb032",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 55151,
+      "sha256": "bdd16984edeeeb4e79e781ea5061137b2747c49a534c886025cd3c1160b0d1ba",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1110,
+      "sha256": "8e38f7af05be68bdc132d22dc4da01164778e92c8418f58d6bad0740ec69bf3f",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2787,
+      "sha256": "4baf8e68288261af3e2dd257263e54ced429f1957a36389c759ed44671a91fe5",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3558,
+      "sha256": "59f41ccfcf321c95249cd6279cf76002966bf01a0ed845b313cb5ff05d46b7f3",
+      "required": true
+    },
+    {
+      "filename": "fhir/Dale454_Rutherford999_667c4f9b-d19c-6e62-56c9-1252dd20f841.json",
+      "size_bytes": 3369405,
+      "sha256": "18813e3ba8b355d10cbc2783717e5b84d5f3ca7d9f12295b94a335d16fbbb032",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 916,
+      "sha256": "78aa6af3965500afcbab735b69730d297bad681005cc375f47c006a89badbd9e",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3448,
+      "sha256": "08eb0abf68afb42f942c734b9c5ff6ef59bdadaad7b72c74c9ee9439ca10eb90",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 742,
+      "sha256": "ad67aa0e3926dc1d4daa5fa8c5971712f56b496337a971d72a7502e211f272d6",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 53701,
+      "sha256": "4ec994cc65009f0f6b37814aa6007abbda8c5d938b8307591d6f66e705d8e950",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2766,
+      "sha256": "119ec449aa16485011ce616a2ebffbedbdceee50f0653b93af122d676fdb1ec4",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Dale454_Rutherford999_667c4f9b-d19c-6e62-56c9-1252dd20f841.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "288086009",
+      "description": "Suture open wound (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "713106006",
+      "description": "Screening for drug abuse (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "310965",
+      "description": "Ibuprofen 200 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "312608009",
+      "description": "Laceration - injury (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "284549007",
+      "description": "Laceration of hand (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "741062008",
+      "description": "Not in labor force (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "312608009",
+      "description": "Laceration - injury (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

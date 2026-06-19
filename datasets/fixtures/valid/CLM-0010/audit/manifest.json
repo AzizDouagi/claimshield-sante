@@ -1,0 +1,163 @@
+{
+  "case_id": "CLM-0010",
+  "claimshield_id": "CLM-0010",
+  "generated_at": "2026-06-18T19:32:57.331734+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "31a4ea5b-b58f-3eb3-9996-a86392b338c3",
+  "encounter_id": "31a4ea5b-b58f-3eb3-d435-4e07d0d206c3",
+  "claim_id": "31a4ea5b-b58f-3eb3-6bc0-0789991c2fe2",
+  "provider_id": "b9d726f1-8d3a-3196-ba13-007faa7d7870",
+  "organization_id": "4705a8fd-19cd-32c1-8b3e-34bcfe84d0bd",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "31a4ea5b-b58f-3eb3-6bc0-0789991c2fe2",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1135.60",
+    "amount_covered": "968.14",
+    "amount_requested": "968.14",
+    "patient_share": "167.46"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3507541,
+      "sha256": "d31584690438b083d2340d9c5dfae4079303d29240fae4a0464da63a3912430d",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 70757,
+      "sha256": "0fac1f465489304ef9d86e3b1e8b2f91f16fa07a06b795b4e679c32d79be37f2",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1094,
+      "sha256": "e74651554d6b29f3730097c65bdb943efc38a9efe0a803e87b8b97c1a6be3a62",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2782,
+      "sha256": "bab5d9f4561435ee0ea9c51165d5da5bfc6942ea425eed99b1c89478e9b910c2",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3213,
+      "sha256": "13ee4c4873af9375c5aa6153139ed9f3b3c83b4074fd059ba287cc9cc9786baa",
+      "required": true
+    },
+    {
+      "filename": "fhir/Lissette621_Tremblay80_31a4ea5b-b58f-3eb3-9996-a86392b338c3.json",
+      "size_bytes": 3507541,
+      "sha256": "d31584690438b083d2340d9c5dfae4079303d29240fae4a0464da63a3912430d",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 904,
+      "sha256": "8aeb359d172f6af721a3d450ab6f18734b40bbd79e3f1cf577d189703b7b2fb2",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3440,
+      "sha256": "7cea23baf89aaed4a9e44230dc7c29fa409791d152ba2f184751c9445ac6204d",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 741,
+      "sha256": "544719e63f4ef153be6bbd1c0acd751690bf0e2b6b25f6b17900e6a209129c28",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 88573,
+      "sha256": "a3a898e26511344a7022fb9cba31ae317e91253dcca21fd0bd60ff2b0e0c80cf",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2758,
+      "sha256": "33f2aa77537f8062ab779ec99ed78c79c3f50c359ba53e7fcec89dd498307c8a",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Lissette621_Tremblay80_31a4ea5b-b58f-3eb3-9996-a86392b338c3.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "103750000",
+      "description": "Sleep apnea assessment (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "713106006",
+      "description": "Screening for drug abuse (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "206905",
+      "description": "Ibuprofen 400 MG Oral Tablet [Ibu]"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "160903007",
+      "description": "Full-time employment (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

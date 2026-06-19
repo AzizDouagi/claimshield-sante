@@ -22,7 +22,7 @@
     "RACE": "white",
     "ETHNICITY": "nonhispanic",
     "GENDER": "F",
-    "BIRTHPLACE": "Falmouth  Massachusetts  US",
+    "BIRTHPLACE": "Falmouth Massachusetts US",
     "ADDRESS": "610 Volkman Divide Unit 44",
     "CITY": "Boston",
     "STATE": "Massachusetts",
@@ -126,7 +126,7 @@
   },
   "organization": {
     "Id": "0d1570ab-371c-3898-9397-95905d8c5166",
-    "NAME": "TUFTS MEDICAL CENTER  INC",
+    "NAME": "TUFTS MEDICAL CENTER INC",
     "ADDRESS": "750 WASHINGTON ST",
     "CITY": "BOSTON",
     "STATE": "MA",

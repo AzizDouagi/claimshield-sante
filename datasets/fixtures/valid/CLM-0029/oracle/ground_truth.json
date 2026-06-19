@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0029",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Damion480 Merlin721 Mohr916",
+    "patient_id": "48da8774-ae72-0063-c18a-dbb2e0a49648",
+    "payer_name": "Medicaid",
+    "service_date": "25/02/2026",
+    "claim_reference": "CLM-0029",
+    "invoice_number": "INV-CLM-0029",
+    "prescription_number": "RX-CLM-0029",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "total_billed": "3536.75",
+    "amount_requested": "3486.75",
+    "patient_share": "50.00",
+    "currency": "USD"
+  }
+}

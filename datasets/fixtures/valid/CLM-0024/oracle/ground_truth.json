@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0024",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Ms. Felice694 Melody728 Balistreri607",
+    "patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "payer_name": "Medicaid",
+    "service_date": "02/03/2025",
+    "claim_reference": "CLM-0024",
+    "invoice_number": "INV-CLM-0024",
+    "prescription_number": "RX-CLM-0024",
+    "procedure_count": 12,
+    "medication_count": 1,
+    "total_billed": "5262.35",
+    "amount_requested": "5192.29",
+    "patient_share": "70.06",
+    "currency": "USD"
+  }
+}

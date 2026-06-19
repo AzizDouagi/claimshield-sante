@@ -1,0 +1,172 @@
+{
+  "case_id": "CLM-0018",
+  "claimshield_id": "CLM-0018",
+  "generated_at": "2026-06-18T19:32:57.647740+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "011bb0c0-8088-4ca4-d94d-e7ee6625b9e2",
+  "encounter_id": "011bb0c0-8088-4ca4-46fc-2d2aa6704541",
+  "claim_id": "011bb0c0-8088-4ca4-2b1d-1818022a18ce",
+  "provider_id": "8b6522ad-61ec-3f4b-8c66-fb059d2d7322",
+  "organization_id": "dd9914b0-9491-3330-a890-d34e95e497ea",
+  "payer_id": "d18ef2e6-ef40-324c-be54-34a5ee865625",
+  "source_claim_id": "011bb0c0-8088-4ca4-2b1d-1818022a18ce",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "704.20",
+    "amount_covered": "704.20",
+    "amount_requested": "704.20",
+    "patient_share": "0.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 4168317,
+      "sha256": "813807eaf2a9c90b257fca5452684f2867a14f555f948d6905759fc76c4d0ec4",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 57426,
+      "sha256": "4af2180334ac9cb186cffa4a637c08c423b6ad3abab61205bbffc2ba964830ed",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1094,
+      "sha256": "40ed97e7c6ad2c9b5aa1f5a2325403ab224c521c4ad4262a1deac9752f48365e",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2807,
+      "sha256": "7b0c296e9d28d23e41e52a1c3004eba661351b6bb23b26bc58e322142fecb33a",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3308,
+      "sha256": "22898a7b68ada367a7a78adbc650fc540ab5fbd22520763c82f7ca84a555f9e0",
+      "required": true
+    },
+    {
+      "filename": "fhir/Efrain317_Hettinger594_011bb0c0-8088-4ca4-d94d-e7ee6625b9e2.json",
+      "size_bytes": 4168317,
+      "sha256": "813807eaf2a9c90b257fca5452684f2867a14f555f948d6905759fc76c4d0ec4",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 913,
+      "sha256": "86e72a67665453877ae5ea967dd88962d86455c57bc240f2524c53a1363c2d2e",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3520,
+      "sha256": "142d98053aabda7cba310ceacf153419e1fc430608ec7555aeac9bd5302c88ec",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 745,
+      "sha256": "d21fed17e6687588569ae5974345a43708391ecf74f9a2edf95785ab8c286695",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 80428,
+      "sha256": "90c13f92b17112d6633922a6f28001435f13597d2c8452a9ebb6d9aa1863c716",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2773,
+      "sha256": "649470e31be5a2cbd482abf9dd82f998d2f022abed92ef399882b1f6b111c3db",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Efrain317_Hettinger594_011bb0c0-8088-4ca4-d94d-e7ee6625b9e2.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "762993000",
+      "description": "Assessment using Morse Fall Scale (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "713106006",
+      "description": "Screening for drug abuse (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "310436",
+      "description": "Galantamine 4 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "230265002",
+      "description": "Familial Alzheimer's disease of early onset (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "160903007",
+      "description": "Full-time employment (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

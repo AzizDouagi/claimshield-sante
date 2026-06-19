@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0036",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Royal919 Christopher407 Upton904",
+    "patient_id": "0f2662b4-422d-4d6a-aa92-a98e9736d772",
+    "payer_name": "Medicare",
+    "service_date": "25/06/2018",
+    "claim_reference": "CLM-0036",
+    "invoice_number": "INV-CLM-0036",
+    "prescription_number": "RX-CLM-0036",
+    "procedure_count": 7,
+    "medication_count": 1,
+    "total_billed": "1280.50",
+    "amount_requested": "961.62",
+    "patient_share": "318.88",
+    "currency": "USD"
+  }
+}

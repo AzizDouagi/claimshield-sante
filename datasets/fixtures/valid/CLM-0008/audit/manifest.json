@@ -1,0 +1,167 @@
+{
+  "case_id": "CLM-0008",
+  "claimshield_id": "CLM-0008",
+  "generated_at": "2026-06-18T19:32:57.258807+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "ca0be9e5-1c94-0b11-3a01-43e708ce171d",
+  "encounter_id": "ca0be9e5-1c94-0b11-5f81-90d4d1ae5306",
+  "claim_id": "ca0be9e5-1c94-0b11-731d-f9bb86c7cc7a",
+  "provider_id": "a888f3b0-4985-3865-950f-5fca2fb25eff",
+  "organization_id": "67cade01-dcfe-37b7-8e2c-b712d9e6fbba",
+  "payer_id": "734afbd6-4794-363b-9bc0-6a3981533ed5",
+  "source_claim_id": "ca0be9e5-1c94-0b11-731d-f9bb86c7cc7a",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1567.00",
+    "amount_covered": "370.14",
+    "amount_requested": "370.14",
+    "patient_share": "1196.86"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 2669518,
+      "sha256": "6eae875353526dce6429ab7ac38164bf1b91247559dcef3e436ca5ea8ab964e7",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 70928,
+      "sha256": "74e6289e0c73cb77d5e3e071b08a6ad03985802ca3293bd80899bdd3e96ae53c",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1085,
+      "sha256": "9bfa8bae328dbd089db1c1d488c06c22a8e15a95df9daab5c0f448b80d819a28",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2801,
+      "sha256": "9947e4ea4d19108c02840710228c88e44028d3097bb6be714b7e69df23ae9cf8",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3265,
+      "sha256": "7050abdb58a085970db8d4e4211fc323c3789f277716c226367f59d319a20b5c",
+      "required": true
+    },
+    {
+      "filename": "fhir/Shelton25_Jaskolski867_ca0be9e5-1c94-0b11-3a01-43e708ce171d.json",
+      "size_bytes": 2669518,
+      "sha256": "6eae875353526dce6429ab7ac38164bf1b91247559dcef3e436ca5ea8ab964e7",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 914,
+      "sha256": "165b68003cb6566d01d848d8426d39881ff0fbe7424d1efebf104b40b5415ccb",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3550,
+      "sha256": "b00ad24e3f714ab43a7fb87695e02de2efdddaa0178b21b298882c42f4e5782a",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 751,
+      "sha256": "e35da90085e728671ed4326ae890121b6d9dc430979da11a081f78dbb79e6002",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 107656,
+      "sha256": "8d085c9e8d181b234bc2c1456fd1306c6013f44e015ecefd94137cd6f774a5a2",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2783,
+      "sha256": "2458ff84b43571858fb49969c70010c1553b2271668b6d1dcbba2c0425e490e1",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Shelton25_Jaskolski867_ca0be9e5-1c94-0b11-3a01-43e708ce171d.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "206905",
+      "description": "Ibuprofen 400 MG Oral Tablet [Ibu]"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "160903007",
+      "description": "Full-time employment (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0012",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Joelle163 Erna640 Medhurst46",
+    "patient_id": "17db6300-f7ed-48b9-37c6-74188dea5fa1",
+    "payer_name": "Humana",
+    "service_date": "06/03/2021",
+    "claim_reference": "CLM-0012",
+    "invoice_number": "INV-CLM-0012",
+    "prescription_number": "RX-CLM-0012",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "total_billed": "4140.89",
+    "amount_requested": "3312.71",
+    "patient_share": "828.18",
+    "currency": "USD"
+  }
+}

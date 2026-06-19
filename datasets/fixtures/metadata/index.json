@@ -1,0 +1,341 @@
+{
+  "generated_at": "2026-06-18T19:32:58.449617+00:00",
+  "total_patients": 37,
+  "generated_cases": 37,
+  "skipped_patients": 0,
+  "cases": [
+    {
+      "claimshield_id": "CLM-0001",
+      "synthea_patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+      "synthea_encounter_id": "c2bdae5f-4f81-abc3-7b9f-0978a1b580ff",
+      "synthea_claim_id": "c2bdae5f-4f81-abc3-89d1-a0cc481b8f5d",
+      "folder": "generated/CLM-0001",
+      "status": "generated",
+      "created_at": "2026-06-18T19:08:29.119662+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0002",
+      "synthea_patient_id": "68cab8e3-3514-4bae-0e9c-1e0fcaf96c52",
+      "synthea_encounter_id": "68cab8e3-3514-4bae-26cb-78f871ff8c72",
+      "synthea_claim_id": "68cab8e3-3514-4bae-0680-845a6a902ce0",
+      "folder": "generated/CLM-0002",
+      "status": "generated",
+      "created_at": "2026-06-18T19:31:16.430130+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0003",
+      "synthea_patient_id": "9b0c96a9-9c81-1e7a-1e0f-c2dea518e789",
+      "synthea_encounter_id": "9b0c96a9-9c81-1e7a-2957-5d50ef1c7953",
+      "synthea_claim_id": "9b0c96a9-9c81-1e7a-9bc6-774f9c2ed3ac",
+      "folder": "generated/CLM-0003",
+      "status": "generated",
+      "created_at": "2026-06-18T19:31:16.454448+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0004",
+      "synthea_patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+      "synthea_encounter_id": "349c3437-f11a-a381-5ec1-b426126a28ab",
+      "synthea_claim_id": "349c3437-f11a-a381-fee4-7e12cd51dbed",
+      "folder": "generated/CLM-0004",
+      "status": "generated",
+      "created_at": "2026-06-18T19:31:16.476351+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0005",
+      "synthea_patient_id": "03f02dc8-d2de-9408-12dd-01c47992fa94",
+      "synthea_encounter_id": "03f02dc8-d2de-9408-ea9c-31db92840fe3",
+      "synthea_claim_id": "03f02dc8-d2de-9408-7e51-00f2d5ed0b4f",
+      "folder": "generated/CLM-0005",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.165304+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0006",
+      "synthea_patient_id": "34d5c7ef-017e-1487-d241-36ccdc4c0d91",
+      "synthea_encounter_id": "34d5c7ef-017e-1487-2018-3298bce48bc6",
+      "synthea_claim_id": "34d5c7ef-017e-1487-8f73-74c3e4783efd",
+      "folder": "generated/CLM-0006",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.194056+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0007",
+      "synthea_patient_id": "977246dd-1f85-263c-5648-e9050d02451a",
+      "synthea_encounter_id": "977246dd-1f85-263c-8fe6-981b43d47af2",
+      "synthea_claim_id": "977246dd-1f85-263c-6dcb-f751d7d9a699",
+      "folder": "generated/CLM-0007",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.225277+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0008",
+      "synthea_patient_id": "ca0be9e5-1c94-0b11-3a01-43e708ce171d",
+      "synthea_encounter_id": "ca0be9e5-1c94-0b11-5f81-90d4d1ae5306",
+      "synthea_claim_id": "ca0be9e5-1c94-0b11-731d-f9bb86c7cc7a",
+      "folder": "generated/CLM-0008",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.259083+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0009",
+      "synthea_patient_id": "f2ed4dd4-3b56-23e8-3d36-4b51bac09036",
+      "synthea_encounter_id": "f2ed4dd4-3b56-23e8-3eee-bfa43d196128",
+      "synthea_claim_id": "f2ed4dd4-3b56-23e8-ecb3-8cb02b280fa5",
+      "folder": "generated/CLM-0009",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.291801+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0010",
+      "synthea_patient_id": "31a4ea5b-b58f-3eb3-9996-a86392b338c3",
+      "synthea_encounter_id": "31a4ea5b-b58f-3eb3-d435-4e07d0d206c3",
+      "synthea_claim_id": "31a4ea5b-b58f-3eb3-6bc0-0789991c2fe2",
+      "folder": "generated/CLM-0010",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.332054+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0011",
+      "synthea_patient_id": "8ebf88af-316a-abca-55f2-7da147460637",
+      "synthea_encounter_id": "8ebf88af-316a-abca-0cc3-c7e3fdafa47d",
+      "synthea_claim_id": "8ebf88af-316a-abca-f327-328bf2a99375",
+      "folder": "generated/CLM-0011",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.373026+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0012",
+      "synthea_patient_id": "17db6300-f7ed-48b9-37c6-74188dea5fa1",
+      "synthea_encounter_id": "17db6300-f7ed-48b9-6405-990c7eccf52c",
+      "synthea_claim_id": "17db6300-f7ed-48b9-7e71-569890cb79f5",
+      "folder": "generated/CLM-0012",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.394177+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0013",
+      "synthea_patient_id": "13b1dad3-c525-bb27-aa87-6024e1eb0f69",
+      "synthea_encounter_id": "13b1dad3-c525-bb27-9281-826be6e11946",
+      "synthea_claim_id": "13b1dad3-c525-bb27-a8af-63c373f0fe04",
+      "folder": "generated/CLM-0013",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.439020+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0014",
+      "synthea_patient_id": "1dcebbcb-c045-80be-d457-1560474db202",
+      "synthea_encounter_id": "1dcebbcb-c045-80be-4be1-382863320bad",
+      "synthea_claim_id": "1dcebbcb-c045-80be-9f9c-414a9cf63804",
+      "folder": "generated/CLM-0014",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.482216+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0015",
+      "synthea_patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+      "synthea_encounter_id": "4316906c-b4ec-d8ac-ba17-772b5b3dda50",
+      "synthea_claim_id": "4316906c-b4ec-d8ac-2a3b-753cce26ed29",
+      "folder": "generated/CLM-0015",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.520557+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0016",
+      "synthea_patient_id": "5d4e6996-4699-6d4d-a223-fc93ed94a86c",
+      "synthea_encounter_id": "5d4e6996-4699-6d4d-5e4e-812cf0c157e7",
+      "synthea_claim_id": "5d4e6996-4699-6d4d-6e67-3362903b693f",
+      "folder": "generated/CLM-0016",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.563129+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0017",
+      "synthea_patient_id": "667c4f9b-d19c-6e62-56c9-1252dd20f841",
+      "synthea_encounter_id": "667c4f9b-d19c-6e62-f314-a3cb38f044ad",
+      "synthea_claim_id": "667c4f9b-d19c-6e62-1fa3-4f37e59b81fd",
+      "folder": "generated/CLM-0017",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.601553+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0018",
+      "synthea_patient_id": "011bb0c0-8088-4ca4-d94d-e7ee6625b9e2",
+      "synthea_encounter_id": "011bb0c0-8088-4ca4-46fc-2d2aa6704541",
+      "synthea_claim_id": "011bb0c0-8088-4ca4-2b1d-1818022a18ce",
+      "folder": "generated/CLM-0018",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.648119+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0019",
+      "synthea_patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+      "synthea_encounter_id": "81179082-1cf7-5a67-687a-7e889bfb3a14",
+      "synthea_claim_id": "81179082-1cf7-5a67-4154-36618f97f0d1",
+      "folder": "generated/CLM-0019",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.703597+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0020",
+      "synthea_patient_id": "9afc8a94-3bcd-2fdf-175b-6118b2e2e82b",
+      "synthea_encounter_id": "9afc8a94-3bcd-2fdf-1d60-86132f512d47",
+      "synthea_claim_id": "9afc8a94-3bcd-2fdf-05fc-ccc7b670aee4",
+      "folder": "generated/CLM-0020",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.731761+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0021",
+      "synthea_patient_id": "5aee6c1f-1511-3ab8-c684-9520d251bf7f",
+      "synthea_encounter_id": "5aee6c1f-1511-3ab8-404e-3d4dc9a7a91c",
+      "synthea_claim_id": "5aee6c1f-1511-3ab8-aee8-86e3cf954a0e",
+      "folder": "generated/CLM-0021",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.775639+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0022",
+      "synthea_patient_id": "949e8034-faae-6ffa-e7ec-3afc5f58ab71",
+      "synthea_encounter_id": "949e8034-faae-6ffa-4dac-33fea2c5d34e",
+      "synthea_claim_id": "949e8034-faae-6ffa-85c4-680015a8cbe6",
+      "folder": "generated/CLM-0022",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.815501+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0023",
+      "synthea_patient_id": "56b03196-c744-0977-5da6-13a6a5eab32d",
+      "synthea_encounter_id": "56b03196-c744-0977-ec41-5b53f8f2d71c",
+      "synthea_claim_id": "56b03196-c744-0977-ffe7-b09a6266df4e",
+      "folder": "generated/CLM-0023",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.854174+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0024",
+      "synthea_patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+      "synthea_encounter_id": "5f029b66-bf99-4177-dff4-271c6c38f1b4",
+      "synthea_claim_id": "5f029b66-bf99-4177-9b14-5639cd6a2855",
+      "folder": "generated/CLM-0024",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.893771+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0025",
+      "synthea_patient_id": "a0c2c095-98e4-5324-c036-bd83bc5fa4d0",
+      "synthea_encounter_id": "a0c2c095-98e4-5324-ecb4-84a7352d1a6d",
+      "synthea_claim_id": "a0c2c095-98e4-5324-9a27-bd52812b0b5e",
+      "folder": "generated/CLM-0025",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.926525+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0026",
+      "synthea_patient_id": "a014abe6-b5ab-4aea-7383-7535f9309450",
+      "synthea_encounter_id": "a014abe6-b5ab-4aea-d138-586eef1664e5",
+      "synthea_claim_id": "a014abe6-b5ab-4aea-45ae-f176d5b00fb7",
+      "folder": "generated/CLM-0026",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.960564+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0027",
+      "synthea_patient_id": "74849c81-59f1-4fb3-4ed4-ccbcb4e33924",
+      "synthea_encounter_id": "74849c81-59f1-4fb3-a489-b7283122374f",
+      "synthea_claim_id": "74849c81-59f1-4fb3-cc89-d0c157484fbe",
+      "folder": "generated/CLM-0027",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:57.997868+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0028",
+      "synthea_patient_id": "230c37e4-16dd-5430-4975-9b3e693e98a9",
+      "synthea_encounter_id": "230c37e4-16dd-5430-322e-e34c7045bfd1",
+      "synthea_claim_id": "230c37e4-16dd-5430-151a-80dbd7cff6e2",
+      "folder": "generated/CLM-0028",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.037867+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0029",
+      "synthea_patient_id": "48da8774-ae72-0063-c18a-dbb2e0a49648",
+      "synthea_encounter_id": "48da8774-ae72-0063-c112-79583d25a793",
+      "synthea_claim_id": "48da8774-ae72-0063-fd34-83073037b5f5",
+      "folder": "generated/CLM-0029",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.072096+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0030",
+      "synthea_patient_id": "a7b863ab-5f4d-e1fe-ff6c-41ed3fff0004",
+      "synthea_encounter_id": "a7b863ab-5f4d-e1fe-1b06-f913c3c705f5",
+      "synthea_claim_id": "a7b863ab-5f4d-e1fe-91ba-15753dc970ee",
+      "folder": "generated/CLM-0030",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.105397+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0031",
+      "synthea_patient_id": "f81eb86b-2177-327c-e616-bcec35932ebc",
+      "synthea_encounter_id": "f81eb86b-2177-327c-da1c-d3bf5134f536",
+      "synthea_claim_id": "f81eb86b-2177-327c-fc43-8ae7869e844e",
+      "folder": "generated/CLM-0031",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.141225+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0032",
+      "synthea_patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+      "synthea_encounter_id": "f16fd97d-f949-5651-51d7-ee7b5fa908cb",
+      "synthea_claim_id": "f16fd97d-f949-5651-3fac-a497c35cde96",
+      "folder": "generated/CLM-0032",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.237990+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0033",
+      "synthea_patient_id": "f6f2b742-7805-02b8-a299-93b00d292d2c",
+      "synthea_encounter_id": "f6f2b742-7805-02b8-608a-cf317ade2952",
+      "synthea_claim_id": "f6f2b742-7805-02b8-5d85-0b4885a4450d",
+      "folder": "generated/CLM-0033",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.279418+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0034",
+      "synthea_patient_id": "4a40fda3-3692-da0a-4fce-c49c554059a8",
+      "synthea_encounter_id": "4a40fda3-3692-da0a-1650-f31ff601245c",
+      "synthea_claim_id": "4a40fda3-3692-da0a-1bb0-1facfde82ce1",
+      "folder": "generated/CLM-0034",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.324071+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0035",
+      "synthea_patient_id": "31829f1f-c63f-6e0e-385e-cad2f869a6d8",
+      "synthea_encounter_id": "31829f1f-c63f-6e0e-5655-9a5fdc4f964d",
+      "synthea_claim_id": "31829f1f-c63f-6e0e-1986-59d01360cb71",
+      "folder": "generated/CLM-0035",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.357190+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0036",
+      "synthea_patient_id": "0f2662b4-422d-4d6a-aa92-a98e9736d772",
+      "synthea_encounter_id": "0f2662b4-422d-4d6a-6514-0fc40ac36856",
+      "synthea_claim_id": "0f2662b4-422d-4d6a-6948-656a7f35e256",
+      "folder": "generated/CLM-0036",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.397723+00:00"
+    },
+    {
+      "claimshield_id": "CLM-0037",
+      "synthea_patient_id": "9e396f9a-bc04-baca-845e-6cc9ee8b102c",
+      "synthea_encounter_id": "9e396f9a-bc04-baca-8103-cf300ee074d3",
+      "synthea_claim_id": "9e396f9a-bc04-baca-878a-9bc0e18a0fab",
+      "folder": "generated/CLM-0037",
+      "status": "generated",
+      "created_at": "2026-06-18T19:32:58.449613+00:00"
+    }
+  ]
+}

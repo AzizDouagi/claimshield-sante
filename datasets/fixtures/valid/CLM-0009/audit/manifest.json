@@ -1,0 +1,167 @@
+{
+  "case_id": "CLM-0009",
+  "claimshield_id": "CLM-0009",
+  "generated_at": "2026-06-18T19:32:57.291489+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "f2ed4dd4-3b56-23e8-3d36-4b51bac09036",
+  "encounter_id": "f2ed4dd4-3b56-23e8-3eee-bfa43d196128",
+  "claim_id": "f2ed4dd4-3b56-23e8-ecb3-8cb02b280fa5",
+  "provider_id": "c3665193-cc7c-3267-876d-8ad07ca26de6",
+  "organization_id": "6ff4bb75-c014-3f73-a574-620cf1538d85",
+  "payer_id": "e03e23c9-4df1-3eb6-a62d-f70f02301496",
+  "source_claim_id": "f2ed4dd4-3b56-23e8-ecb3-8cb02b280fa5",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "919.90",
+    "amount_covered": "735.92",
+    "amount_requested": "735.92",
+    "patient_share": "183.98"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 2364266,
+      "sha256": "a9019008eaad77e5bb2b947f80a72cc91e771471b93b0ea19f0cb03e2fc9cc60",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 59260,
+      "sha256": "0cc0cbf03667a41964eca6e5fb1206bc21811141da47883232cf092e1ea37f59",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1048,
+      "sha256": "613d71bef7e867c4e421dff218f426d6af70efd052580e7fc5f89f47ff4b95bd",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2794,
+      "sha256": "5d9b4e36bc215216d93a68d5f06b032afe1f2b9a2f0ba0732cfd10d484cb9f3c",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3182,
+      "sha256": "0d7b402214cdb154f1bc34ada3a79bf1e64360db2c56718bda08961714eb5248",
+      "required": true
+    },
+    {
+      "filename": "fhir/Jasmin506_Bailey598_f2ed4dd4-3b56-23e8-3d36-4b51bac09036.json",
+      "size_bytes": 2364266,
+      "sha256": "a9019008eaad77e5bb2b947f80a72cc91e771471b93b0ea19f0cb03e2fc9cc60",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 905,
+      "sha256": "3ebfc949b4dadee7719a0b0050d532048512b702e9876559a4b395d342638eb1",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3490,
+      "sha256": "c75392826f24f1f757b669b3ab4f8af330d4aacc3f14457be4ec45e352309d59",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 743,
+      "sha256": "dfea0664486ab0855fbe3f2e6e2d8323666fc3209bcef2caee6967e57049f996",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 103238,
+      "sha256": "8dd74a956355eabd707d81be70e20c815962ae6db6477cd4db8d9b70d3cf7573",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2848,
+      "sha256": "b34bdd2fe3109283d91e8d1561b4186e107ceff13028e7e70209170da10eca24",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Jasmin506_Bailey598_f2ed4dd4-3b56-23e8-3d36-4b51bac09036.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "103697008",
+      "description": "Patient referral for dental care (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "310798",
+      "description": "Hydrochlorothiazide 25 MG Oral Tablet"
+    },
+    {
+      "code": "308136",
+      "description": "amLODIPine 2.5 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "160904001",
+      "description": "Part-time employment (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "73595000",
+      "description": "Stress (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

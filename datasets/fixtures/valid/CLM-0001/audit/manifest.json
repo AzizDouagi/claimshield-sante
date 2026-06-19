@@ -1,6 +1,6 @@
 {
   "case_id": "CLM-0001",
-  "generated_at": "2026-06-18T15:12:27.972884+00:00",
+  "generated_at": "2026-06-18T19:08:29.119662+00:00",
   "dataset": {
     "source_generator": "Synthea",
     "source_software_license": "Apache-2.0",
@@ -18,14 +18,14 @@
   "files": [
     {
       "filename": "case_data.json",
-      "size_bytes": 27565,
-      "sha256": "6cd9d5fac215c1150184479361966a4ade26e8bce024764067ab88d7ceb5a215",
+      "size_bytes": 27563,
+      "sha256": "b1e14c211a2f91a0d604657a6f50948fc1f9cf94b6e4d43827f25ea1f568fc1b",
       "required": true
     },
     {
       "filename": "claim_request.pdf",
       "size_bytes": 4091,
-      "sha256": "640833c964d8d33d2a4e7681d1b50dc24dcc0c4b6013ba8c27c5d91941fab1c9",
+      "sha256": "0952f425788e9e0d671223577bc38bf688bd4bbc6b14c4c2af7d12bba05f9b0c",
       "required": true
     },
     {
@@ -37,19 +37,19 @@
     {
       "filename": "medical_invoice.pdf",
       "size_bytes": 3923,
-      "sha256": "e25c59355e09997e88261c31d0b97ed706a9bcfadf7be447bd0d4c9431a32182",
+      "sha256": "7cb8d5eed07af6424d53ec3910c070707ebd56d6a750ab51badf84528c7e6a9c",
       "required": true
     },
     {
       "filename": "patient_fhir_bundle.json",
-      "size_bytes": 34870,
-      "sha256": "91287e2333ce4f77bcd5f12306de9a018dcaacdc54eea7ef74d89ea188196da6",
+      "size_bytes": 34868,
+      "sha256": "f722573ab1d99541bfcbe73d77e2bd703e391ca66e5f28152d6c97e8e1bf9d2a",
       "required": false
     },
     {
       "filename": "prescription.pdf",
       "size_bytes": 2884,
-      "sha256": "cc290e93e702d8203ef495fb9dd7bf62a10263175ef160afb08dd49949bbac05",
+      "sha256": "e43f31af6ad9a8d143134f137ffbb510ec195e6a73992d2e3c59ab309ccdffb9",
       "required": true
     }
   ]

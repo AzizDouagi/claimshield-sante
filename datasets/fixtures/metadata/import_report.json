@@ -1,0 +1,243 @@
+{
+  "imported_at": "2026-06-18T19:43:34.986105+00:00",
+  "source_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases",
+  "source_generated_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases/generated",
+  "destination_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/datasets/fixtures/valid",
+  "dry_run": false,
+  "validate_only": true,
+  "cases_found": 37,
+  "cases_copied": 0,
+  "cases_unchanged": 37,
+  "backups_created": 0,
+  "errors_count": 0,
+  "warnings": [
+    "Dossier FHIR absent"
+  ],
+  "operations": [],
+  "validations": [
+    {
+      "case_id": "CLM-0001",
+      "ok": true,
+      "warnings": [
+        "Dossier FHIR absent"
+      ],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0002",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0003",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0004",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0005",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0006",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0007",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0008",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0009",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0010",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0011",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0012",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0013",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0014",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0015",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0016",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0017",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0018",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0019",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0020",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0021",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0022",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0023",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0024",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0025",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0026",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0027",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0028",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0029",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0030",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0031",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0032",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0033",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0034",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0035",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0036",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "case_id": "CLM-0037",
+      "ok": true,
+      "warnings": [],
+      "errors": []
+    }
+  ]
+}

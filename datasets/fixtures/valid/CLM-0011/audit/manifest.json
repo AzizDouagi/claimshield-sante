@@ -1,0 +1,192 @@
+{
+  "case_id": "CLM-0011",
+  "claimshield_id": "CLM-0011",
+  "generated_at": "2026-06-18T19:32:57.372692+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "8ebf88af-316a-abca-55f2-7da147460637",
+  "encounter_id": "8ebf88af-316a-abca-0cc3-c7e3fdafa47d",
+  "claim_id": "8ebf88af-316a-abca-f327-328bf2a99375",
+  "provider_id": "40329214-2fca-3330-8739-3658bd443d0d",
+  "organization_id": "84abfbd5-41c1-3df4-9b31-7ca93cb2309a",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "8ebf88af-316a-abca-f327-328bf2a99375",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "4056.73",
+    "amount_covered": "3370.14",
+    "amount_requested": "3370.14",
+    "patient_share": "686.59"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3102529,
+      "sha256": "ce9c9dc53c7437f58aa02ebacd4e03de33c411e2129fe1974ab94eae7f44282b",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 81399,
+      "sha256": "9e1d387924a7d13ac0cf6c0e92d10364275fff24e436fa665f0b6419253d8201",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1102,
+      "sha256": "4fe2bb332e00e7de64db20c9012d6f9bd9446e67ac170583049846c3da97fd7e",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2801,
+      "sha256": "f040b624b3f96678d78330f4af77a0760c716bff0014aec7af2597831b3a2db1",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3346,
+      "sha256": "5311575d0b8c869a07f478fb04e7f3cb33de12cb1d9406671482ffe916c3b978",
+      "required": true
+    },
+    {
+      "filename": "fhir/Ana_Luisa894_Luz785_Atencio773_8ebf88af-316a-abca-55f2-7da147460637.json",
+      "size_bytes": 3102529,
+      "sha256": "ce9c9dc53c7437f58aa02ebacd4e03de33c411e2129fe1974ab94eae7f44282b",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 914,
+      "sha256": "847d5c1710cf5c3cc51a3226b86a0a5a70f655b5907dfe5959610812ee995a4c",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3978,
+      "sha256": "8f02c12a2717c1e21f0780390e4ac0cf1aa2a11a5d9d682660baed0f7edecc15",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 747,
+      "sha256": "c479bb099cda733b9f6d2c9a1b79e73a3b694347b0e4a558c790ace0e323b0de",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 134875,
+      "sha256": "e559b0db1500a8bf848067cd5e686b96f51390b5c8d092be0e6fb8f7545d0c2e",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 3120,
+      "sha256": "89aae0e8cc51eda9d1f9918553e37681775a0b54bde5e8fdb3a7141e31920181",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Ana_Luisa894_Luz785_Atencio773_8ebf88af-316a-abca-55f2-7da147460637.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "127783003",
+      "description": "Spirometry (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    },
+    {
+      "code": "103697008",
+      "description": "Patient referral for dental care (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "245314",
+      "description": "albuterol 5 MG/ML Inhalation Solution"
+    },
+    {
+      "code": "314076",
+      "description": "lisinopril 10 MG Oral Tablet"
+    },
+    {
+      "code": "308136",
+      "description": "amLODIPine 2.5 MG Oral Tablet"
+    },
+    {
+      "code": "896209",
+      "description": "60 ACTUAT Fluticasone propionate 0.25 MG/ACTUAT / salmeterol 0.05 MG/ACTUAT Dry Powder Inhaler"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "160904001",
+      "description": "Part-time employment (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "423315002",
+      "description": "Limited social contact (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "66383009",
+      "description": "Gingivitis (disorder)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

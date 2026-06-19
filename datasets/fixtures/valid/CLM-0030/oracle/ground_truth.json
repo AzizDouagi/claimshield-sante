@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0030",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Toshiko149 Samuel331 Dibbert990",
+    "patient_id": "a7b863ab-5f4d-e1fe-ff6c-41ed3fff0004",
+    "payer_name": "UnitedHealthcare",
+    "service_date": "29/01/2019",
+    "claim_reference": "CLM-0030",
+    "invoice_number": "INV-CLM-0030",
+    "prescription_number": "RX-CLM-0030",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "total_billed": "3536.75",
+    "amount_requested": "2829.40",
+    "patient_share": "707.35",
+    "currency": "USD"
+  }
+}

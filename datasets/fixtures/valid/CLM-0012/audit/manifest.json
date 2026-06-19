@@ -1,0 +1,152 @@
+{
+  "case_id": "CLM-0012",
+  "claimshield_id": "CLM-0012",
+  "generated_at": "2026-06-18T19:32:57.393938+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "17db6300-f7ed-48b9-37c6-74188dea5fa1",
+  "encounter_id": "17db6300-f7ed-48b9-6405-990c7eccf52c",
+  "claim_id": "17db6300-f7ed-48b9-7e71-569890cb79f5",
+  "provider_id": "fb6d017b-370f-3766-94a1-b583608aa0bf",
+  "organization_id": "f6ba791e-fe68-3596-bef4-60751db6a60e",
+  "payer_id": "26aab0cd-6aba-3e1b-ac5b-05c8867e762c",
+  "source_claim_id": "17db6300-f7ed-48b9-7e71-569890cb79f5",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "4140.89",
+    "amount_covered": "3312.71",
+    "amount_requested": "3312.71",
+    "patient_share": "828.18"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 1305400,
+      "sha256": "1beafc42869963c6e2f4d982ee879c2af49884cac7bd365fc7501c99e80192d5",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 28042,
+      "sha256": "0871230df4e44e9ac76350567fdd3dc1f26294e27f13d9af36230d348e11159b",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1092,
+      "sha256": "e0ed30311d3f0f51412277e8fbf4ab7e14703cade86ee6fb880e06c4b6313293",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2817,
+      "sha256": "89c7e781e882f98e9eae059c9816a0cbde38144847d21f2fb15b667d738229f3",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 2676,
+      "sha256": "1def8a324da50cfb0d93d1d562e4a11a29ecf0903e944e69d0556c06743f03dd",
+      "required": true
+    },
+    {
+      "filename": "fhir/Joelle163_Erna640_Medhurst46_17db6300-f7ed-48b9-37c6-74188dea5fa1.json",
+      "size_bytes": 1305400,
+      "sha256": "1beafc42869963c6e2f4d982ee879c2af49884cac7bd365fc7501c99e80192d5",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 910,
+      "sha256": "cadda40c019da3039464b539613a7dc533201cf13e013c0fef16ee4d54878f9a",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3209,
+      "sha256": "a4c36b8ff7235833b50b3f754bb6bdbbb07e9d2ed270ac6d75f8e031dafeffa8",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 753,
+      "sha256": "29378fe221c51de430164af545fbc7e2735c56c54eefd85d8173f0d9c45e3448",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 21046,
+      "sha256": "d13c2dc0de630d096ac0b85732b835201236ba16f3709e562e2a37e35cd79c45",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2787,
+      "sha256": "481f03dfa51e1481ea01c10ef4ad9e2dfcada471ddb52d5595940a4e46389cd2",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Joelle163_Erna640_Medhurst46_17db6300-f7ed-48b9-37c6-74188dea5fa1.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "288086009",
+      "description": "Suture open wound (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "313782",
+      "description": "Acetaminophen 325 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "312608009",
+      "description": "Laceration - injury (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "284549007",
+      "description": "Laceration of hand (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "312608009",
+      "description": "Laceration - injury (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0026",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mrs. Usha71 Hane680",
+    "patient_id": "a014abe6-b5ab-4aea-7383-7535f9309450",
+    "payer_name": "Medicaid",
+    "service_date": "15/01/2022",
+    "claim_reference": "CLM-0026",
+    "invoice_number": "INV-CLM-0026",
+    "prescription_number": "RX-CLM-0026",
+    "procedure_count": 9,
+    "medication_count": 1,
+    "total_billed": "3968.15",
+    "amount_requested": "3918.15",
+    "patient_share": "50.00",
+    "currency": "USD"
+  }
+}

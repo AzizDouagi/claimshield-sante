@@ -1,0 +1,162 @@
+{
+  "case_id": "CLM-0031",
+  "claimshield_id": "CLM-0031",
+  "generated_at": "2026-06-18T19:32:58.140810+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "f81eb86b-2177-327c-e616-bcec35932ebc",
+  "encounter_id": "f81eb86b-2177-327c-da1c-d3bf5134f536",
+  "claim_id": "f81eb86b-2177-327c-fc43-8ae7869e844e",
+  "provider_id": "f10e3837-8147-33d8-b6f7-6fc750f33ea9",
+  "organization_id": "5f7663da-4b19-3629-b8f2-fb07d75421d9",
+  "payer_id": "8fa6c185-e44e-3e34-8bd8-39be8694f4ce",
+  "source_claim_id": "f81eb86b-2177-327c-fc43-8ae7869e844e",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "840.20",
+    "amount_covered": "672.16",
+    "amount_requested": "672.16",
+    "patient_share": "168.04"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 2476995,
+      "sha256": "0264dd572251e3c12ddfee57b65de782e6f859bdcbb004ba35ac95b342fd4023",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 73155,
+      "sha256": "5badb8d8780625c0b9aaa8b8d16b1cf9abe07ed72f903bcdbbb4d71d02168508",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1076,
+      "sha256": "1c3dc0c0a688092f9052c922c245405702d912d16aa219ea2694e31ea6c7098d",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2801,
+      "sha256": "d4b6ed9a14bc3ca0be456003cd49dc2a9cba4429cdb6654f87d085a06503f63e",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3197,
+      "sha256": "76aa247f9f7f49729f1acdc51f78f03c88ec03d527fb03116bc8cf052c39e3c9",
+      "required": true
+    },
+    {
+      "filename": "fhir/Lourdes258_Rodríguez701_f81eb86b-2177-327c-e616-bcec35932ebc.json",
+      "size_bytes": 2476995,
+      "sha256": "0264dd572251e3c12ddfee57b65de782e6f859bdcbb004ba35ac95b342fd4023",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 910,
+      "sha256": "33c762bc3b7260915b945cf936e3d3bc7eb7672a3f7cbd477bd9194bdd897caa",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3569,
+      "sha256": "3270ee64543593c201b3bd45c9a71cb711ca44f74464211b60fbe5a3727c0fcb",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 738,
+      "sha256": "7cddb87c0045d989d5c653e6a6c2a4dbd7930424b0236e45808c0e0c83797897",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 111254,
+      "sha256": "8404acd5f995944980309514b17c1a689a44d6677dbb603599807736a9670878",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2875,
+      "sha256": "d37f97618028474fd625a98160c9c5b175b07a4c40d1dda78434acac56ddd198",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Lourdes258_Rodríguez701_f81eb86b-2177-327c-e616-bcec35932ebc.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "209387",
+      "description": "Acetaminophen 325 MG Oral Tablet [Tylenol]"
+    },
+    {
+      "code": "835603",
+      "description": "tramadol hydrochloride 50 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

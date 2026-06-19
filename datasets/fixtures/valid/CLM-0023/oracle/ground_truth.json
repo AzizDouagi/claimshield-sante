@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0023",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Ms. Nelida367 Dorris197 Gutkowski940",
+    "patient_id": "56b03196-c744-0977-5da6-13a6a5eab32d",
+    "payer_name": "Cigna Health",
+    "service_date": "30/12/2016",
+    "claim_reference": "CLM-0023",
+    "invoice_number": "INV-CLM-0023",
+    "prescription_number": "RX-CLM-0023",
+    "procedure_count": 7,
+    "medication_count": 2,
+    "total_billed": "1395.12",
+    "amount_requested": "552.48",
+    "patient_share": "842.64",
+    "currency": "USD"
+  }
+}

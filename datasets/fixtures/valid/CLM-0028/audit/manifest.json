@@ -1,0 +1,178 @@
+{
+  "case_id": "CLM-0028",
+  "claimshield_id": "CLM-0028",
+  "generated_at": "2026-06-18T19:32:58.037568+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "230c37e4-16dd-5430-4975-9b3e693e98a9",
+  "encounter_id": "230c37e4-16dd-5430-322e-e34c7045bfd1",
+  "claim_id": "230c37e4-16dd-5430-151a-80dbd7cff6e2",
+  "provider_id": "c90af1c4-e22f-3ecb-a670-8d0eb8726d79",
+  "organization_id": "440fa4b8-c731-3cf5-81d9-aa3f30a37b95",
+  "payer_id": "df166300-5a78-3502-a46a-832842197811",
+  "source_claim_id": "230c37e4-16dd-5430-151a-80dbd7cff6e2",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "3968.15",
+    "amount_covered": "3918.15",
+    "amount_requested": "3918.15",
+    "patient_share": "50.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3370284,
+      "sha256": "094fa33e6ce425fd4263a2711a4edb3a3204a27635c1626ab97ff8e55c9c4479",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 48746,
+      "sha256": "4f4a97135b4cf30451ec2b31d1cb9995d28ec69360030056a6894b769cfd5e66",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1082,
+      "sha256": "d74984c373f76ce994f6d1b140e2cd7cf98a8adb70edef5d006d616f92aae9d9",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2802,
+      "sha256": "a33c65a50fc2921a796dc45697aac3b08c82d18061158980208729afda3d2a3a",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3057,
+      "sha256": "8c87c8471e5f49a4aee8f2050074234dcafa54e99fc08e5972fdbbd007bf05e7",
+      "required": true
+    },
+    {
+      "filename": "fhir/Hayley136_Nannette779_Sauer652_230c37e4-16dd-5430-4975-9b3e693e98a9.json",
+      "size_bytes": 3370284,
+      "sha256": "094fa33e6ce425fd4263a2711a4edb3a3204a27635c1626ab97ff8e55c9c4479",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 913,
+      "sha256": "c647e9000e921260d96c0e6edb1b998f3f77ebcfbc2fd8ee0c2b6a1ac2a63dcf",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3839,
+      "sha256": "28195fce684f29019add2752f6b2ef8c5b1e63371998d1fedd8715427817f5b2",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 755,
+      "sha256": "cde578adbe8ec77e612b3c2e189123e28174e780e910b9332afd2c53a567e0e2",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 41341,
+      "sha256": "aca317a4806c65412863a1ab3bbef7187597de857839253ec370a537b09d2ef4",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2805,
+      "sha256": "76058d6652057e6c468f0f19945436a950d6b63e9591413057fcc1e914d1f187",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Hayley136_Nannette779_Sauer652_230c37e4-16dd-5430-4975-9b3e693e98a9.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "34043003",
+      "description": "Dental consultation and report (procedure)"
+    },
+    {
+      "code": "225362009",
+      "description": "Dental care (regime/therapy)"
+    },
+    {
+      "code": "1260009003",
+      "description": "Removal of supragingival plaque and calculus from all teeth using dental instrument (procedure)"
+    },
+    {
+      "code": "1260010008",
+      "description": "Removal of subgingival plaque and calculus from all teeth using dental instrument (procedure)"
+    },
+    {
+      "code": "241046008",
+      "description": "Dental plain X-ray bitewing (procedure)"
+    },
+    {
+      "code": "274788003",
+      "description": "Examination of gingivae (procedure)"
+    },
+    {
+      "code": "1259293006",
+      "description": "Application of composite dental filling material to dentin of tooth following fracture of tooth (procedure)"
+    },
+    {
+      "code": "68071007",
+      "description": "Dental fluoride treatment (procedure)"
+    },
+    {
+      "code": "243085009",
+      "description": "Oral health education (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "1535362",
+      "description": "sodium fluoride 0.0272 MG/MG Oral Gel"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "109570002",
+      "description": "Primary dental caries (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "66383009",
+      "description": "Gingivitis (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

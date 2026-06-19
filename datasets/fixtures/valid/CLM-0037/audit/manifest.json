@@ -1,0 +1,176 @@
+{
+  "case_id": "CLM-0037",
+  "claimshield_id": "CLM-0037",
+  "generated_at": "2026-06-18T19:32:58.449249+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "9e396f9a-bc04-baca-845e-6cc9ee8b102c",
+  "encounter_id": "9e396f9a-bc04-baca-8103-cf300ee074d3",
+  "claim_id": "9e396f9a-bc04-baca-878a-9bc0e18a0fab",
+  "provider_id": "edf349dd-0c53-3f92-8096-484bbe63c3b3",
+  "organization_id": "aad05540-c9cb-3805-b3c4-f9b9d9b42b2e",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "9e396f9a-bc04-baca-878a-9bc0e18a0fab",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "704.20",
+    "amount_covered": "496.28",
+    "amount_requested": "496.28",
+    "patient_share": "207.92"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 4625319,
+      "sha256": "014f522b58577afba74209200c0261ee90ee00961ef4c1613855689042e5bbae",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 73684,
+      "sha256": "7999614bc7d08cd8e35b92f462bd2237e21ac91e84fdf0210b5567255af26588",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1103,
+      "sha256": "b289cccd489e3ddd40f00b4400b4d40f98a239657ea10b2897bbab58c91acfa0",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2799,
+      "sha256": "c66286d87dd21a351511fb71bbdf084a920467ab54f28a18d1ddcf5c7bf8646f",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3221,
+      "sha256": "6c7e868d9a3bf5e99590fb8091411f1482b0a6cb4ecfb3830dc847576d6479c5",
+      "required": true
+    },
+    {
+      "filename": "fhir/Lady554_Aubrey96_Mohr916_9e396f9a-bc04-baca-845e-6cc9ee8b102c.json",
+      "size_bytes": 4625319,
+      "sha256": "014f522b58577afba74209200c0261ee90ee00961ef4c1613855689042e5bbae",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 906,
+      "sha256": "268a9250aa1ffbff38b763f7c6e103b885e31a93beccd7a41981c9fa89db0e2f",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3636,
+      "sha256": "cc7b44d6a14f2c8695bf172f7d8b45a56ec83e040e6daa106f7a95816715ee32",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 740,
+      "sha256": "2229a02a676392edc132a65099dd946523f952790758fe0a7fd3a24a6160aad6",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 109967,
+      "sha256": "8016de87758ecc625c43981180fe432f4b67b849e61173d51adcede2ab1361ff",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 3102,
+      "sha256": "f6a0968cbdacb65fd1634305d137948f0c6edbed2de9d6ce3796161fe16dd0b3",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Lady554_Aubrey96_Mohr916_9e396f9a-bc04-baca-845e-6cc9ee8b102c.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "762993000",
+      "description": "Assessment using Morse Fall Scale (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "309362",
+      "description": "Clopidogrel 75 MG Oral Tablet"
+    },
+    {
+      "code": "312961",
+      "description": "Simvastatin 20 MG Oral Tablet"
+    },
+    {
+      "code": "866412",
+      "description": "24 HR metoprolol succinate 100 MG Extended Release Oral Tablet"
+    },
+    {
+      "code": "705129",
+      "description": "Nitroglycerin 0.4 MG/ACTUAT Mucosal Spray"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "414545008",
+      "description": "Ischemic heart disease (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "423315002",
+      "description": "Limited social contact (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,174 @@
+{
+  "case_id": "CLM-0021",
+  "claimshield_id": "CLM-0021",
+  "generated_at": "2026-06-18T19:32:57.775332+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "5aee6c1f-1511-3ab8-c684-9520d251bf7f",
+  "encounter_id": "5aee6c1f-1511-3ab8-404e-3d4dc9a7a91c",
+  "claim_id": "5aee6c1f-1511-3ab8-aee8-86e3cf954a0e",
+  "provider_id": "0d52173a-6bf8-3ce3-9158-9a5576fd40dc",
+  "organization_id": "171254da-957c-304a-b3fc-51a2d3ebee43",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "5aee6c1f-1511-3ab8-aee8-86e3cf954a0e",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1623.03",
+    "amount_covered": "1452.53",
+    "amount_requested": "1452.53",
+    "patient_share": "170.50"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3113313,
+      "sha256": "cc55b6bfd41cee283abee6b6a65f522e9790453e88d8dc9168d60cdb2f4af042",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 90026,
+      "sha256": "3497e38ed0be9cf7640fa3bad5efea341ed8044648a3bbf228852caed4b3fa08",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1085,
+      "sha256": "7074b2a5206f1a9997bb91c9b66cd2f2d2c9bc923fd6ae18b5065a8c97667064",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2814,
+      "sha256": "aa235e20e39ded26ee0439b704fdd232267fa2806699dd1c5c81eb891f264c2a",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3325,
+      "sha256": "08d159c6a56d6ed88b63e9ad7b3ec048ec4533c43f5bc82893f96329f7b02583",
+      "required": true
+    },
+    {
+      "filename": "fhir/Ricardo560_Gaona896_5aee6c1f-1511-3ab8-c684-9520d251bf7f.json",
+      "size_bytes": 3113313,
+      "sha256": "cc55b6bfd41cee283abee6b6a65f522e9790453e88d8dc9168d60cdb2f4af042",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 913,
+      "sha256": "cec07c8e1e2eaeebd33dae294fddc4874007d97a5b78dc45ba248b390e7b4367",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3833,
+      "sha256": "04829be094a1846d5b99d523fc8d59515d401a0a3712fb050e0fffb7b4adae5e",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 731,
+      "sha256": "ae5ad6263264936d6e30dba139c7b631e22c17f540c59da35e10a7558eb6c01b",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 155848,
+      "sha256": "68740e6e577c05e146a65877e8fe4e5a65adf259617453037ae1a952de2d9516",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2985,
+      "sha256": "80169e3edd15a9b90d672409d365f89f8a7f323563312b5bf6b86b82e5999c9d",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Ricardo560_Gaona896_5aee6c1f-1511-3ab8-c684-9520d251bf7f.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "103750000",
+      "description": "Sleep apnea assessment (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "106892",
+      "description": "insulin isophane human 70 UNT/ML / insulin regular human 30 UNT/ML Injectable Suspension [Humulin]"
+    },
+    {
+      "code": "310798",
+      "description": "Hydrochlorothiazide 25 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0018",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Efrain317 Mac103 Hettinger594",
+    "patient_id": "011bb0c0-8088-4ca4-d94d-e7ee6625b9e2",
+    "payer_name": "Dual Eligible",
+    "service_date": "02/06/2014",
+    "claim_reference": "CLM-0018",
+    "invoice_number": "INV-CLM-0018",
+    "prescription_number": "RX-CLM-0018",
+    "procedure_count": 6,
+    "medication_count": 1,
+    "total_billed": "704.20",
+    "amount_requested": "704.20",
+    "patient_share": "0.00",
+    "currency": "USD"
+  }
+}

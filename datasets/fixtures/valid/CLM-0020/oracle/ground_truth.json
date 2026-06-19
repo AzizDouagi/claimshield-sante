@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0020",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Tom274 Donnell534 Cruickshank494",
+    "patient_id": "9afc8a94-3bcd-2fdf-175b-6118b2e2e82b",
+    "payer_name": "Humana",
+    "service_date": "18/12/2020",
+    "claim_reference": "CLM-0020",
+    "invoice_number": "INV-CLM-0020",
+    "prescription_number": "RX-CLM-0020",
+    "procedure_count": 7,
+    "medication_count": 1,
+    "total_billed": "3105.35",
+    "amount_requested": "2484.28",
+    "patient_share": "621.07",
+    "currency": "USD"
+  }
+}

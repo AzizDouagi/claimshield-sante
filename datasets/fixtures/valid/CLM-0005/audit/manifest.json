@@ -1,0 +1,171 @@
+{
+  "case_id": "CLM-0005",
+  "claimshield_id": "CLM-0005",
+  "generated_at": "2026-06-18T19:32:57.165019+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "03f02dc8-d2de-9408-12dd-01c47992fa94",
+  "encounter_id": "03f02dc8-d2de-9408-ea9c-31db92840fe3",
+  "claim_id": "03f02dc8-d2de-9408-7e51-00f2d5ed0b4f",
+  "provider_id": "ea16dbfc-95db-3a2b-a399-cc75a1116720",
+  "organization_id": "63b4f233-fb49-3b1e-a17c-2d572367b131",
+  "payer_id": "df166300-5a78-3502-a46a-832842197811",
+  "source_claim_id": "03f02dc8-d2de-9408-7e51-00f2d5ed0b4f",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "113494.56",
+    "amount_covered": "113494.56",
+    "amount_requested": "113494.56",
+    "patient_share": "0.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 1821810,
+      "sha256": "cd733e2f4856784bdf172312ceb1a8295268bd88ac1d62989a580919ac40cfa5",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 40203,
+      "sha256": "7c3239e883c75c172a3e2781deeea5db8d01b8bcf426bb5f3e37854ec8b99a46",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1081,
+      "sha256": "7b7b0ade1307204f1ebea33ab34dec70cb88d54bf46b99c8efb4393d3a9bad5a",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2781,
+      "sha256": "da3815f7579d1f3837c1e883766c23e39f06e70e6f9e8d80579759b86044a951",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3073,
+      "sha256": "64fb3ac1ed8b595a615504c89aa19ec7b4588745d053e1f237cb31bc209536c1",
+      "required": true
+    },
+    {
+      "filename": "fhir/Erika442_Enola75_Weimann465_03f02dc8-d2de-9408-12dd-01c47992fa94.json",
+      "size_bytes": 1821810,
+      "sha256": "cd733e2f4856784bdf172312ceb1a8295268bd88ac1d62989a580919ac40cfa5",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 913,
+      "sha256": "ae4f9d9311ed5c4a3262b7471369c31caa36deb9535975d43e0badd20127f3e0",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3598,
+      "sha256": "b3dfae7253b5b00070ab739a7e7916cd06f05290297b8df4a53eac85caa08743",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 748,
+      "sha256": "771a1627ae0b1ca4b39c747d61a2a973cfa0ae73420294c9972f42ee19b89982",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 52204,
+      "sha256": "85069cd98b3d1952b0532fd916851f26f306d36885370e313ed1133cc59d145c",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 3003,
+      "sha256": "7d31ecd8a82f278985c27f09cd6ea3fd1dd32b81e25d8e100cbe02e912667a95",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Erika442_Enola75_Weimann465_03f02dc8-d2de-9408-12dd-01c47992fa94.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430701006",
+      "description": "Resuscitation using intravenous fluid (procedure)"
+    },
+    {
+      "code": "449214001",
+      "description": "Transfer to stepdown unit (procedure)"
+    },
+    {
+      "code": "305351004",
+      "description": "Admission to intensive care unit (procedure)"
+    },
+    {
+      "code": "430701006",
+      "description": "Resuscitation using intravenous fluid (procedure)"
+    },
+    {
+      "code": "449214001",
+      "description": "Transfer to stepdown unit (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "1659131",
+      "description": "piperacillin 2000 MG / tazobactam 250 MG Injection"
+    },
+    {
+      "code": "1807510",
+      "description": "150 ML vancomycin 5 MG/ML Injection"
+    },
+    {
+      "code": "242969",
+      "description": "4 ML norepinephrine 1 MG/ML Injection"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "91302008",
+      "description": "Sepsis (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "91302008",
+      "description": "Sepsis (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,184 @@
+{
+  "case_id": "CLM-0013",
+  "claimshield_id": "CLM-0013",
+  "generated_at": "2026-06-18T19:32:57.438689+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "13b1dad3-c525-bb27-aa87-6024e1eb0f69",
+  "encounter_id": "13b1dad3-c525-bb27-9281-826be6e11946",
+  "claim_id": "13b1dad3-c525-bb27-a8af-63c373f0fe04",
+  "provider_id": "b9d726f1-8d3a-3196-ba13-007faa7d7870",
+  "organization_id": "4705a8fd-19cd-32c1-8b3e-34bcfe84d0bd",
+  "payer_id": "df166300-5a78-3502-a46a-832842197811",
+  "source_claim_id": "13b1dad3-c525-bb27-a8af-63c373f0fe04",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1975.00",
+    "amount_covered": "1975.00",
+    "amount_requested": "1975.00",
+    "patient_share": "0.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3914522,
+      "sha256": "9dd46e005052a2e4979df805a25e235df20885a9652562e26500796d3340cb1c",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 62873,
+      "sha256": "a968e3b0c7eb9558d9fef2999a1b804a4601907c5f282a716d674942387e14ee",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1092,
+      "sha256": "7956815b1810278b8eea2b8e8084e996c53bdb9712fb6d17b3fa0962fd55b385",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2781,
+      "sha256": "4c4f50ad2a50d7a9d1c3beee9babb29648aefb71278c1fc3503e4a332ecc3f6c",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3373,
+      "sha256": "d9d81d7d47de10deff4a017a78ef5c4be872ad2fb6d53d3d4f3eac649af21d56",
+      "required": true
+    },
+    {
+      "filename": "fhir/Alejandro916_Dickinson688_13b1dad3-c525-bb27-aa87-6024e1eb0f69.json",
+      "size_bytes": 3914522,
+      "sha256": "9dd46e005052a2e4979df805a25e235df20885a9652562e26500796d3340cb1c",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 917,
+      "sha256": "44022ce308f1afccd4255a5f783c9a220fc0af8335d1b8d9ac7a0eddec06e2b3",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3770,
+      "sha256": "283863329af0e99217bdca8c424b61ad011f92fb59f6020274a924a44ff25ac0",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 748,
+      "sha256": "39e4b02f0e240d7c63aedfcd714bcbcef14bac1a68fe7074db8dfbc4a46f8624",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 126190,
+      "sha256": "a245f06c4d2e54c58c303d235f4276282f0bb5f8691f80e181098df6d791972c",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2867,
+      "sha256": "db3c6169efae8e24873b994b643290ccc4ff2026e0baf257d39e1f77f8249566",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Alejandro916_Dickinson688_13b1dad3-c525-bb27-aa87-6024e1eb0f69.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    },
+    {
+      "code": "103697008",
+      "description": "Patient referral for dental care (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "351109",
+      "description": "budesonide 0.25 MG/ML Inhalation Suspension"
+    },
+    {
+      "code": "351136",
+      "description": "albuterol 0.417 MG/ML Inhalation Solution"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "73595000",
+      "description": "Stress (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "66383009",
+      "description": "Gingivitis (disorder)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

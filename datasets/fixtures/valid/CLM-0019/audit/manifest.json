@@ -1,0 +1,187 @@
+{
+  "case_id": "CLM-0019",
+  "claimshield_id": "CLM-0019",
+  "generated_at": "2026-06-18T19:32:57.703224+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+  "encounter_id": "81179082-1cf7-5a67-687a-7e889bfb3a14",
+  "claim_id": "81179082-1cf7-5a67-4154-36618f97f0d1",
+  "provider_id": "9d03bf26-a673-3010-8bf1-ec2df8b33397",
+  "organization_id": "d6c165ec-d9ca-35a5-9bc8-2061cbfb83a2",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "81179082-1cf7-5a67-4154-36618f97f0d1",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1567.00",
+    "amount_covered": "1313.26",
+    "amount_requested": "1313.26",
+    "patient_share": "253.74"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 5052536,
+      "sha256": "5eca9c90e6b0c6314332cb31e22a421402b015f5e20eb726d059a8dc103405f8",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 80573,
+      "sha256": "f7a65b7ca9620d8cb5e39b04a9717fd8eed2f78ec4162e8ad33a2cba0a6b93b7",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1093,
+      "sha256": "65962c1e22c76e9cc399bf60bc105242af80b498c3d04d8e89d3c0d6d3cf0333",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2793,
+      "sha256": "2eb3a344c24c20aa523fda56d719b04edcb09cf10501feb18e689348b58c20f5",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3308,
+      "sha256": "ddb8c878f9562bf8010d82f71ebb95158b3809b5a35b11174308d963d74d5bf4",
+      "required": true
+    },
+    {
+      "filename": "fhir/Ed239_Hirthe744_81179082-1cf7-5a67-18da-a8c6e3cd8c29.json",
+      "size_bytes": 5052536,
+      "sha256": "5eca9c90e6b0c6314332cb31e22a421402b015f5e20eb726d059a8dc103405f8",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 907,
+      "sha256": "2f780740d1290033c6c48025b01d9dfef3a98f4a1684c99e42d95c0bd43050df",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 4018,
+      "sha256": "1570c1558d38361cb3e2a06162e9992d366fccb1b8d399b28ebb2c9af5f22026",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 739,
+      "sha256": "db1103745bceb0694ce179a1f9d3edeb04ff1719d7c820662cf522985acec9f6",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 115120,
+      "sha256": "ed2ad5dd69bb1858618a3ff4267d68cd4019d1af65a6b6291ee22d00c417005a",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 3322,
+      "sha256": "e664a7add9fcd55931154c345703af44ad22503a3351df3959a573de72a202c8",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Ed239_Hirthe744_81179082-1cf7-5a67-18da-a8c6e3cd8c29.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "762993000",
+      "description": "Assessment using Morse Fall Scale (procedure)"
+    },
+    {
+      "code": "428211000124100",
+      "description": "Assessment of substance use (procedure)"
+    },
+    {
+      "code": "763302001",
+      "description": "Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)"
+    },
+    {
+      "code": "103697008",
+      "description": "Patient referral for dental care (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "993770",
+      "description": "Acetaminophen 300 MG / Codeine Phosphate 15 MG Oral Tablet"
+    },
+    {
+      "code": "1049504",
+      "description": "Abuse-Deterrent 12 HR Oxycodone Hydrochloride 10 MG Extended Release Oral Tablet [Oxycontin]"
+    },
+    {
+      "code": "245134",
+      "description": "72 HR Fentanyl 0.025 MG/HR Transdermal System"
+    },
+    {
+      "code": "1860491",
+      "description": "12 HR Hydrocodone Bitartrate 10 MG Extended Release Oral Capsule"
+    },
+    {
+      "code": "904419",
+      "description": "Alendronic acid 10 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "423315002",
+      "description": "Limited social contact (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "66383009",
+      "description": "Gingivitis (disorder)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

@@ -1,0 +1,171 @@
+{
+  "case_id": "CLM-0036",
+  "claimshield_id": "CLM-0036",
+  "generated_at": "2026-06-18T19:32:58.397380+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "0f2662b4-422d-4d6a-aa92-a98e9736d772",
+  "encounter_id": "0f2662b4-422d-4d6a-6514-0fc40ac36856",
+  "claim_id": "0f2662b4-422d-4d6a-6948-656a7f35e256",
+  "provider_id": "58cd6100-399e-3392-aa18-102ae55442ec",
+  "organization_id": "643eac8e-1620-3b6a-b9f3-664b003d22cd",
+  "payer_id": "a735bf55-83e9-331a-899d-a82a60b9f60c",
+  "source_claim_id": "0f2662b4-422d-4d6a-6948-656a7f35e256",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "1280.50",
+    "amount_covered": "961.62",
+    "amount_requested": "961.62",
+    "patient_share": "318.88"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3539126,
+      "sha256": "a3331ab16587757b92e8f055b37fc39558523c0d4b60e81b18a4919448a051d2",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 83985,
+      "sha256": "f7739c57b8380dfc24277bd87116b4cbd7f20435ef0297e884d6fc1538ef35c5",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1093,
+      "sha256": "c11e6b66d3909e6576d44a9504cd9b2982dce7606ad400fc86d38693565d2353",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2811,
+      "sha256": "7d8b4cc2b6c9b99d70cc4be4dced1d394742bde81d206dfac84527b5c3c6ec61",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3243,
+      "sha256": "e4c7ce57d83ee12a0c844b19b1b146f37ad5ae0eb5f265469bd88fd8c3a9ae79",
+      "required": true
+    },
+    {
+      "filename": "fhir/Royal919_Upton904_0f2662b4-422d-4d6a-aa92-a98e9736d772.json",
+      "size_bytes": 3539126,
+      "sha256": "a3331ab16587757b92e8f055b37fc39558523c0d4b60e81b18a4919448a051d2",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 914,
+      "sha256": "2f11377a00cb0364cdeec971eae11cef4405e0a61978a5820f2ff9b4ad88b669",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3564,
+      "sha256": "a1859ce88ce8d764557e50775fe9a22c9c781f362a63968cebddd9b1a20a81fe",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 748,
+      "sha256": "91d5f348757539f18daf3dc7452d3ccf5ea7f98911a9783fccf7afe536d3e40a",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 112109,
+      "sha256": "ddbd9bd06cd3ca1e396dd7faed30eb36f0b24dfb5086486b8cd3d2c976b9bd06",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2782,
+      "sha256": "9b1c878faebcfe02c48e1a29cd5f5b2cfff974cdc057b2c96019843d7d9a498c",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Royal919_Upton904_0f2662b4-422d-4d6a-aa92-a98e9736d772.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "430193006",
+      "description": "Medication reconciliation (procedure)"
+    },
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "762993000",
+      "description": "Assessment using Morse Fall Scale (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "904419",
+      "description": "Alendronic acid 10 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "73595000",
+      "description": "Stress (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

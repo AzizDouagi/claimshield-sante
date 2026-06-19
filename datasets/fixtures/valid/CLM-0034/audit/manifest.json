@@ -1,0 +1,168 @@
+{
+  "case_id": "CLM-0034",
+  "claimshield_id": "CLM-0034",
+  "generated_at": "2026-06-18T19:32:58.323766+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "4a40fda3-3692-da0a-4fce-c49c554059a8",
+  "encounter_id": "4a40fda3-3692-da0a-1650-f31ff601245c",
+  "claim_id": "4a40fda3-3692-da0a-1bb0-1facfde82ce1",
+  "provider_id": "2d72e8ce-d288-37a5-ad05-7c9036e85ee6",
+  "organization_id": "b5e6f1bd-c744-3556-9775-5ff8399eea33",
+  "payer_id": "d31fccc3-1767-390d-966a-22a5156f4219",
+  "source_claim_id": "4a40fda3-3692-da0a-1bb0-1facfde82ce1",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "704.20",
+    "amount_covered": "704.20",
+    "amount_requested": "704.20",
+    "patient_share": "0.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 3970147,
+      "sha256": "d0e6022d4b71fbe9a872c14e9140ead8dd5ccc65b04881447d3b886ac3884e48",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 78962,
+      "sha256": "fdf613f5b24ee01a02c2880f9d0e1d437f9977b395b88f39269a00e6fd6297c9",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1092,
+      "sha256": "845f6b5dc205c204517a8d6669ad08345f48270f2e5415942f4be73f8b840692",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2803,
+      "sha256": "99ae91a7a71dd9ef77d9f4a88c9486ba5abb62fe2e3401be60eb4ba1445bb33d",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3172,
+      "sha256": "ee1b2126c88a11782c445e9146e7be2ba40239190dc7845ac8087510d96f6b15",
+      "required": true
+    },
+    {
+      "filename": "fhir/Demetrius568_Waters156_4a40fda3-3692-da0a-4fce-c49c554059a8.json",
+      "size_bytes": 3970147,
+      "sha256": "d0e6022d4b71fbe9a872c14e9140ead8dd5ccc65b04881447d3b886ac3884e48",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 909,
+      "sha256": "5617cc1587a31faf229e390216e4f2f0b1af37c4ab5ac4420c206b75ea00e41a",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3466,
+      "sha256": "cdedd14b3451253d53c47d8b536772194fbdcff2528de72dde31da6fcee1150e",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 740,
+      "sha256": "9a4caac849d502f0680a34a4039fd9716e958662ea394ee565904bc31d80b1d8",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 134316,
+      "sha256": "39b3f6010c192c80c92d331f52ce9dbc37e481a902a56b0f6246bf098eb36da8",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 2828,
+      "sha256": "0d970b2de7a3db491dc9fe7ff37715387f7b2aec7c6641c685913fba04809f06",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Demetrius568_Waters156_4a40fda3-3692-da0a-4fce-c49c554059a8.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "860975",
+      "description": "24 HR Metformin hydrochloride 500 MG Extended Release Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "55822004",
+      "description": "Hyperlipidemia (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "73595000",
+      "description": "Stress (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

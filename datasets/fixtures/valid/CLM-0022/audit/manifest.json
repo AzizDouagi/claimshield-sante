@@ -1,0 +1,166 @@
+{
+  "case_id": "CLM-0022",
+  "claimshield_id": "CLM-0022",
+  "generated_at": "2026-06-18T19:32:57.815130+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "949e8034-faae-6ffa-e7ec-3afc5f58ab71",
+  "encounter_id": "949e8034-faae-6ffa-4dac-33fea2c5d34e",
+  "claim_id": "949e8034-faae-6ffa-85c4-680015a8cbe6",
+  "provider_id": "46e199e8-8ede-31a1-9b84-e63bd7675908",
+  "organization_id": "071a898d-3535-39fd-bf61-d33301aacd04",
+  "payer_id": "e03e23c9-4df1-3eb6-a62d-f70f02301496",
+  "source_claim_id": "949e8034-faae-6ffa-85c4-680015a8cbe6",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "704.20",
+    "amount_covered": "563.36",
+    "amount_requested": "563.36",
+    "patient_share": "140.84"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "archive/patient_fhir_bundle_full.json",
+      "size_bytes": 2757085,
+      "sha256": "72723a848172fe1e54f9360b4281449a57d0413e9a66172259199e3472bf2702",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 58396,
+      "sha256": "7ea05287889b8474bb05d958839d93b34f3cf13ac33a0b2d2469184786ff63c5",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1040,
+      "sha256": "5a199035eed3aa73e31da64602930c790aae897175521fd6ee6fb73a733bd46f",
+      "required": true
+    },
+    {
+      "filename": "claim_request.pdf",
+      "size_bytes": 2821,
+      "sha256": "268d9a7fc765e435717ad1f61100ae055febefe54a0d6a1038816c4f37d551b6",
+      "required": true
+    },
+    {
+      "filename": "encounter_summary.pdf",
+      "size_bytes": 3152,
+      "sha256": "13a83f1d0fe0bb26c76712bb2c61a000f8240375f4f168d74e6f32a200b4d647",
+      "required": true
+    },
+    {
+      "filename": "fhir/Eleanore671_Pok428_Koch169_949e8034-faae-6ffa-e7ec-3afc5f58ab71.json",
+      "size_bytes": 2757085,
+      "sha256": "72723a848172fe1e54f9360b4281449a57d0413e9a66172259199e3472bf2702",
+      "required": false
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 912,
+      "sha256": "efdc8eed0298612d57f215ece3eb274a96d9ffe60bf9950bc0d77bdd221c4e68",
+      "required": false
+    },
+    {
+      "filename": "medical_invoice.pdf",
+      "size_bytes": 3628,
+      "sha256": "e4f6010082ce4e167db4333ded3ffa8e814db9881ee1b2878287ae224fc7f3c2",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 759,
+      "sha256": "ac8aef58eecb8d3242bbf422b7ee83ba2f55612a9952b74adbc898f0eaf93d57",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 108897,
+      "sha256": "2d3f61a20f1caabf5b8d731493bc68d5a4b4ed4a821b4ffdcce9028c16d93e9d",
+      "required": false
+    },
+    {
+      "filename": "prescription.pdf",
+      "size_bytes": 3017,
+      "sha256": "473538db808fbf6a23301386b07a804a50b5ae54c935e7cd67a46a67004b2bde",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Eleanore671_Pok428_Koch169_949e8034-faae-6ffa-e7ec-3afc5f58ab71.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "710824005",
+      "description": "Assessment of health and social care needs (procedure)"
+    },
+    {
+      "code": "710841007",
+      "description": "Assessment of anxiety (procedure)"
+    },
+    {
+      "code": "866148006",
+      "description": "Screening for domestic abuse (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    },
+    {
+      "code": "171207006",
+      "description": "Depression screening (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "1049625",
+      "description": "Acetaminophen 325 MG / Oxycodone Hydrochloride 10 MG Oral Tablet [Percocet]"
+    },
+    {
+      "code": "209387",
+      "description": "Acetaminophen 325 MG Oral Tablet [Tylenol]"
+    },
+    {
+      "code": "835603",
+      "description": "tramadol hydrochloride 50 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "160903007",
+      "description": "Full-time employment (finding)",
+      "source": "conditions.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

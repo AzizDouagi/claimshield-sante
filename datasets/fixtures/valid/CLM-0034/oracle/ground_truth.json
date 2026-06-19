@@ -1,0 +1,30 @@
+{
+  "case_id": "CLM-0034",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "human_review_required": true,
+  "expected_anomalies": [],
+  "required_documents": {
+    "claim_request.pdf": true,
+    "medical_invoice.pdf": true,
+    "prescription.pdf": true,
+    "encounter_summary.pdf": true,
+    "patient_fhir_bundle.json": false
+  },
+  "expected_extraction": {
+    "patient_name": "Mr. Demetrius568 Waters156",
+    "patient_id": "4a40fda3-3692-da0a-4fce-c49c554059a8",
+    "payer_name": "UnitedHealthcare",
+    "service_date": "20/06/2017",
+    "claim_reference": "CLM-0034",
+    "invoice_number": "INV-CLM-0034",
+    "prescription_number": "RX-CLM-0034",
+    "procedure_count": 5,
+    "medication_count": 1,
+    "total_billed": "704.20",
+    "amount_requested": "704.20",
+    "patient_share": "0.00",
+    "currency": "USD"
+  }
+}
