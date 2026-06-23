@@ -1,0 +1,437 @@
+{
+  "case_id": "CLM-0032",
+  "claimshield_id": "CLM-0032",
+  "generated_at": "2026-06-18T19:32:58.237507+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+  "encounter_id": "f16fd97d-f949-5651-51d7-ee7b5fa908cb",
+  "claim_id": "f16fd97d-f949-5651-3fac-a497c35cde96",
+  "provider_id": "239014f1-08f2-39a1-b218-c0561ebb3af3",
+  "organization_id": "46375470-1e20-3ddc-8dc5-010ba53826b6",
+  "payer_id": "df166300-5a78-3502-a46a-832842197811",
+  "source_claim_id": "f16fd97d-f949-5651-3fac-a497c35cde96",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "17092.06",
+    "amount_covered": "17092.06",
+    "amount_requested": "17092.06",
+    "patient_share": "0.00"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "fhir/Columbus656_Kutch271_f16fd97d-f949-5651-406d-b46440616cea.json",
+      "size_bytes": 5126537,
+      "sha256": "1dd48cefe862d4cd43e5b32ade11c6a5ff3619e6de8cca60e8066287406824b7",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 374368,
+      "sha256": "e517738cdf8587bb35f7b5518829330cc78c2eea3b1a69f332b265cef495815f",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1125,
+      "sha256": "f3aaca622c870e1f21fdce56cf27ea89f22960fbb5bbfa5c4618d354179176a7",
+      "required": true
+    },
+    {
+      "filename": "demande_remboursement_CLM-0032.pdf",
+      "size_bytes": 2884,
+      "sha256": "7f15edc02a6e792cb730623621b6f1b30b31a8843c493d946b64732ca1976e85",
+      "required": true
+    },
+    {
+      "filename": "compte_rendu_CLM-0032.pdf",
+      "size_bytes": 4039,
+      "sha256": "e126a0274c8a17e13a458a6fe0e1ec56066882711ae881200a4bd48ddf722a27",
+      "required": true
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 4133,
+      "sha256": "5384f350c1516c3db2cd20b4bc6e69a00fff7f11af59d9abb40c59010a3bd123",
+      "required": false
+    },
+    {
+      "filename": "facture_CLM-0032.pdf",
+      "size_bytes": 8008,
+      "sha256": "daa052e4d7d147abf4475e1e57f2313c50a2f79a66efef77dc5311e5ca1ce657",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 745,
+      "sha256": "4fbc26f0e334a8f8cb4aece2d23ee40402f251059f099e299c6dd8717103273a",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 1476652,
+      "sha256": "3efb7e27a00d578faf006779c00a2ae19b2742a4a397bee5e34b0b7841f49033",
+      "required": false
+    },
+    {
+      "filename": "ordonnance_CLM-0032.pdf",
+      "size_bytes": 9632,
+      "sha256": "837baaf47fa66d46dfff334f1bacc66c221209fa4d15d2680e091ad28227767d",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "observations.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Columbus656_Kutch271_f16fd97d-f949-5651-406d-b46440616cea.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "399208008",
+      "description": "Plain X-ray of chest (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    },
+    {
+      "code": "371908008",
+      "description": "Oxygen administration by mask (procedure)"
+    },
+    {
+      "code": "431182000",
+      "description": "Placing subject in prone position (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854235",
+      "description": "0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854252",
+      "description": "1 ML Enoxaparin sodium 150 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854252",
+      "description": "1 ML Enoxaparin sodium 150 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854252",
+      "description": "1 ML Enoxaparin sodium 150 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    },
+    {
+      "code": "854252",
+      "description": "1 ML Enoxaparin sodium 150 MG/ML Prefilled Syringe"
+    },
+    {
+      "code": "2123111",
+      "description": "NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler"
+    },
+    {
+      "code": "198440",
+      "description": "Acetaminophen 500 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "233604007",
+      "description": "Pneumonia (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "389087006",
+      "description": "Hypoxemia (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "271825005",
+      "description": "Respiratory distress (finding)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "770349000",
+      "description": "Sepsis caused by virus (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "132281000119108",
+      "description": "Acute deep venous thrombosis (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "840539006",
+      "description": "Disease caused by severe acute respiratory syndrome coronavirus 2 (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

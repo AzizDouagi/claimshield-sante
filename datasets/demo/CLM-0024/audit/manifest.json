@@ -1,0 +1,184 @@
+{
+  "case_id": "CLM-0024",
+  "claimshield_id": "CLM-0024",
+  "generated_at": "2026-06-18T19:32:57.893445+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+  "encounter_id": "5f029b66-bf99-4177-dff4-271c6c38f1b4",
+  "claim_id": "5f029b66-bf99-4177-9b14-5639cd6a2855",
+  "provider_id": "ec28e435-41b9-314b-aa20-b9952a37a2c7",
+  "organization_id": "ea8d287f-b3a9-3800-8798-788e334ee406",
+  "payer_id": "df166300-5a78-3502-a46a-832842197811",
+  "source_claim_id": "5f029b66-bf99-4177-9b14-5639cd6a2855",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "5262.35",
+    "amount_covered": "5192.29",
+    "amount_requested": "5192.29",
+    "patient_share": "70.06"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "fhir/Felice694_Balistreri607_5f029b66-bf99-4177-0c82-80efbe2706dc.json",
+      "size_bytes": 3410019,
+      "sha256": "1c78597cd8e85831c2fe0466d5f1d8332e7f26786ca23652a5a74cf014a00013",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 62593,
+      "sha256": "e1579aca7812742933049fe35e31e4403fcd68400ac605cf8c44b89f892bff56",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1082,
+      "sha256": "e6068d4eab60ec563aceaa7fe12fb046680786249a952d9c169524f99393d626",
+      "required": true
+    },
+    {
+      "filename": "demande_remboursement_CLM-0024.pdf",
+      "size_bytes": 2802,
+      "sha256": "9f3cf22d8fbdf3ebb0edc08e8290acf4a87bdeeb3947231b2593f6bce61aa02e",
+      "required": true
+    },
+    {
+      "filename": "compte_rendu_CLM-0024.pdf",
+      "size_bytes": 3076,
+      "sha256": "73eae7bd8479e29eeb53c1edd513c49780a1344c9d65603f50e88fac7ea4c423",
+      "required": true
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 3864,
+      "sha256": "9d5b47d98b67374399ceb75838538b3dd5b8e5562005d7ca13b8137f1f8fc728",
+      "required": false
+    },
+    {
+      "filename": "facture_CLM-0024.pdf",
+      "size_bytes": 3970,
+      "sha256": "6a6988c92799a75599def48ac61cb5329843dbb2eb68e6ae4bc83eef74969178",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 742,
+      "sha256": "fcded94b3606033100d9f8a103de2dc515385cd020744ed2c0635b9ada8704a2",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 45486,
+      "sha256": "c1045f3c82d856b1e39eee5fa48110a36800b0bbe4ecfdb8cd2255343179a333",
+      "required": false
+    },
+    {
+      "filename": "ordonnance_CLM-0024.pdf",
+      "size_bytes": 2785,
+      "sha256": "08c8bddc3302065b26b52170f1887bc8c4686562f429eee32f3a1ab7d2cd8858",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Felice694_Balistreri607_5f029b66-bf99-4177-0c82-80efbe2706dc.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "34043003",
+      "description": "Dental consultation and report (procedure)"
+    },
+    {
+      "code": "225362009",
+      "description": "Dental care (regime/therapy)"
+    },
+    {
+      "code": "1260009003",
+      "description": "Removal of supragingival plaque and calculus from all teeth using dental instrument (procedure)"
+    },
+    {
+      "code": "1260010008",
+      "description": "Removal of subgingival plaque and calculus from all teeth using dental instrument (procedure)"
+    },
+    {
+      "code": "241046008",
+      "description": "Dental plain X-ray bitewing (procedure)"
+    },
+    {
+      "code": "274788003",
+      "description": "Examination of gingivae (procedure)"
+    },
+    {
+      "code": "81733005",
+      "description": "Dental surgical procedure (procedure)"
+    },
+    {
+      "code": "3802001",
+      "description": "Dental application of desensitizing medicament (procedure)"
+    },
+    {
+      "code": "64544008",
+      "description": "Gingivectomy or gingivoplasty per tooth (procedure)"
+    },
+    {
+      "code": "456191000124101",
+      "description": "Postoperative care for dental procedure (regime/therapy)"
+    },
+    {
+      "code": "68071007",
+      "description": "Dental fluoride treatment (procedure)"
+    },
+    {
+      "code": "243085009",
+      "description": "Oral health education (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "1535362",
+      "description": "sodium fluoride 0.0272 MG/MG Oral Gel"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "18718003",
+      "description": "Gingival disease (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "103697008",
+      "description": "Patient referral for dental care (procedure)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

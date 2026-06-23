@@ -1,0 +1,10 @@
+{
+  "case_id": "CLM-0005",
+  "decision": "BLOCK",
+  "prompt_injection_detected": true,
+  "blocked_fields": ["patient_name"],
+  "reasons": [
+    "Champ 'patient_name' contient une directive d'injection (score > 0.9).",
+    "Décision Security Gate : BLOCK — pipeline interrompu."
+  ]
+}

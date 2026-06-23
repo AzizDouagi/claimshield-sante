@@ -1,0 +1,116 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "CLM-0019",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "REJECT",
+  "recommendation_reasons": [
+    "Document obligatoire manquant : facture_CLM-0019.pdf absent du dossier.",
+    "Règle métier : tout dossier incomplet est rejeté immédiatement en intake.",
+    "L'assuré doit soumettre à nouveau avec la facture complète."
+  ],
+  "human_review_required": false,
+  "human_review_reasons": [],
+  "expected_anomalies": [
+    "MISSING_DOCUMENT:facture_CLM-0019.pdf"
+  ],
+  "required_documents": [
+    "compte_rendu_CLM-0019.pdf",
+    "demande_remboursement_CLM-0019.pdf",
+    "facture_CLM-0019.pdf",
+    "ordonnance_CLM-0019.pdf"
+  ],
+  "optional_documents": [
+    "claim.json",
+    "patient.json",
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [
+    "facture_CLM-0019.pdf"
+  ],
+  "expected_extraction": {
+    "patient_name": "Mr. Ed239 Steve819 Hirthe744",
+    "patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+    "payer_name": "Medicare",
+    "service_date": "2023-08-08",
+    "claim_reference": "CLM-0019",
+    "invoice_number": "INV-CLM-0019",
+    "prescription_number": "RX-CLM-0019",
+    "procedure_count": 7,
+    "medication_count": 5,
+    "total_billed": "1567.00",
+    "amount_requested": "1313.26",
+    "patient_share": "253.74",
+    "currency": "USD"
+  },
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Aucune injection détectée."
+    ]
+  },
+  "expected_privacy": {
+    "status": "NOT_EVALUATED",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "expected_identity": {
+    "status": "NOT_EVALUATED",
+    "patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+    "patient_name": "Mr. Ed239 Steve819 Hirthe744",
+    "source_patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+    "claim_patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+    "encounter_patient_id": "81179082-1cf7-5a67-18da-a8c6e3cd8c29",
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "expected_coverage": {
+    "status": "NOT_EVALUATED",
+    "payer_name": "Medicare",
+    "source_payer_name": "Medicare",
+    "coverage_rate": null,
+    "amount_requested": "1313.26",
+    "patient_share": "253.74",
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "expected_fhir": {
+    "status": "NOT_EVALUATED",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "NOT_EVALUATED",
+    "procedure_count": 7,
+    "medication_count": 5,
+    "prescription_required": true,
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "expected_fraud": {
+    "status": "NOT_EVALUATED",
+    "duplicate_invoice": null,
+    "expected_anomalies": [],
+    "reasons": [
+      "Non évalué : dossier incomplet, rejeté en intake."
+    ]
+  },
+  "scenario_id": "SC-04",
+  "scenario_description": "Document obligatoire absent : la facture médicale est manquante au moment du dépôt. Le Claim Intake Agent rejette le dossier sans poursuivre le traitement.",
+  "scenario_tags": [
+    "REJECT",
+    "missing-document",
+    "intake"
+  ]
+}

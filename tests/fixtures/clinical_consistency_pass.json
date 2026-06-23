@@ -1,0 +1,10 @@
+{
+  "case_id": "CLM-0001",
+  "status": "PASS",
+  "procedure_count": 8,
+  "medication_count": 1,
+  "prescription_required": true,
+  "signals": [],
+  "confidence": 1.0,
+  "reasons": ["8 actes et 1 médicament, cohérence clinique conforme."]
+}

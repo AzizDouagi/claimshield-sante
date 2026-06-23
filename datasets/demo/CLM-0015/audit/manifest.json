@@ -1,0 +1,145 @@
+{
+  "case_id": "CLM-0015",
+  "claimshield_id": "CLM-0015",
+  "generated_at": "2026-06-18T19:32:57.520228+00:00",
+  "synthetic": true,
+  "dataset": {
+    "source_generator": "Synthea",
+    "source_software_license": "Apache-2.0",
+    "contains_real_personal_data": false,
+    "purpose": "ClaimShield Sante MVP testing"
+  },
+  "patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+  "encounter_id": "4316906c-b4ec-d8ac-ba17-772b5b3dda50",
+  "claim_id": "4316906c-b4ec-d8ac-2a3b-753cce26ed29",
+  "provider_id": "3bd00325-a6b3-3f2d-9912-be08cb01c448",
+  "organization_id": "b3ada130-6443-3a8e-98c7-4ec127a2b0c4",
+  "payer_id": "b046940f-1664-3047-bca7-dfa76be352a4",
+  "source_claim_id": "4316906c-b4ec-d8ac-2a3b-753cce26ed29",
+  "financial_summary": {
+    "currency": "USD",
+    "total_billed": "577.58",
+    "amount_covered": "462.06",
+    "amount_requested": "462.06",
+    "patient_share": "115.52"
+  },
+  "documents": [
+    "claim_request.pdf",
+    "medical_invoice.pdf",
+    "prescription.pdf",
+    "encounter_summary.pdf"
+  ],
+  "files": [
+    {
+      "filename": "fhir/Rickie717_Will178_4316906c-b4ec-d8ac-c837-39487380f923.json",
+      "size_bytes": 3458682,
+      "sha256": "eb2f800a1a338a8f2a8380c211dfc5c3b2736570807d1db27b35c0c0172e6854",
+      "required": false
+    },
+    {
+      "filename": "case_data.json",
+      "size_bytes": 36225,
+      "sha256": "d9c10f59ad4f23ca3b971a32d75286cb4a5e57e3618e083f07b18577069f97ad",
+      "required": true
+    },
+    {
+      "filename": "claim.json",
+      "size_bytes": 1092,
+      "sha256": "3ca14dba3401b970487cbb75e2ac7118aeb317901cc780c440366ab1ab4a1c25",
+      "required": true
+    },
+    {
+      "filename": "demande_remboursement_CLM-0015.pdf",
+      "size_bytes": 2796,
+      "sha256": "ea65611c4c02144de8462cce64ee978f8c12dbb5612b78420b08ca20029ef3e1",
+      "required": true
+    },
+    {
+      "filename": "compte_rendu_CLM-0015.pdf",
+      "size_bytes": 2708,
+      "sha256": "223c2830cfbd3ff026f9f0f172118f73632fe4d6336cfaf984b57213a5391fcc",
+      "required": true
+    },
+    {
+      "filename": "ground_truth.json",
+      "size_bytes": 3823,
+      "sha256": "f5d8ef495bcae3d459ddd755b46f9d792193fc6eb2b9e339bcccb25b04a99778",
+      "required": false
+    },
+    {
+      "filename": "facture_CLM-0015.pdf",
+      "size_bytes": 3184,
+      "sha256": "24e826e6207545d1ab69790fbb58410da61ffd9027a7f8e5ac5c9ef0b3f8f3d8",
+      "required": true
+    },
+    {
+      "filename": "patient.json",
+      "size_bytes": 736,
+      "sha256": "8f21aefa437bcf72465dfb11acaf51cbfef234ff2003e0f8003d526efb00f74f",
+      "required": true
+    },
+    {
+      "filename": "patient_fhir_bundle.json",
+      "size_bytes": 19331,
+      "sha256": "9a284713838437e5a09519873dbb9d5aa398477881c2f93b4a42b0279fbf8a32",
+      "required": false
+    },
+    {
+      "filename": "ordonnance_CLM-0015.pdf",
+      "size_bytes": 2768,
+      "sha256": "133d5431895c213a6bd5bea2f761283c8d870edfa959c0929ee29c83e53642a3",
+      "required": true
+    }
+  ],
+  "synthea_sources_used": [
+    "claims.csv",
+    "claims_transactions.csv",
+    "conditions.csv",
+    "encounters.csv",
+    "medications.csv",
+    "organizations.csv",
+    "patients.csv",
+    "payer_transitions.csv",
+    "payers.csv",
+    "procedures.csv",
+    "providers.csv"
+  ],
+  "fhir_files": [
+    "archive/patient_fhir_bundle_full.json",
+    "fhir/Rickie717_Will178_4316906c-b4ec-d8ac-c837-39487380f923.json",
+    "patient_fhir_bundle.json"
+  ],
+  "procedures": [
+    {
+      "code": "1290407002",
+      "description": "Plain X-ray of knee region (procedure)"
+    }
+  ],
+  "medications": [
+    {
+      "code": "313782",
+      "description": "Acetaminophen 325 MG Oral Tablet"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "125601008",
+      "description": "Injury of knee (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "444470001",
+      "description": "Injury of anterior cruciate ligament (disorder)",
+      "source": "conditions.csv"
+    },
+    {
+      "code": "125601008",
+      "description": "Injury of knee (disorder)",
+      "source": "encounters.csv"
+    }
+  ],
+  "warnings": [],
+  "missing_info": [],
+  "validation_status": "valid",
+  "validation_errors": []
+}

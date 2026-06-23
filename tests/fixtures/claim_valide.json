@@ -1,0 +1,40 @@
+{
+  "case_id": "CLM-0001",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "patient": {
+    "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "patient_name": "Mrs. Tresa661 Taunya970 Sawayn19",
+    "birth_date": null,
+    "gender": null
+  },
+  "coverage": {
+    "payer_name": "Cigna Health",
+    "coverage_rate": "0.80",
+    "policy_active": true,
+    "policy_start": null,
+    "policy_end": null
+  },
+  "extracted": {
+    "patient_name": "Mrs. Tresa661 Taunya970 Sawayn19",
+    "patient_id": "c2bdae5f-4f81-abc3-c9ae-3f60d73d3cfc",
+    "payer_name": "Cigna Health",
+    "service_date": "2026-06-03",
+    "claim_reference": "CLM-0001",
+    "invoice_number": "INV-CLM-0001",
+    "prescription_number": "RX-CLM-0001",
+    "procedure_count": 8,
+    "medication_count": 1,
+    "total_billed": "3666.69",
+    "amount_requested": "2933.35",
+    "patient_share": "733.34",
+    "currency": "USD"
+  },
+  "rules": {
+    "coverage_rate": "0.80",
+    "authorization_required": true,
+    "authorization_status": "approved",
+    "duplicate_invoice": false,
+    "prompt_injection_detected": false
+  }
+}

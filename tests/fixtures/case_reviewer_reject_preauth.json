@@ -1,0 +1,15 @@
+{
+  "case_id": "CLM-0015",
+  "recommendation": "REJECT",
+  "justification": [
+    "Pré-autorisation requise pour cet acte (chirurgie programmée).",
+    "Statut d'autorisation : pending au moment du dépôt.",
+    "Règle métier : tout acte soumis à pré-autorisation sans accord préalable → REJECT."
+  ],
+  "disagreements": [],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "Pré-autorisation requise mais non obtenue avant la prestation.",
+    "L'assureur Anthem doit statuer sur la prise en charge a posteriori."
+  ]
+}

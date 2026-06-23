@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "CLM-0024",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "REJECT",
+  "recommendation_reasons": [
+    "Doublon de facture confirmé par comparaison SHA-256 en base.",
+    "Règle anti-fraude : toute facture déjà remboursée → REJECT immédiat.",
+    "Dossier transmis à la cellule fraude pour investigation."
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "Doublon de facture détecté : possible erreur de soumission ou tentative de fraude.",
+    "Un analyste fraude doit confirmer avant archivage."
+  ],
+  "expected_anomalies": [
+    "DUPLICATE_INVOICE:INV-CLM-0024"
+  ],
+  "required_documents": [
+    "compte_rendu_CLM-0024.pdf",
+    "demande_remboursement_CLM-0024.pdf",
+    "facture_CLM-0024.pdf",
+    "ordonnance_CLM-0024.pdf"
+  ],
+  "optional_documents": [
+    "claim.json",
+    "patient.json",
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
+  "expected_extraction": {
+    "patient_name": "Ms. Felice694 Melody728 Balistreri607",
+    "patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "payer_name": "Medicaid",
+    "service_date": "2025-03-02",
+    "claim_reference": "CLM-0024",
+    "invoice_number": "INV-CLM-0024",
+    "prescription_number": "RX-CLM-0024",
+    "procedure_count": 12,
+    "medication_count": 1,
+    "total_billed": "5262.35",
+    "amount_requested": "5192.29",
+    "patient_share": "70.06",
+    "currency": "USD"
+  },
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Aucune injection détectée."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "patient_name": "Ms. Felice694 Melody728 Balistreri607",
+    "source_patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "claim_patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "encounter_patient_id": "5f029b66-bf99-4177-0c82-80efbe2706dc",
+    "reasons": [
+      "Identité patient vérifiée, UUID cohérent."
+    ]
+  },
+  "expected_coverage": {
+    "status": "PASS",
+    "payer_name": "Medicaid",
+    "source_payer_name": "Medicaid",
+    "coverage_rate": null,
+    "amount_requested": "5192.29",
+    "patient_share": "70.06",
+    "reasons": [
+      "Couverture active, taux conforme."
+    ]
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "PASS",
+    "procedure_count": 12,
+    "medication_count": 1,
+    "prescription_required": true,
+    "reasons": [
+      "12 actes cohérents avec le diagnostic, chronologie valide."
+    ]
+  },
+  "expected_fraud": {
+    "status": "FAIL",
+    "duplicate_invoice": true,
+    "expected_anomalies": [],
+    "reasons": [
+      "Hash SHA-256 de INV-CLM-0024 déjà présent en base (soumission du 2023-04-10).",
+      "Montant 5 262,35 USD déjà remboursé à hauteur de 5 192,29 USD.",
+      "Fraude suspectée : re-soumission d'une facture déjà liquidée."
+    ],
+    "flags": [
+      "DUPLICATE_INVOICE"
+    ]
+  },
+  "scenario_id": "SC-05",
+  "scenario_description": "Doublon de facture détecté : la facture INV-CLM-0024 a déjà été soumise et remboursée (hash SHA-256 identique dans la base). Le Fraud Detection Agent signale le doublon → REJECT.",
+  "scenario_tags": [
+    "REJECT",
+    "fraud",
+    "duplicate-invoice"
+  ]
+}

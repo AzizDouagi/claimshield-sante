@@ -1,0 +1,15 @@
+{
+  "case_id": "CLM-0032",
+  "recommendation": "PENDING",
+  "justification": [
+    "Volume d'actes (29) et de médicaments (42) largement supérieur aux seuils d'alerte.",
+    "Règle clinique : dossier suspendu automatiquement si actes > 10 ou méds > 15.",
+    "Décision finale déléguée au médecin conseil."
+  ],
+  "disagreements": [],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "Volume d'actes (29) et médicaments (42) anormalement élevé pour ce type de consultation.",
+    "Un médecin conseil doit valider la cohérence clinique avant décision."
+  ]
+}

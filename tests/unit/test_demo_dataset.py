@@ -1,0 +1,246 @@
+"""Tests du jeu de données de démonstration — datasets/demo/.
+
+Valide :
+- présence des 6 dossiers et de leurs fichiers obligatoires
+- conformité des ground_truth.json aux schémas Pydantic
+- exactitude des hashes SHA-256 dans manifest.json
+- données exclusivement synthétiques (pas de données réelles)
+- unicité et cohérence des scénarios métier
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from schemas.domain import (
+    ClaimSubmission,
+    ExtractedData,
+    Recommendation,
+    SecurityDecision,
+    VerificationStatus,
+)
+from schemas.results import (
+    CaseReviewerResult,
+    ClinicalConsistencyResult,
+    FraudDetectionResult,
+    SecurityGateResult,
+)
+
+DEMO_DIR = Path(__file__).resolve().parents[2] / "datasets" / "demo"
+
+EXPECTED_CASES = ["CLM-0004", "CLM-0005", "CLM-0015", "CLM-0019", "CLM-0024", "CLM-0032"]
+EXPECTED_SCENARIOS = {"SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06"}
+EXPECTED_RECOMMENDATIONS = {
+    "CLM-0004": "APPROVE",
+    "CLM-0015": "REJECT",
+    "CLM-0005": "REJECT",
+    "CLM-0019": "REJECT",
+    "CLM-0024": "REJECT",
+    "CLM-0032": "PENDING",
+}
+
+
+def load_gt(case_id: str) -> dict:
+    return json.loads((DEMO_DIR / case_id / "oracle" / "ground_truth.json").read_text())
+
+
+def load_cd(case_id: str) -> dict:
+    return json.loads((DEMO_DIR / case_id / "oracle" / "case_data.json").read_text())
+
+
+def load_manifest(case_id: str) -> dict:
+    return json.loads((DEMO_DIR / case_id / "audit" / "manifest.json").read_text())
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def resolve(case_dir: Path, fname: str) -> Path | None:
+    for d in [case_dir / "input", case_dir / "oracle", case_dir / "audit"]:
+        p = d / fname
+        if p.exists():
+            return p
+    return None
+
+
+# ── Structure ─────────────────────────────────────────────────────────────────
+
+
+def test_six_dossiers_presents():
+    """datasets/demo/ contient exactement 6 dossiers CLM-*."""
+    cases = sorted(d.name for d in DEMO_DIR.iterdir() if d.is_dir() and d.name.startswith("CLM-"))
+    assert cases == EXPECTED_CASES
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_ground_truth_existe(case_id: str):
+    assert (DEMO_DIR / case_id / "oracle" / "ground_truth.json").exists()
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_manifest_existe(case_id: str):
+    assert (DEMO_DIR / case_id / "audit" / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_documents_requis_presents(case_id: str):
+    """Chaque fichier de required_documents est présent sauf ceux dans expected_missing_documents."""
+    gt = load_gt(case_id)
+    input_dir = DEMO_DIR / case_id / "input"
+    missing_ok = set(gt.get("expected_missing_documents", []))
+    for doc in gt.get("required_documents", []):
+        if doc in missing_ok:
+            assert not (input_dir / doc).exists(), f"{doc} devrait être absent (SC-04)"
+        else:
+            assert (input_dir / doc).exists(), f"{doc} manquant dans {case_id}/input/"
+
+
+# ── Scénarios métier ──────────────────────────────────────────────────────────
+
+
+def test_scenarios_ids_uniques():
+    """Les 6 scenario_id sont distincts et couvrent SC-01 à SC-06."""
+    ids = {load_gt(c)["scenario_id"] for c in EXPECTED_CASES}
+    assert ids == EXPECTED_SCENARIOS
+
+
+@pytest.mark.parametrize("case_id,expected_rec", EXPECTED_RECOMMENDATIONS.items())
+def test_recommandation_attendue(case_id: str, expected_rec: str):
+    gt = load_gt(case_id)
+    assert gt["expected_recommendation"] == expected_rec
+
+
+def test_sc03_securite_bloquee():
+    """SC-03 : Security Gate FAIL et prompt_injection_detected=True."""
+    gt = load_gt("CLM-0005")
+    assert gt["expected_security"]["status"] == "FAIL"
+    assert gt["expected_security"]["prompt_injection_detected"] is True
+
+
+def test_sc04_facture_absente():
+    """SC-04 : la facture est physiquement absente de input/."""
+    assert not (DEMO_DIR / "CLM-0019" / "input" / "facture_CLM-0019.pdf").exists()
+    gt = load_gt("CLM-0019")
+    assert "facture_CLM-0019.pdf" in gt["expected_missing_documents"]
+
+
+def test_sc05_doublon_facture():
+    """SC-05 : FraudDetection indique duplicate_invoice=True."""
+    gt = load_gt("CLM-0024")
+    assert gt["expected_fraud"]["duplicate_invoice"] is True
+    assert gt["expected_fraud"]["status"] == "FAIL"
+
+
+def test_sc06_incohérence_clinique():
+    """SC-06 : clinical_consistency NEEDS_REVIEW, human_review_required=True."""
+    gt = load_gt("CLM-0032")
+    assert gt["expected_clinical_consistency"]["status"] == "NEEDS_REVIEW"
+    assert gt["human_review_required"] is True
+    assert gt["expected_recommendation"] == "PENDING"
+
+
+# ── Données synthétiques ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_donnees_synthetiques(case_id: str):
+    gt = load_gt(case_id)
+    cd = load_cd(case_id)
+    assert gt["data_classification"] == "SYNTHETIC_TEST_DATA"
+    assert gt["contains_real_personal_data"] is False
+    assert cd["data_classification"] == "SYNTHETIC_TEST_DATA"
+    assert cd["contains_real_personal_data"] is False
+    assert cd["provenance"]["license"] == "Apache-2.0"
+
+
+# ── Hashes SHA-256 ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_hashes_corrects(case_id: str):
+    """Chaque hash SHA-256 du manifest correspond au fichier réel."""
+    case_dir = DEMO_DIR / case_id
+    manifest = load_manifest(case_id)
+    for entry in manifest["files"]:
+        p = resolve(case_dir, entry["filename"])
+        assert p is not None, f"{case_id}: fichier introuvable : {entry['filename']}"
+        assert sha256(p) == entry["sha256"], f"{case_id}: hash incorrect : {entry['filename']}"
+
+
+# ── Conformité Pydantic ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_claim_submission_valide(case_id: str):
+    gt = load_gt(case_id)
+    ext = gt["expected_extraction"]
+    ClaimSubmission(
+        case_id=gt["case_id"],
+        data_classification=gt["data_classification"],
+        extracted=ExtractedData(
+            patient_name=ext.get("patient_name"),
+            patient_id=ext.get("patient_id"),
+            payer_name=ext.get("payer_name"),
+            claim_reference=ext.get("claim_reference"),
+            procedure_count=ext.get("procedure_count"),
+            medication_count=ext.get("medication_count"),
+            total_billed=ext.get("total_billed"),
+            amount_requested=ext.get("amount_requested"),
+            patient_share=ext.get("patient_share"),
+        ),
+    )
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_security_gate_result_valide(case_id: str):
+    gt = load_gt(case_id)
+    es = gt["expected_security"]
+    decision = "BLOCK" if es.get("status") == "FAIL" else "ALLOW"
+    SecurityGateResult(
+        case_id=case_id,
+        decision=SecurityDecision(decision),
+        prompt_injection_detected=es.get("prompt_injection_detected"),
+        reasons=es.get("reasons", []),
+    )
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_fraud_detection_result_valide(case_id: str):
+    gt = load_gt(case_id)
+    ef = gt["expected_fraud"]
+    FraudDetectionResult(
+        case_id=case_id,
+        status=VerificationStatus(ef["status"]),
+        duplicate_invoice=ef.get("duplicate_invoice"),
+        reasons=ef.get("reasons", []),
+    )
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_clinical_consistency_result_valide(case_id: str):
+    gt = load_gt(case_id)
+    ecc = gt["expected_clinical_consistency"]
+    ClinicalConsistencyResult(
+        case_id=case_id,
+        status=VerificationStatus(ecc["status"]),
+        procedure_count=ecc.get("procedure_count"),
+        medication_count=ecc.get("medication_count"),
+        prescription_required=ecc.get("prescription_required"),
+        reasons=ecc.get("reasons", []),
+    )
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_CASES)
+def test_case_reviewer_result_valide(case_id: str):
+    gt = load_gt(case_id)
+    CaseReviewerResult(
+        case_id=case_id,
+        recommendation=Recommendation(gt["expected_recommendation"]),
+        justification=gt.get("recommendation_reasons", []),
+        human_review_required=gt.get("human_review_required", False),
+        human_review_reasons=gt.get("human_review_reasons", []),
+    )

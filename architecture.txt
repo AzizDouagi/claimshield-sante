@@ -1,0 +1,155 @@
+.
+├── agents
+│   ├── audit_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── case_reviewer_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── claim_intake_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── clinical_consistency_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── document_ocr_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── fhir_validator_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── fraud_detection_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── identity_coverage_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── medical_coding_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   ├── privacy_agent
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── README.md
+│   │   └── schemas.py
+│   └── security_gate_agent
+│       ├── __init__.py
+│       ├── agent.py
+│       ├── README.md
+│       └── schemas.py
+├── api
+├── app
+├── architecture.txt
+├── CLAUDE.md
+├── config
+├── database
+├── datasets
+│   └── fixtures
+│       ├── anomalous
+│       ├── backups
+│       │   └── CLM-0001_20260618_204331
+│       ├── metadata
+│       │   ├── generation_report.json
+│       │   ├── generation.log
+│       │   ├── import_report.json
+│       │   └── index.json
+│       └── valid
+│           ├── CLM-0001
+│           ├── CLM-0002
+│           ├── CLM-0003
+│           ├── CLM-0004
+│           ├── CLM-0005
+│           ├── CLM-0006
+│           ├── CLM-0007
+│           ├── CLM-0008
+│           ├── CLM-0009
+│           ├── CLM-0010
+│           ├── CLM-0011
+│           ├── CLM-0012
+│           ├── CLM-0013
+│           ├── CLM-0014
+│           ├── CLM-0015
+│           ├── CLM-0016
+│           ├── CLM-0017
+│           ├── CLM-0018
+│           ├── CLM-0019
+│           ├── CLM-0020
+│           ├── CLM-0021
+│           ├── CLM-0022
+│           ├── CLM-0023
+│           ├── CLM-0024
+│           ├── CLM-0025
+│           ├── CLM-0026
+│           ├── CLM-0027
+│           ├── CLM-0028
+│           ├── CLM-0029
+│           ├── CLM-0030
+│           ├── CLM-0031
+│           ├── CLM-0032
+│           ├── CLM-0033
+│           ├── CLM-0034
+│           ├── CLM-0035
+│           ├── CLM-0036
+│           └── CLM-0037
+├── docker-compose.yml
+├── docs
+│   ├── architecture.txt
+│   ├── data_policy.md
+│   ├── decision_matrix.md
+│   └── mvp_scope.md
+├── graph
+│   ├── __init__.py
+│   ├── checkpoints.py
+│   ├── edges.py
+│   ├── nodes.py
+│   └── workflow.py
+├── human_review
+├── logs
+├── mcp_servers
+├── orchestrator
+│   ├── __init__.py
+│   ├── orchestrator.py
+│   ├── policies.py
+│   └── routing.py
+├── prompts
+├── pyproject.toml
+├── README.md
+├── schemas
+├── scripts
+│   └── import_synthea_claimshield_cases.py
+├── security
+├── services
+├── state
+│   ├── __init__.py
+│   └── claim_state.py
+├── storage
+│   ├── inbox
+│   ├── processed
+│   ├── quarantine
+│   └── rejected
+├── tests
+└── tools
+    └── dataset_builder
+        ├── generate_case_documents.py
+        ├── inspect_claimshield_data.py
+        └── select_first_case.py
+
+81 directories, 72 files

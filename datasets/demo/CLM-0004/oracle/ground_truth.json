@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "CLM-0004",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "APPROVE",
+  "recommendation_reasons": [
+    "Tous les documents obligatoires sont présents.",
+    "Identité patient vérifiée (UUID cohérent sur toutes les pièces).",
+    "Couverture Anthem active, taux 80 %.",
+    "Montant demandé (5 972,17 USD) dans les seuils contractuels.",
+    "Aucune anomalie de sécurité, fraude ou cohérence clinique détectée."
+  ],
+  "human_review_required": false,
+  "human_review_reasons": [],
+  "expected_anomalies": [],
+  "required_documents": [
+    "compte_rendu_CLM-0004.pdf",
+    "demande_remboursement_CLM-0004.pdf",
+    "facture_CLM-0004.pdf",
+    "ordonnance_CLM-0004.pdf"
+  ],
+  "optional_documents": [
+    "claim.json",
+    "patient.json",
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
+  "expected_extraction": {
+    "patient_name": "Ms. Rhona164 Kimber624 Mertz280",
+    "patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "payer_name": "Anthem",
+    "service_date": "2023-06-06",
+    "claim_reference": "CLM-0004",
+    "invoice_number": "INV-CLM-0004",
+    "prescription_number": "RX-CLM-0004",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "total_billed": "8881.04",
+    "amount_requested": "5972.17",
+    "patient_share": "2908.87",
+    "currency": "USD"
+  },
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Aucune injection détectée, champs conformes."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "patient_name": "Ms. Rhona164 Kimber624 Mertz280",
+    "source_patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "claim_patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "encounter_patient_id": "349c3437-f11a-a381-f0de-316b9e5dbc75",
+    "reasons": [
+      "Identifiants repris depuis expected_extraction et case_data.json quand disponible."
+    ]
+  },
+  "expected_coverage": {
+    "status": "PASS",
+    "payer_name": "Anthem",
+    "source_payer_name": "Anthem",
+    "coverage_rate": null,
+    "amount_requested": "5972.17",
+    "patient_share": "2908.87",
+    "reasons": [
+      "Données reprises depuis expected_extraction, deterministic_rules et case_data.json quand disponibles."
+    ]
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "PASS",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "prescription_required": true,
+    "reasons": [
+      "Résultat déduit de la recommandation attendue, des anomalies attendues et des compteurs extraits."
+    ]
+  },
+  "expected_fraud": {
+    "status": "PASS",
+    "duplicate_invoice": false,
+    "expected_anomalies": [],
+    "reasons": [
+      "Aucun doublon détecté pour INV-CLM-0004."
+    ]
+  },
+  "scenario_id": "SC-01",
+  "scenario_description": "Approbation standard : dossier complet, identité vérifiée, couverture active (Anthem 80 %), montant dans les seuils, aucune anomalie.",
+  "scenario_tags": [
+    "APPROVE",
+    "happy-path"
+  ]
+}

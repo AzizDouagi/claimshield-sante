@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Annotated
 
 from pydantic import Field
 
 from schemas.domain import (
     DataClassification,
     ExtractedData,
+    IntakeStatus,
     Recommendation,
     SecurityDecision,
     StrictModel,
@@ -27,23 +29,61 @@ from schemas.domain import (
 # ── 1. Claim Intake Agent ─────────────────────────────────────────────────────
 
 
-class DocumentEntry(StrictModel):
-    filename: str
-    sha256: str = Field(..., min_length=64, max_length=64)
-    size_bytes: int = Field(..., gt=0)
-    mime_type: str
-    status: VerificationStatus
+class UploadedFileInfo(StrictModel):
+    """Fichier reçu avant toute validation (données annoncées par le déposant)."""
+
+    original_name: str
+    announced_size: int = Field(..., ge=0)
+    announced_mime_type: str
+    temp_id: str | None = None
+
+
+class InspectedFile(StrictModel):
+    """Résultat réel de l'inspection d'un fichier après lecture physique."""
+
+    original_name: str
+    storage_name: str
+    normalized_extension: str
+    detected_mime_type: str
+    actual_size: int = Field(..., ge=0)
+    sha256: Annotated[str, Field(min_length=64, max_length=64)] | None = None
+    status: IntakeStatus
+    block_reasons: list[str] = Field(default_factory=list)
+    relative_storage_path: str | None = None
+
+
+class StructuredError(StrictModel):
+    """Erreur structurée rattachée à un fichier ou à une règle de validation."""
+
+    code: str
+    message: str
+    field: str | None = None
+
+
+class ClaimManifest(StrictModel):
+    """Manifeste complet du dossier ingéré."""
+
+    claim_id: str
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    depositor_id: str | None = None
+    file_count: int = Field(..., ge=0)
+    total_size_bytes: int = Field(..., ge=0)
+    files: list[InspectedFile] = Field(default_factory=list)
+    status: IntakeStatus
+    alerts: list[str] = Field(default_factory=list)
+    schema_version: str = "1.0.0"
 
 
 class ClaimIntakeResult(StrictModel):
-    """Réception, inventaire et quarantaine du dossier."""
+    """Sortie finale de l'agent d'ingestion documentaire."""
 
-    case_id: str
-    status: VerificationStatus
-    ingestion_path: str
-    documents: list[DocumentEntry] = Field(default_factory=list)
-    missing_documents: list[str] = Field(default_factory=list)
+    claim_id: str
+    status: IntakeStatus
+    manifest: ClaimManifest
+    accepted_count: int = Field(..., ge=0)
+    quarantined_count: int = Field(..., ge=0)
     reasons: list[str] = Field(default_factory=list)
+    errors: list[StructuredError] = Field(default_factory=list)
 
 
 # ── 2. Security Gate Agent ────────────────────────────────────────────────────

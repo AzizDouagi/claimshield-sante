@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     claimshield_rejected_dir: Path = Field(
         _PROJECT_ROOT / "storage" / "rejected", alias="CLAIMSHIELD_REJECTED_DIR"
     )
+    claimshield_temp_dir: Path = Field(
+        _PROJECT_ROOT / "storage" / "temp", alias="CLAIMSHIELD_TEMP_DIR"
+    )
 
     # ── Base de données ───────────────────────────────────────────────────────
     database_url: str = Field(
@@ -77,9 +80,22 @@ class Settings(BaseSettings):
 
     # ── Sécurité fichiers ─────────────────────────────────────────────────────
     claimshield_max_file_size_mb: int = Field(20, alias="CLAIMSHIELD_MAX_FILE_SIZE_MB")
+    claimshield_max_folder_size_mb: int = Field(200, alias="CLAIMSHIELD_MAX_FOLDER_SIZE_MB")
+    claimshield_max_files_per_folder: int = Field(50, alias="CLAIMSHIELD_MAX_FILES_PER_FOLDER")
     claimshield_allowed_extensions: str = Field(
         "pdf,png,jpeg,jpg,json", alias="CLAIMSHIELD_ALLOWED_EXTENSIONS"
     )
+    claimshield_allowed_mime_types: str = Field(
+        "application/pdf,image/png,image/jpeg,application/json",
+        alias="CLAIMSHIELD_ALLOWED_MIME_TYPES",
+    )
+
+    @field_validator("claimshield_max_file_size_mb", "claimshield_max_folder_size_mb", "claimshield_max_files_per_folder")
+    @classmethod
+    def _doit_etre_positif(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} doit être strictement positif, reçu : {v}")
+        return v
 
     # ── Audit ─────────────────────────────────────────────────────────────────
     claimshield_audit_dir: Path = Field(
@@ -124,8 +140,33 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def temp_dir(self) -> Path:
+        return self.claimshield_temp_dir
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def max_file_size_bytes(self) -> int:
+        return self.claimshield_max_file_size_mb * 1024 * 1024
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def max_folder_size_bytes(self) -> int:
+        return self.claimshield_max_folder_size_mb * 1024 * 1024
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def max_files_per_folder(self) -> int:
+        return self.claimshield_max_files_per_folder
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def allowed_extensions(self) -> list[str]:
         return [e.strip().lower() for e in self.claimshield_allowed_extensions.split(",")]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def allowed_mime_types(self) -> list[str]:
+        return [m.strip().lower() for m in self.claimshield_allowed_mime_types.split(",")]
 
 
 @lru_cache(maxsize=1)

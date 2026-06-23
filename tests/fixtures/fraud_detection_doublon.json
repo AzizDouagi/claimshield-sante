@@ -1,0 +1,18 @@
+{
+  "case_id": "CLM-0024",
+  "status": "FAIL",
+  "duplicate_invoice": true,
+  "risk_score": 0.95,
+  "signals": [
+    {
+      "signal_type": "DUPLICATE_INVOICE",
+      "description": "Hash SHA-256 de INV-CLM-0024 déjà présent en base (soumission du 2023-04-10).",
+      "risk_contribution": 0.95
+    }
+  ],
+  "threshold_version": "1.0.0",
+  "reasons": [
+    "Hash SHA-256 de INV-CLM-0024 déjà présent en base.",
+    "Montant 5 262,35 USD déjà remboursé à hauteur de 5 192,29 USD."
+  ]
+}

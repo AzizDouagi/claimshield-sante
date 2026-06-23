@@ -50,6 +50,12 @@ class AuthorizationStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class IntakeStatus(str, Enum):
+    ACCEPTED = "accepted"
+    QUARANTINED = "quarantined"
+    BLOCKED = "blocked"
+
+
 # ── Montants ─────────────────────────────────────────────────────────────────
 
 PositiveDecimal = Annotated[Decimal, Field(gt=Decimal("0"))]

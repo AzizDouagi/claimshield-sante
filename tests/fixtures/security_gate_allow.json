@@ -1,0 +1,7 @@
+{
+  "case_id": "CLM-0001",
+  "decision": "ALLOW",
+  "prompt_injection_detected": false,
+  "blocked_fields": [],
+  "reasons": ["Aucune injection détectée, tous les champs sont conformes."]
+}

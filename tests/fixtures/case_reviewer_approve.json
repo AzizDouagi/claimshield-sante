@@ -1,0 +1,14 @@
+{
+  "case_id": "CLM-0004",
+  "recommendation": "APPROVE",
+  "justification": [
+    "Tous les documents obligatoires sont présents.",
+    "Identité patient vérifiée (UUID cohérent sur toutes les pièces).",
+    "Couverture Anthem active, taux 80 %.",
+    "Montant demandé (5 972,17 USD) dans les seuils contractuels.",
+    "Aucune anomalie de sécurité, fraude ou cohérence clinique détectée."
+  ],
+  "disagreements": [],
+  "human_review_required": false,
+  "human_review_reasons": []
+}

@@ -198,8 +198,8 @@ CLAIMSHIELD_LLM_MODEL=gemma4:latest
 CLAIMSHIELD_LLM_PROVIDER=ollama
 DATABASE_URL=sqlite+aiosqlite:///./storage/claimshield.db
 LANGGRAPH_CHECKPOINT_DB=./storage/checkpoints.db
-SYNTHEA_ROOT=/Users/azizdouagi/Documents/Stage/Wevioo/synthea
-CLAIMSHIELD_SOURCE_ROOT=/Users/azizdouagi/Documents/Stage/Wevioo/synthea/claimshield_cases
+SYNTHEA_ROOT=/path/to/synthea
+CLAIMSHIELD_SOURCE_ROOT=/path/to/synthea/claimshield_cases
 ```
 
 La configuration est lue exclusivement via `config/settings.py` — aucun `os.getenv` direct dans le code des agents.

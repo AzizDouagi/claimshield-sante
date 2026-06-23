@@ -1,0 +1,27 @@
+{
+  "case_id": "CLM-0032",
+  "status": "NEEDS_REVIEW",
+  "procedure_count": 29,
+  "medication_count": 42,
+  "prescription_required": true,
+  "signals": [
+    {
+      "signal_type": "VOLUME_ACTES_ANORMAL",
+      "description": "29 actes pour une consultation ambulatoire (seuil d'alerte : 10).",
+      "fields_compared": ["procedure_count"],
+      "severity": "WARNING"
+    },
+    {
+      "signal_type": "VOLUME_MEDICAMENTS_ANORMAL",
+      "description": "42 médicaments prescrits (seuil d'alerte : 15).",
+      "fields_compared": ["medication_count"],
+      "severity": "WARNING"
+    }
+  ],
+  "confidence": 0.4,
+  "reasons": [
+    "Volume d'actes (29) supérieur au seuil d'alerte (10).",
+    "Volume de médicaments (42) supérieur au seuil d'alerte (15).",
+    "Revue par médecin conseil requise."
+  ]
+}

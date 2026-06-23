@@ -69,7 +69,12 @@ oauth.json
 service-account.json
 
 # Storage runtime (jamais committer)
-storage/
+storage/incoming/*
+storage/quarantine/*
+storage/temporary/*
+!storage/incoming/.gitkeep
+!storage/quarantine/.gitkeep
+!storage/temporary/.gitkeep
 
 # Docker
 .dockerenv

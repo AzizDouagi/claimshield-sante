@@ -1,8 +1,8 @@
 {
   "imported_at": "2026-06-19T13:07:20.332806+00:00",
-  "source_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/synthea/claimshield_cases",
-  "source_generated_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/synthea/claimshield_cases/generated",
-  "destination_directory": "/Users/azizdouagi/Documents/Stage/Wevioo/claimshield-sante/datasets/fixtures/valid",
+  "source_directory": "${CLAIMSHIELD_SOURCE_ROOT}",
+  "source_generated_directory": "${CLAIMSHIELD_SOURCE_ROOT}/generated",
+  "destination_directory": "datasets/fixtures/valid",
   "dry_run": false,
   "validate_only": true,
   "cases_found": 37,

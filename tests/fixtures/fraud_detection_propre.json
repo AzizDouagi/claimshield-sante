@@ -1,0 +1,9 @@
+{
+  "case_id": "CLM-0001",
+  "status": "PASS",
+  "duplicate_invoice": false,
+  "risk_score": 0.0,
+  "signals": [],
+  "threshold_version": "1.0.0",
+  "reasons": ["Aucun doublon détecté pour INV-CLM-0001."]
+}

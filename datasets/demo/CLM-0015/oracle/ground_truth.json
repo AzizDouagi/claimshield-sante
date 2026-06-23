@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "CLM-0015",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "REJECT",
+  "recommendation_reasons": [
+    "Pré-autorisation requise pour cet acte (chirurgie programmée).",
+    "Statut d'autorisation : pending au moment du dépôt.",
+    "Règle métier : tout acte soumis à pré-autorisation sans accord préalable → REJECT."
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "Pré-autorisation requise mais non obtenue avant la prestation.",
+    "L'assureur Anthem doit statuer sur la prise en charge a posteriori."
+  ],
+  "expected_anomalies": [
+    "MISSING_PREAUTHORIZATION"
+  ],
+  "required_documents": [
+    "compte_rendu_CLM-0015.pdf",
+    "demande_remboursement_CLM-0015.pdf",
+    "facture_CLM-0015.pdf",
+    "ordonnance_CLM-0015.pdf"
+  ],
+  "optional_documents": [
+    "claim.json",
+    "patient.json",
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
+  "expected_extraction": {
+    "patient_name": "Mr. Rickie717 Jordon466 Will178",
+    "patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+    "payer_name": "Blue Cross Blue Shield",
+    "service_date": "2016-07-19",
+    "claim_reference": "CLM-0015",
+    "invoice_number": "INV-CLM-0015",
+    "prescription_number": "RX-CLM-0015",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "total_billed": "577.58",
+    "amount_requested": "462.06",
+    "patient_share": "115.52",
+    "currency": "USD"
+  },
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Aucune injection détectée."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+    "patient_name": "Mr. Rickie717 Jordon466 Will178",
+    "source_patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+    "claim_patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+    "encounter_patient_id": "4316906c-b4ec-d8ac-c837-39487380f923",
+    "reasons": [
+      "Identifiants repris depuis expected_extraction et case_data.json quand disponible."
+    ]
+  },
+  "expected_coverage": {
+    "status": "FAIL",
+    "payer_name": "Blue Cross Blue Shield",
+    "source_payer_name": "Blue Cross Blue Shield",
+    "coverage_rate": null,
+    "amount_requested": "462.06",
+    "patient_share": "115.52",
+    "reasons": [
+      "Couverture Anthem active, mais pré-autorisation non obtenue avant la prestation.",
+      "authorization_required=True, authorization_status=pending."
+    ],
+    "policy_active": true
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "PASS",
+    "procedure_count": 1,
+    "medication_count": 1,
+    "prescription_required": true,
+    "reasons": [
+      "1 acte et 1 médicament, cohérence clinique conforme."
+    ]
+  },
+  "expected_fraud": {
+    "status": "PASS",
+    "duplicate_invoice": false,
+    "expected_anomalies": [],
+    "reasons": [
+      "Aucun doublon détecté pour INV-CLM-0015."
+    ]
+  },
+  "scenario_id": "SC-02",
+  "scenario_description": "Pré-autorisation requise non fournie : l'acte chirurgical référencé exige une pré-autorisation (authorization_required=true), mais le statut est 'pending' au moment du dépôt → rejet.",
+  "scenario_tags": [
+    "REJECT",
+    "preauthorization"
+  ]
+}

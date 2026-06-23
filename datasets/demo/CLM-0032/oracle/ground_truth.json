@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "CLM-0032",
+  "data_classification": "SYNTHETIC_TEST_DATA",
+  "contains_real_personal_data": false,
+  "expected_recommendation": "PENDING",
+  "recommendation_reasons": [
+    "Volume d'actes et de médicaments largement supérieur aux seuils d'alerte.",
+    "Règle clinique : dossier suspendu automatiquement si actes > 10 ou méds > 15.",
+    "Décision finale déléguée au médecin conseil (PENDING)."
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "Volume d'actes (29) et médicaments (42) anormalement élevé pour ce type de consultation.",
+    "Le Clinical Consistency Agent ne peut pas statuer automatiquement.",
+    "Un médecin conseil doit valider la cohérence clinique avant décision."
+  ],
+  "expected_anomalies": [
+    "CLINICAL_INCONSISTENCY:volume_actes_anormal",
+    "CLINICAL_INCONSISTENCY:volume_medicaments_anormal"
+  ],
+  "required_documents": [
+    "compte_rendu_CLM-0032.pdf",
+    "demande_remboursement_CLM-0032.pdf",
+    "facture_CLM-0032.pdf",
+    "ordonnance_CLM-0032.pdf"
+  ],
+  "optional_documents": [
+    "claim.json",
+    "patient.json",
+    "patient_fhir_bundle.json"
+  ],
+  "expected_missing_documents": [],
+  "expected_extraction": {
+    "patient_name": "Mr. Columbus656 Archie818 Kutch271",
+    "patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+    "payer_name": "Medicaid",
+    "service_date": "2020-12-19",
+    "claim_reference": "CLM-0032",
+    "invoice_number": "INV-CLM-0032",
+    "prescription_number": "RX-CLM-0032",
+    "procedure_count": 29,
+    "medication_count": 42,
+    "total_billed": "17092.06",
+    "amount_requested": "17092.06",
+    "patient_share": "0.00",
+    "currency": "USD"
+  },
+  "expected_security": {
+    "status": "PASS",
+    "prompt_injection_detected": false,
+    "reasons": [
+      "Aucune injection détectée."
+    ]
+  },
+  "expected_privacy": {
+    "status": "PASS",
+    "data_classification": "SYNTHETIC_TEST_DATA",
+    "contains_real_personal_data": false,
+    "reasons": [
+      "Résultat repris depuis les champs data_classification et contains_real_personal_data."
+    ]
+  },
+  "expected_identity": {
+    "status": "PASS",
+    "patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+    "patient_name": "Mr. Columbus656 Archie818 Kutch271",
+    "source_patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+    "claim_patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+    "encounter_patient_id": "f16fd97d-f949-5651-406d-b46440616cea",
+    "reasons": [
+      "Identité patient vérifiée, UUID cohérent."
+    ]
+  },
+  "expected_coverage": {
+    "status": "PASS",
+    "payer_name": "Medicaid",
+    "source_payer_name": "Medicaid",
+    "coverage_rate": null,
+    "amount_requested": "17092.06",
+    "patient_share": "0.00",
+    "reasons": [
+      "Couverture active, taux de prise en charge 100 % (patient_share=0)."
+    ]
+  },
+  "expected_fhir": {
+    "status": "PASS",
+    "bundle_expected": true,
+    "required": false,
+    "optional": true,
+    "reasons": [
+      "Présence attendue déduite de required_documents et optional_documents."
+    ]
+  },
+  "expected_clinical_consistency": {
+    "status": "NEEDS_REVIEW",
+    "procedure_count": 29,
+    "medication_count": 42,
+    "prescription_required": true,
+    "reasons": [
+      "29 actes pour une consultation ambulatoire : seuil d'alerte = 10.",
+      "42 médicaments prescrits : seuil d'alerte = 15.",
+      "Ratio médicaments/actes = 1.45 — cohérence à valider par médecin conseil."
+    ]
+  },
+  "expected_fraud": {
+    "status": "NEEDS_REVIEW",
+    "duplicate_invoice": false,
+    "expected_anomalies": [],
+    "reasons": [
+      "Aucun doublon détecté, mais le volume anormal (29 actes, 42 méds) déclenche une vérification approfondie."
+    ]
+  },
+  "scenario_id": "SC-06",
+  "scenario_description": "Incohérence clinique : volume anormalement élevé d'actes (29) et de médicaments (42) pour une consultation ambulatoire. Le Clinical Consistency Agent signale une divergence → PENDING + revue humaine obligatoire.",
+  "scenario_tags": [
+    "PENDING",
+    "clinical-inconsistency",
+    "human-review"
+  ]
+}
