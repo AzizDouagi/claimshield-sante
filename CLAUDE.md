@@ -2,6 +2,8 @@
 
 dans chaque réponse appele moi toujours par mon prènom: AZIZ
 
+**Commits git** : ne jamais ajouter de ligne `Co-Authored-By` dans les messages de commit. Seul le nom d'Aziz Douagi doit apparaître comme auteur sur GitHub.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 **IMPORTANT — keep this file up to date.** Whenever a file gains a real implementation (replacing an empty stub), update the corresponding entry below.
