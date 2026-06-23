@@ -30,6 +30,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Claude Code
+CLAUDE.md
+
 # IDE
 .idea/
 .vscode/
