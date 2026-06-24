@@ -18,6 +18,7 @@ from pydantic import Field
 from schemas.domain import (
     DataClassification,
     ExtractedData,
+    FileStatus,
     IntakeStatus,
     Recommendation,
     SecurityDecision,
@@ -47,8 +48,8 @@ class InspectedFile(StrictModel):
     detected_mime_type: str
     actual_size: int = Field(..., ge=0)
     sha256: Annotated[str, Field(min_length=64, max_length=64)] | None = None
-    status: IntakeStatus
-    block_reasons: list[str] = Field(default_factory=list)
+    status: FileStatus
+    reasons: list[StructuredError] = Field(default_factory=list)
     relative_storage_path: str | None = None
 
 
@@ -82,6 +83,8 @@ class ClaimIntakeResult(StrictModel):
     manifest: ClaimManifest
     accepted_count: int = Field(..., ge=0)
     quarantined_count: int = Field(..., ge=0)
+    duplicate_count: int = Field(default=0, ge=0)
+    error_count: int = Field(default=0, ge=0)
     reasons: list[str] = Field(default_factory=list)
     errors: list[StructuredError] = Field(default_factory=list)
 

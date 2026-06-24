@@ -263,9 +263,16 @@ def test_all_models_json_serializable():
         ),
         dom.ClaimSubmission(case_id="CLM-0001"),
         res.ClaimIntakeResult(
-            case_id="CLM-0001",
-            status=dom.VerificationStatus.PASS,
-            ingestion_path="storage/inbox/CLM-0001",
+            claim_id="CLM-0001",
+            status=dom.IntakeStatus.ACCEPTED,
+            manifest=res.ClaimManifest(
+                claim_id="CLM-0001",
+                file_count=0,
+                total_size_bytes=0,
+                status=dom.IntakeStatus.ACCEPTED,
+            ),
+            accepted_count=0,
+            quarantined_count=0,
         ),
         res.SecurityGateResult(case_id="CLM-0001", decision=dom.SecurityDecision.ALLOW),
         res.PrivacyResult(

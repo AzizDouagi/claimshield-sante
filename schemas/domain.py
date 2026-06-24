@@ -51,9 +51,91 @@ class AuthorizationStatus(str, Enum):
 
 
 class IntakeStatus(str, Enum):
+    """Statut global du dossier d'ingestion."""
+
     ACCEPTED = "accepted"
     QUARANTINED = "quarantined"
     BLOCKED = "blocked"
+    ERROR = "error"
+
+
+class FileStatus(str, Enum):
+    """Statut d'un fichier individuel après inspection.
+
+    DUPLICATE et ERROR n'existent qu'au niveau fichier ;
+    ils remontent respectivement en QUARANTINED et ERROR au niveau dossier.
+    """
+
+    ACCEPTED = "accepted"
+    QUARANTINED = "quarantined"
+    BLOCKED = "blocked"
+    DUPLICATE = "duplicate"
+    ERROR = "error"
+
+
+class IntakeReasonCode(str, Enum):
+    """Codes stables identifiant la cause d'un rejet ou d'une alerte d'ingestion.
+
+    Chaque valeur correspond à une entrée dans REASON_DESCRIPTIONS.
+    Les codes ne changent pas entre versions — seul le message peut évoluer.
+    """
+
+    EMPTY_CLAIM = "EMPTY_CLAIM"
+    EMPTY_FILE = "EMPTY_FILE"
+    UNSUPPORTED_EXTENSION = "UNSUPPORTED_EXTENSION"
+    UNSUPPORTED_MIME_TYPE = "UNSUPPORTED_MIME_TYPE"
+    MIME_EXTENSION_MISMATCH = "MIME_EXTENSION_MISMATCH"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+    CLAIM_TOO_LARGE = "CLAIM_TOO_LARGE"
+    PATH_TRAVERSAL_ATTEMPT = "PATH_TRAVERSAL_ATTEMPT"
+    DUPLICATE_FILE = "DUPLICATE_FILE"
+    STORAGE_ERROR = "STORAGE_ERROR"
+    TOO_MANY_FILES = "TOO_MANY_FILES"
+    FOLDER_QUOTA_EXCEEDED = "FOLDER_QUOTA_EXCEEDED"
+    INVALID_FILENAME = "INVALID_FILENAME"
+
+
+REASON_DESCRIPTIONS: dict[str, str] = {
+    IntakeReasonCode.EMPTY_CLAIM: (
+        "Dossier vide — aucun fichier soumis"
+    ),
+    IntakeReasonCode.EMPTY_FILE: (
+        "Fichier vide (0 octet) — le contenu est absent"
+    ),
+    IntakeReasonCode.UNSUPPORTED_EXTENSION: (
+        "Extension non autorisée — seuls PDF, PNG, JPEG et JSON sont acceptés"
+    ),
+    IntakeReasonCode.UNSUPPORTED_MIME_TYPE: (
+        "Type MIME non autorisé — le contenu réel du fichier n'est pas reconnu"
+    ),
+    IntakeReasonCode.MIME_EXTENSION_MISMATCH: (
+        "Incohérence MIME/extension — le contenu détecté ne correspond pas à l'extension déclarée"
+    ),
+    IntakeReasonCode.FILE_TOO_LARGE: (
+        "Fichier trop volumineux — dépasse la limite de taille individuelle configurée"
+    ),
+    IntakeReasonCode.CLAIM_TOO_LARGE: (
+        "Dossier trop volumineux — le quota cumulé est dépassé"
+    ),
+    IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT: (
+        "Tentative de traversée de répertoire — nom de fichier dangereux refusé"
+    ),
+    IntakeReasonCode.DUPLICATE_FILE: (
+        "Fichier en double — SHA-256 identique à un fichier déjà reçu dans ce dossier"
+    ),
+    IntakeReasonCode.STORAGE_ERROR: (
+        "Échec technique de stockage — écriture ou déplacement impossible"
+    ),
+    IntakeReasonCode.TOO_MANY_FILES: (
+        "Trop de fichiers — le nombre maximum de fichiers par dossier est atteint"
+    ),
+    IntakeReasonCode.FOLDER_QUOTA_EXCEEDED: (
+        "Quota dépassé — la taille cumulée du dossier dépasse la limite configurée"
+    ),
+    IntakeReasonCode.INVALID_FILENAME: (
+        "Nom de fichier invalide — caractères ou structure non autorisés"
+    ),
+}
 
 
 # ── Montants ─────────────────────────────────────────────────────────────────

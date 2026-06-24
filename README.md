@@ -8,17 +8,24 @@ Construit avec **LangGraph**, **Ollama (gemma4)** et **Pydantic v2**. Toutes les
 
 ## Prérequis
 
-| Outil | Version minimale |
-|---|---|
-| Python | 3.11+ |
-| Ollama | 0.4+ avec `gemma4:latest` tiré |
-| Git | tout récent |
+| Outil | Version minimale | Obligatoire |
+|---|---|---|
+| Python | 3.11+ | Oui |
+| Ollama | 0.4+ avec `gemma4:latest` tiré | Oui |
+| Git | tout récent | Oui |
+| `libmagic` | 5.x | Non — repli automatique sur `mimetypes` |
 
 Vérifier que le modèle local est disponible :
 
 ```bash
 ollama list | grep gemma4
 ```
+
+> **Note `libmagic`** — utilisée par `python-magic` pour détecter le type MIME réel d'un fichier à partir de son contenu (magic bytes), indépendamment de son extension.
+> Sans `libmagic`, le code se replie automatiquement sur `mimetypes` (détection par extension uniquement) : les fichiers restent traités, mais les incohérences MIME/extension ne sont plus détectées.
+>
+> macOS : `brew install libmagic`
+> Linux : `apt-get install libmagic1` ou `dnf install file-libs`
 
 ---
 
@@ -34,10 +41,18 @@ python3 -m venv .venv
 source .venv/bin/activate          # macOS / Linux
 # .venv\Scripts\activate           # Windows
 
-# 3. Installer les dépendances
+# 3. Installer la dépendance système libmagic (recommandé)
+# macOS :
+brew install libmagic
+# Ubuntu/Debian :
+# sudo apt-get install libmagic1
+# Fedora/RHEL :
+# sudo dnf install file-libs
+
+# 4. Installer les dépendances Python
 pip install -r requirements.txt
 
-# 4. Configurer l'environnement
+# 5. Configurer l'environnement
 cp .env.example .env
 # Éditer .env si nécessaire (les chemins Synthea et Ollama sont préconfigurés)
 ```

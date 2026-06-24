@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from config.settings import Settings, get_settings
-from schemas.domain import IntakeStatus
+from schemas.domain import FileStatus
 from schemas.results import StructuredError
 
 _UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9._-]")
@@ -50,10 +50,39 @@ class StorageService:
     def quarantine_dir(self) -> Path:
         return self._s.quarantine_dir.resolve()
 
+    @property
+    def manifests_dir(self) -> Path:
+        return (self._root / "manifests").resolve()
+
     def ensure_dirs(self) -> None:
-        """Crée les trois zones si elles n'existent pas encore."""
-        for d in (self.temp_dir, self.incoming_dir, self.quarantine_dir):
+        """Crée les quatre zones si elles n'existent pas encore."""
+        for d in (self.temp_dir, self.incoming_dir, self.quarantine_dir, self.manifests_dir):
             d.mkdir(parents=True, exist_ok=True)
+
+    # ── Manifest d'ingestion ─────────────────────────────────────────────────
+
+    def write_intake_manifest(self, case_id: str, content: str) -> Path:
+        """Écrit le manifest d'ingestion JSON dans manifests/<case_id>.json.
+
+        Écrase silencieusement si le fichier existe (re-ingestion idempotente).
+        Retourne le chemin absolu du fichier écrit.
+        """
+        dest = self._safe_resolve(self.manifests_dir, f"{case_id}.json")
+        self.manifests_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        return dest
+
+    def read_intake_manifest(self, case_id: str) -> str:
+        """Lit le manifest d'ingestion JSON pour un dossier donné.
+
+        Lève FileNotFoundError si le manifest n'existe pas encore.
+        """
+        path = self._safe_resolve(self.manifests_dir, f"{case_id}.json")
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Manifest introuvable pour le dossier '{case_id}' : {path}"
+            )
+        return path.read_text(encoding="utf-8")
 
     # ── Résolution sécurisée ─────────────────────────────────────────────────
 
@@ -156,23 +185,25 @@ class StorageService:
         temp_path: Path,
         case_id: str,
         physical_name: str,
-        status: IntakeStatus,
+        status: FileStatus,
     ) -> Path | None:
         """Déplace atomiquement temp_path vers la zone définitive selon le statut.
 
         ACCEPTED    → incoming/<case_id>/<physical_name>
         QUARANTINED → quarantine/<case_id>/<physical_name>
+        DUPLICATE   → quarantine/<case_id>/<physical_name>  (revue humaine)
         BLOCKED     → temp_path supprimé, retourne None
+        ERROR       → temp_path supprimé, retourne None
 
         Le déplacement est atomique (Path.rename → rename(2) POSIX sur même partition).
         En cas d'erreur IO, le fichier temporaire est supprimé avant de lever
         StorageError. Aucun fichier existant n'est écrasé.
         """
-        if status == IntakeStatus.BLOCKED:
+        if status in (FileStatus.BLOCKED, FileStatus.ERROR):
             temp_path.unlink(missing_ok=True)
             return None
 
-        is_accepted = status == IntakeStatus.ACCEPTED
+        is_accepted = status == FileStatus.ACCEPTED
         zone_label = "incoming" if is_accepted else "quarantine"
         zone_root = self.incoming_dir if is_accepted else self.quarantine_dir
 

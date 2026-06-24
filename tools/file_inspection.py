@@ -14,8 +14,8 @@ import mimetypes
 import re
 from pathlib import Path
 
-from schemas.domain import IntakeStatus
-from schemas.results import InspectedFile
+from schemas.domain import FileStatus, IntakeReasonCode
+from schemas.results import InspectedFile, StructuredError
 
 # ── Détection MIME (avec repli sans dépendance système) ──────────────────────
 
@@ -47,46 +47,74 @@ _BLOCK_SIZE = 65_536  # 64 Kio — limite de lecture par chunk pour SHA-256
 # ── Validation du nom de fichier ──────────────────────────────────────────────
 
 
-def validate_filename(name: str) -> tuple[bool, list[str]]:
+def validate_filename(name: str) -> tuple[bool, list[StructuredError]]:
     """Valide le nom de fichier fourni par le déposant.
 
-    Retourne (valide, motifs_de_rejet).
+    Retourne (valide, raisons_de_rejet).
     Aucun accès disque — validation purement sur la chaîne.
     """
-    reasons: list[str] = []
+    reasons: list[StructuredError] = []
     name = name.strip()
 
     if not name:
-        reasons.append("Nom de fichier vide après suppression des espaces")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.INVALID_FILENAME,
+            message="Nom de fichier vide après suppression des espaces",
+            field="filename",
+        ))
         return False, reasons
 
     if "\x00" in name:
-        reasons.append("Caractère nul détecté dans le nom de fichier")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.INVALID_FILENAME,
+            message="Caractère nul détecté dans le nom de fichier",
+            field="filename",
+        ))
         return False, reasons
 
     if all(c == "." for c in name):
-        reasons.append("Nom composé uniquement de points refusé")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.INVALID_FILENAME,
+            message="Nom composé uniquement de points refusé",
+            field="filename",
+        ))
         return False, reasons
 
     # Chemin absolu POSIX (/etc/passwd, /home/…)
     if name.startswith("/"):
-        reasons.append("Chemin absolu POSIX refusé")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT,
+            message="Chemin absolu POSIX refusé",
+            field="filename",
+        ))
         return False, reasons
 
     # Chemin absolu Windows (C:\, D:/, …)
     if _WINDOWS_DRIVE_RE.match(name):
-        reasons.append("Chemin absolu Windows refusé")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT,
+            message="Chemin absolu Windows refusé",
+            field="filename",
+        ))
         return False, reasons
 
     # Chemin UNC (\\server\ ou //server/)
     if name.startswith("\\\\") or name.startswith("//"):
-        reasons.append("Chemin UNC refusé")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT,
+            message="Chemin UNC refusé",
+            field="filename",
+        ))
         return False, reasons
 
     # Traversée de répertoire (../ ou ..\)
     parts = re.split(r"[/\\]", name)
     if ".." in parts:
-        reasons.append("Traversée de répertoire refusée (séquence '..' détectée)")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT,
+            message="Traversée de répertoire refusée (séquence '..' détectée)",
+            field="filename",
+        ))
         return False, reasons
 
     return True, reasons
@@ -132,29 +160,35 @@ def check_mime_consistency(
     detected_mime: str,
     normalized_ext: str,
     allowed_mime_types: list[str],
-) -> tuple[bool, list[str], bool]:
+) -> tuple[bool, list[StructuredError], bool]:
     """Vérifie que le MIME détecté est autorisé et cohérent avec l'extension déclarée.
 
-    Retourne (cohérent, motifs, est_quarantaine).
+    Retourne (cohérent, raisons, est_quarantaine).
 
     - MIME non autorisé          → BLOCKED
     - MIME autorisé mais discordant avec l'extension → QUARANTINED
     """
-    reasons: list[str] = []
+    reasons: list[StructuredError] = []
 
     if detected_mime not in allowed_mime_types:
-        reasons.append(
-            f"MIME détecté '{detected_mime}' non présent dans la liste autorisée"
-        )
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.UNSUPPORTED_MIME_TYPE,
+            message=f"MIME détecté '{detected_mime}' non présent dans la liste autorisée",
+            field="mime_type",
+        ))
         return False, reasons, False
 
     expected_mime = _EXT_TO_MIME.get(normalized_ext)
     if expected_mime is not None and detected_mime != expected_mime:
-        reasons.append(
-            f"Incohérence MIME/extension : "
-            f"'.{normalized_ext}' attend '{expected_mime}', "
-            f"contenu réel détecté '{detected_mime}'"
-        )
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.MIME_EXTENSION_MISMATCH,
+            message=(
+                f"Incohérence MIME/extension : "
+                f"'.{normalized_ext}' attend '{expected_mime}', "
+                f"contenu réel détecté '{detected_mime}'"
+            ),
+            field="mime_type",
+        ))
         return False, reasons, True  # quarantaine
 
     return True, reasons, False
@@ -163,25 +197,33 @@ def check_mime_consistency(
 # ── Vérification de la taille ─────────────────────────────────────────────────
 
 
-def check_file_size(path: Path, max_size_bytes: int) -> tuple[bool, list[str], int]:
+def check_file_size(path: Path, max_size_bytes: int) -> tuple[bool, list[StructuredError], int]:
     """Vérifie la taille réelle du fichier lu depuis le disque.
 
     Ne tient aucun compte de la taille annoncée par le client.
-    Retourne (valide, motifs, taille_réelle_octets).
+    Retourne (valide, raisons, taille_réelle_octets).
     """
-    reasons: list[str] = []
+    reasons: list[StructuredError] = []
     real_size = path.stat().st_size
 
     if real_size == 0:
-        reasons.append("Fichier vide refusé")
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.EMPTY_FILE,
+            message="Fichier vide (0 octet) refusé",
+            field="size_bytes",
+        ))
         return False, reasons, 0
 
     if real_size > max_size_bytes:
         limit_mb = max_size_bytes / (1024 * 1024)
         real_mb = real_size / (1024 * 1024)
-        reasons.append(
-            f"Fichier trop volumineux : {real_mb:.2f} Mo dépasse la limite de {limit_mb:.0f} Mo"
-        )
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.FILE_TOO_LARGE,
+            message=(
+                f"Fichier trop volumineux : {real_mb:.2f} Mo dépasse la limite de {limit_mb:.0f} Mo"
+            ),
+            field="size_bytes",
+        ))
         return False, reasons, real_size
 
     return True, reasons, real_size
@@ -205,25 +247,33 @@ def check_folder_limits(
     incoming_size_bytes: int,
     max_total_bytes: int,
     max_file_count: int,
-) -> tuple[bool, list[str]]:
+) -> tuple[bool, list[StructuredError]]:
     """Vérifie si l'ajout d'un fichier dépasserait les limites configurées du dossier.
 
-    Retourne (autorisé, motifs).
+    Retourne (autorisé, raisons).
     """
-    reasons: list[str] = []
+    reasons: list[StructuredError] = []
 
     if current_file_count + 1 > max_file_count:
-        reasons.append(
-            f"Quota de fichiers dépassé : {current_file_count + 1} > {max_file_count} autorisés"
-        )
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.TOO_MANY_FILES,
+            message=(
+                f"Quota de fichiers dépassé : {current_file_count + 1} > {max_file_count} autorisés"
+            ),
+            field="file_count",
+        ))
 
     projected = current_total_bytes + incoming_size_bytes
     if projected > max_total_bytes:
         limit_mb = max_total_bytes / (1024 * 1024)
         proj_mb = projected / (1024 * 1024)
-        reasons.append(
-            f"Quota de taille du dossier dépassé : {proj_mb:.2f} Mo > {limit_mb:.0f} Mo autorisés"
-        )
+        reasons.append(StructuredError(
+            code=IntakeReasonCode.FOLDER_QUOTA_EXCEEDED,
+            message=(
+                f"Quota de taille du dossier dépassé : {proj_mb:.2f} Mo > {limit_mb:.0f} Mo autorisés"
+            ),
+            field="total_size_bytes",
+        ))
 
     return not reasons, reasons
 
@@ -263,13 +313,12 @@ def inspect_file(
     Le nom original n'est jamais utilisé comme nom de stockage.
     Le hash n'est calculé que si le fichier passe les contrôles de taille.
     """
-    block_reasons: list[str] = []
+    all_reasons: list[StructuredError] = []
     is_quarantine_only = False
 
     # ── Étape 1 : validation du nom (sans accès disque) ──────────────────────
     name_ok, name_reasons = validate_filename(original_name)
     if not name_ok:
-        # Retour anticipé : on ne touche pas le disque pour un nom invalide.
         return InspectedFile(
             original_name=original_name,
             storage_name=f"{claim_id}_doc{index:02d}_blocked",
@@ -277,8 +326,8 @@ def inspect_file(
             detected_mime_type="",
             actual_size=0,
             sha256=None,
-            status=IntakeStatus.BLOCKED,
-            block_reasons=name_reasons,
+            status=FileStatus.BLOCKED,
+            reasons=name_reasons,
             relative_storage_path=None,
         )
 
@@ -288,12 +337,16 @@ def inspect_file(
     # ── Étape 2 : extension ───────────────────────────────────────────────────
     if not ext_allowed:
         ext_label = f".{normalized_ext}" if normalized_ext else "(aucune)"
-        block_reasons.append(f"Extension {ext_label} non autorisée")
+        all_reasons.append(StructuredError(
+            code=IntakeReasonCode.UNSUPPORTED_EXTENSION,
+            message=f"Extension {ext_label} non autorisée",
+            field="filename",
+        ))
 
     # ── Étape 3 : taille réelle (premier accès disque) ───────────────────────
     size_ok, size_reasons, actual_size = check_file_size(path, max_file_size_bytes)
     if not size_ok:
-        block_reasons.extend(size_reasons)
+        all_reasons.extend(size_reasons)
 
     # ── Étape 4 : hash SHA-256 (uniquement si taille valide) ─────────────────
     sha256 = compute_sha256(path) if size_ok else None
@@ -306,24 +359,22 @@ def inspect_file(
         detected_mime, normalized_ext, allowed_mime_types
     )
     if not mime_ok:
-        block_reasons.extend(mime_reasons)
+        all_reasons.extend(mime_reasons)
         if is_quarantine_signal:
             is_quarantine_only = True
 
     # ── Étape 7 : statut final ────────────────────────────────────────────────
-    if not block_reasons:
-        status = IntakeStatus.ACCEPTED
+    if not all_reasons:
+        status = FileStatus.ACCEPTED
     elif is_quarantine_only and ext_allowed and size_ok:
         # Le seul problème est une incohérence MIME/extension : quarantaine humaine
-        status = IntakeStatus.QUARANTINED
+        status = FileStatus.QUARANTINED
     else:
-        status = IntakeStatus.BLOCKED
+        status = FileStatus.BLOCKED
 
-    relative_storage_path = (
-        f"storage/inbox/{claim_id}/{storage_name}"
-        if status != IntakeStatus.BLOCKED
-        else None
-    )
+    # Le chemin définitif est calculé par l'agent après commit_file() ;
+    # on laisse None ici pour ne pas exposer un emplacement temporaire incorrect.
+    relative_storage_path = None
 
     return InspectedFile(
         original_name=original_name,
@@ -333,7 +384,7 @@ def inspect_file(
         actual_size=actual_size,
         sha256=sha256,
         status=status,
-        block_reasons=block_reasons,
+        reasons=all_reasons,
         relative_storage_path=relative_storage_path,
     )
 

@@ -8,7 +8,8 @@ Pipeline :
        a. Écriture dans la zone temporaire  (StorageService.stage_file)
        b. Vérification du quota dossier destination
        c. Inspection complète : nom · extension · taille · MIME · SHA-256
-       d. Déplacement atomique  incoming/ ou quarantine/
+       d. Détection de doublons par SHA-256
+       e. Déplacement atomique  incoming/ ou quarantine/
   3. Vérification des documents obligatoires
   4. Construction du ClaimManifest
   5. Retour ClaimIntakeResult
@@ -25,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from config.settings import Settings, get_settings
-from schemas.domain import IntakeStatus
+from schemas.domain import FileStatus, IntakeReasonCode, IntakeStatus
 from schemas.results import (
     ClaimIntakeResult,
     ClaimManifest,
@@ -33,13 +34,17 @@ from schemas.results import (
     StructuredError,
 )
 from services.storage import StorageError, StorageService
-from state.claim_state import ClaimState
+from state.claim_state import ClaimState, validate_state_update
 from tools.file_inspection import (
     build_storage_name,
     check_folder_limits,
     compute_folder_totals,
     inspect_file,
 )
+
+# Codes de StorageError qui signalent une défaillance technique (I/O) plutôt
+# qu'une violation de politique.  NO_OVERWRITE est une règle métier → BLOCKED.
+_TECHNICAL_STORAGE_ERRORS = frozenset({"WRITE_ERROR", "MOVE_ERROR", "TEMP_COLLISION"})
 
 
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
@@ -64,7 +69,7 @@ def run(
         settings: Configuration (injectée pour les tests ; sinon chargée via get_settings).
 
     Returns:
-        ClaimIntakeResult avec statut accepted | quarantined | blocked.
+        ClaimIntakeResult avec statut accepted | quarantined | blocked | error.
     """
     s = settings or get_settings()
     svc = storage or StorageService(settings=s)
@@ -84,27 +89,33 @@ def run(
 
     if not candidate_files:
         err = StructuredError(
-            code="EMPTY_FOLDER",
-            message="Le dossier ne contient aucun fichier",
+            code=IntakeReasonCode.EMPTY_CLAIM,
+            message="Le dossier de demande ne contient aucun fichier",
             field="source_path",
         )
-        return _blocked_result(case_id, received_at, depositor_id, [err], ["Dossier vide refusé"])
+        result = _blocked_result(case_id, received_at, depositor_id, [err], ["Dossier vide refusé"])
+        svc.write_intake_manifest(case_id, result.manifest.model_dump_json(indent=2))
+        return result
 
     if len(candidate_files) > s.max_files_per_folder:
         err = StructuredError(
-            code="TOO_MANY_FILES",
+            code=IntakeReasonCode.TOO_MANY_FILES,
             message=(
                 f"Le dossier contient {len(candidate_files)} fichiers, "
                 f"limite configurée : {s.max_files_per_folder}"
             ),
             field="source_path",
         )
-        return _blocked_result(case_id, received_at, depositor_id, [err], [err.message])
+        result = _blocked_result(case_id, received_at, depositor_id, [err], [err.message])
+        svc.write_intake_manifest(case_id, result.manifest.model_dump_json(indent=2))
+        return result
 
     # ── Étape 2 : traitement fichier par fichier ─────────────────────────────
 
     inspected_files: list[InspectedFile] = []
     folder_file_count, folder_bytes = compute_folder_totals(svc.incoming_dir / case_id)
+    # SHA-256 → nom original du premier fichier portant ce hash (déduplication)
+    seen_sha256: dict[str, str] = {}
 
     for index, fpath in enumerate(candidate_files):
 
@@ -124,8 +135,12 @@ def run(
                 detected_mime_type="",
                 actual_size=0,
                 sha256=None,
-                status=IntakeStatus.BLOCKED,
-                block_reasons=[exc.structured.message],
+                status=FileStatus.ERROR,
+                reasons=[StructuredError(
+                    code=IntakeReasonCode.STORAGE_ERROR,
+                    message=exc.structured.message,
+                    field=fpath.name,
+                )],
                 relative_storage_path=None,
             ))
             continue
@@ -141,12 +156,7 @@ def run(
         )
         if not quota_ok:
             temp_path.unlink(missing_ok=True)
-            err = StructuredError(
-                code="FOLDER_QUOTA_EXCEEDED",
-                message="; ".join(quota_reasons),
-                field=fpath.name,
-            )
-            errors.append(err)
+            errors.extend(quota_reasons)
             inspected_files.append(InspectedFile(
                 original_name=fpath.name,
                 storage_name=build_storage_name(fpath.name, case_id, index),
@@ -154,8 +164,8 @@ def run(
                 detected_mime_type="",
                 actual_size=file_size,
                 sha256=None,
-                status=IntakeStatus.BLOCKED,
-                block_reasons=quota_reasons,
+                status=FileStatus.BLOCKED,
+                reasons=quota_reasons,
                 relative_storage_path=None,
             ))
             continue
@@ -171,7 +181,33 @@ def run(
             max_file_size_bytes=s.max_file_size_bytes,
         )
 
-        # d. Déplacement atomique vers incoming/ ou quarantine/ ────────────────
+        # d. Détection de doublons par SHA-256 ────────────────────────────────
+        # Ne concerne que les fichiers qui ont passé l'inspection (ACCEPTED).
+        # Un doublon = même sha256 qu'un fichier déjà enregistré dans ce dossier.
+        # On ne conclut PAS à une fraude ici : c'est le rôle de fraud_detection_agent.
+        if inspected.sha256 and inspected.status == FileStatus.ACCEPTED:
+            if inspected.sha256 in seen_sha256:
+                first_name = seen_sha256[inspected.sha256]
+                # Le message conserve explicitement la référence au hash identique
+                # et le nom du premier fichier accepté — pas de décision de fraude.
+                dup_reason = StructuredError(
+                    code=IntakeReasonCode.DUPLICATE_FILE,
+                    message=(
+                        f"Octets identiques (SHA-256 : {inspected.sha256}) "
+                        f"au fichier déjà accepté '{first_name}' dans ce dossier. "
+                        f"Le premier fichier est conservé ; celui-ci est mis en quarantaine."
+                    ),
+                    field=fpath.name,
+                )
+                inspected = inspected.model_copy(update={
+                    "status": FileStatus.DUPLICATE,
+                    "reasons": [dup_reason],
+                    # sha256 intentionnellement conservé : sert de preuve d'identité
+                })
+            else:
+                seen_sha256[inspected.sha256] = fpath.name
+
+        # e. Déplacement atomique vers incoming/ ou quarantine/ ────────────────
         try:
             dest = svc.commit_file(
                 temp_path=temp_path,
@@ -180,25 +216,33 @@ def run(
                 status=inspected.status,
             )
         except StorageError as exc:
-            # Commit échoué (ex. NO_OVERWRITE) : temp déjà supprimé par commit_file
             errors.append(exc.structured)
+            # Défaillance I/O réelle (WRITE_ERROR, MOVE_ERROR…) → ERROR
+            # Violation de politique (ex. NO_OVERWRITE) → BLOCKED
+            commit_file_status = (
+                FileStatus.ERROR
+                if exc.structured.code in _TECHNICAL_STORAGE_ERRORS
+                else FileStatus.BLOCKED
+            )
             inspected = inspected.model_copy(update={
-                "status": IntakeStatus.BLOCKED,
-                "block_reasons": inspected.block_reasons + [exc.structured.message],
+                "status": commit_file_status,
+                "reasons": inspected.reasons + [StructuredError(
+                    code=IntakeReasonCode.STORAGE_ERROR,
+                    message=exc.structured.message,
+                    field=fpath.name,
+                )],
                 "relative_storage_path": None,
             })
             inspected_files.append(inspected)
             continue
 
-        # e. Mise à jour du chemin relatif réel ───────────────────────────────
+        # f. Mise à jour du chemin relatif réel (relatif à la racine du storage) ─
         if dest is not None:
-            zone = "incoming" if inspected.status == IntakeStatus.ACCEPTED else "quarantine"
+            zone = "incoming" if inspected.status == FileStatus.ACCEPTED else "quarantine"
             inspected = inspected.model_copy(update={
-                "relative_storage_path": (
-                    f"storage/{zone}/{case_id}/{inspected.storage_name}"
-                ),
+                "relative_storage_path": f"{zone}/{case_id}/{inspected.storage_name}",
             })
-            if inspected.status == IntakeStatus.ACCEPTED:
+            if inspected.status == FileStatus.ACCEPTED:
                 folder_file_count += 1
                 folder_bytes += file_size
 
@@ -216,21 +260,33 @@ def run(
                 reasons.append(msg)
 
     # ── Étape 4 : statut global ──────────────────────────────────────────────
+    # Priorité : ERROR > BLOCKED > QUARANTINED/DUPLICATE > ACCEPTED
 
-    accepted = [f for f in inspected_files if f.status == IntakeStatus.ACCEPTED]
-    quarantined = [f for f in inspected_files if f.status == IntakeStatus.QUARANTINED]
-    blocked = [f for f in inspected_files if f.status == IntakeStatus.BLOCKED]
+    accepted = [f for f in inspected_files if f.status == FileStatus.ACCEPTED]
+    quarantined = [f for f in inspected_files if f.status == FileStatus.QUARANTINED]
+    blocked = [f for f in inspected_files if f.status == FileStatus.BLOCKED]
+    duplicate = [f for f in inspected_files if f.status == FileStatus.DUPLICATE]
+    errored = [f for f in inspected_files if f.status == FileStatus.ERROR]
 
-    if blocked:
+    if errored or errors:
+        global_status = IntakeStatus.ERROR
+        reasons.append(
+            f"{len(errored)} fichier(s) en erreur technique — stockage inaccessible"
+        )
+    elif blocked:
         global_status = IntakeStatus.BLOCKED
         reasons.append(
             f"{len(blocked)} fichier(s) bloqué(s) — dossier non traitable en l'état"
         )
-    elif quarantined or alerts:
+    elif quarantined or duplicate or alerts:
         global_status = IntakeStatus.QUARANTINED
         if quarantined:
             reasons.append(
                 f"{len(quarantined)} fichier(s) en quarantaine — revue humaine requise"
+            )
+        if duplicate:
+            reasons.append(
+                f"{len(duplicate)} fichier(s) en doublon — vérification requise"
             )
     else:
         global_status = IntakeStatus.ACCEPTED
@@ -238,7 +294,7 @@ def run(
             f"{len(accepted)} fichier(s) accepté(s) et stockés — dossier prêt pour traitement"
         )
 
-    # ── Étape 5 : manifest et résultat ──────────────────────────────────────
+    # ── Étape 5 : manifest, persistance et résultat ──────────────────────────
 
     manifest = ClaimManifest(
         claim_id=case_id,
@@ -251,12 +307,20 @@ def run(
         alerts=alerts,
     )
 
+    # Persistance du manifest sur disque — généré exclusivement depuis les
+    # fichiers réellement reçus et inspectés (jamais copié depuis les données
+    # de démonstration).  Toujours écrit, même pour les dossiers bloqués ou en
+    # erreur, afin de garantir une traçabilité complète.
+    svc.write_intake_manifest(case_id, manifest.model_dump_json(indent=2))
+
     return ClaimIntakeResult(
         claim_id=case_id,
         status=global_status,
         manifest=manifest,
         accepted_count=len(accepted),
         quarantined_count=len(quarantined),
+        duplicate_count=len(duplicate),
+        error_count=len(errored),
         reasons=reasons,
         errors=errors,
     )
@@ -286,7 +350,13 @@ def node(state: ClaimState) -> dict:
     )
 
     updates: dict = {
+        # ── Ce que le state reçoit après ingestion ────────────────────────────
+        # Contenu autorisé : identifiant, statut, manifest structuré,
+        # métadonnées documents (hashes + chemins relatifs).
+        # Contenu interdit : octets bruts, chemins absolus, objets fichiers.
         "intake_result": result,
+        "intake_status": result.status,      # promu pour le routage du graphe
+        "intake_input": None,                # vidé — source_path absolu supprimé
         "current_step": "claim_intake",
         "completed_steps": ["claim_intake"],
     }
@@ -297,6 +367,8 @@ def node(state: ClaimState) -> dict:
     if result.manifest.alerts:
         updates["alerts"] = result.manifest.alerts
 
+    # Garde-fou : lève ValueError si du contenu interdit est détecté
+    validate_state_update(updates)
     return updates
 
 
