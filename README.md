@@ -167,3 +167,69 @@ Voir `.env.example` pour la liste complète.
 - Aucun paiement automatique.
 - Aucune accusation automatique de fraude.
 - Toute recommandation finale requiert une validation humaine.
+
+---
+
+## Codes de sécurité stables
+
+Les codes ci-dessous sont des identifiants techniques stables. Ils ne contiennent
+aucune donnée médicale, aucun secret et aucun contenu de document. Seules les
+descriptions peuvent évoluer.
+
+### Audit minimal du Security Gate
+
+Chaque décision du Security Gate embarque un `SecurityAuditEntry` minimal dans
+le résultat Pydantic. Cet événement contient uniquement :
+
+- `claim_id`
+- horodatage `evaluated_at`
+- acteur ou agent demandeur `actor`
+- type d'entrée contrôlée `input_type`
+- politique appliquée `policy_applied`
+- version de politique `policy_version`
+- décision `decision` / `outcome`
+- codes stables `reason_codes`
+- hash `file_sha256` si un fichier est concerné
+
+L'audit minimal ne stocke jamais de document brut, texte OCR complet, prompt
+système, token, clé API ou mot de passe.
+
+### Seuils de sévérité
+
+Les seuils sont déterministes, versionnés dans `SeverityPolicy` et appliqués par
+du code Python. Aucun LLM ne choisit librement le niveau ou la décision.
+
+| Niveau | Exemple | Décision |
+|---|---|---|
+| `LOW` | Élément inhabituel sans danger immédiat | `ALLOW` avec alerte |
+| `MEDIUM` | Incohérence nécessitant vérification | `QUARANTINE` |
+| `HIGH` | URL externe ou outil interdit | `BLOCK` |
+| `CRITICAL` | Injection, accès secret, shell ou path traversal | `BLOCK` |
+
+| Code | Sévérité | Description |
+|---|---|---|
+| `UNSUPPORTED_EXTENSION` | HIGH | Extension de fichier non autorisée. |
+| `UNSUPPORTED_MIME` | HIGH | Type MIME détecté non autorisé. |
+| `FILE_TOO_LARGE` | HIGH | Taille réelle du fichier supérieure à la limite. |
+| `EMPTY_FILE` | HIGH | Fichier vide refusé. |
+| `FILE_METADATA_INCOMPLETE` | HIGH | Métadonnées fichier insuffisantes. |
+| `MIME_EXTENSION_MISMATCH` | MEDIUM | Incohérence entre extension et MIME détecté. |
+| `PATH_TRAVERSAL` | CRITICAL | Tentative de traversée de répertoire. |
+| `ABSOLUTE_PATH_FORBIDDEN` | CRITICAL | Chemin absolu interdit. |
+| `PATH_NULL_BYTE` | CRITICAL | Caractère nul interdit dans un chemin. |
+| `PATH_OUTSIDE_STORAGE` | CRITICAL | Chemin résolu hors de la racine storage. |
+| `STORAGE_ZONE_FORBIDDEN` | HIGH | Zone de stockage non autorisée. |
+| `EXTERNAL_URL_FORBIDDEN` | HIGH | URL externe refusée par défaut. |
+| `PRIVATE_NETWORK_URL` | CRITICAL | URL vers localhost, loopback ou réseau privé. |
+| `DANGEROUS_URL_SCHEME` | HIGH | Schéma d'URL dangereux ou non autorisé. |
+| `MALFORMED_URL` | HIGH | URL absente ou malformée. |
+| `URL_CREDENTIALS_FORBIDDEN` | HIGH | Identifiants présents dans l'URL. |
+| `PROMPT_INJECTION_DETECTED` | CRITICAL | Tentative d'injection de prompt détectée. |
+| `SECRET_ACCESS_ATTEMPT` | CRITICAL | Tentative d'accès à un secret. |
+| `SHELL_ACCESS_ATTEMPT` | CRITICAL | Tentative d'accès shell, terminal ou commande. |
+| `UNAUTHORIZED_TOOL` | CRITICAL | Outil ou agent demandeur non autorisé. |
+| `WRITE_PATH_FORBIDDEN` | HIGH | Écriture demandée hors des zones autorisées. |
+| `INVALID_AGENT_OUTPUT` | HIGH | Sortie d'agent invalide ou dangereuse. |
+| `SUSPICIOUS_DOCUMENT_CONTENT` | HIGH | Contenu documentaire suspect. |
+| `SUSPICIOUS_CONTENT` | MEDIUM | Contenu suspect non classé plus précisément. |
+| `POLICY_VIOLATION` | MEDIUM | Violation générique de politique de sécurité. |

@@ -183,7 +183,7 @@ def test_security_result_from_oracle():
     gt = load_ground_truth("CLM-0001")
     sec = gt["expected_security"]
     result = SecurityGateResult(
-        case_id=gt["case_id"],
+        claim_id=gt["case_id"],
         decision=SecurityDecision.ALLOW,
         prompt_injection_detected=sec["prompt_injection_detected"],
         reasons=sec["reasons"],
@@ -274,7 +274,11 @@ def test_all_models_json_serializable():
             accepted_count=0,
             quarantined_count=0,
         ),
-        res.SecurityGateResult(case_id="CLM-0001", decision=dom.SecurityDecision.ALLOW),
+        res.SecurityGateResult(
+            claim_id="CLM-0001",
+            decision=dom.SecurityDecision.ALLOW,
+            reasons=["Aucune menace détectée — dossier autorisé"],
+        ),
         res.PrivacyResult(
             case_id="CLM-0001",
             status=dom.VerificationStatus.PASS,

@@ -86,6 +86,11 @@ class ClaimState(TypedDict, total=False):
     # ne doit le lire.
     intake_input: dict | None
 
+    # ── Entrée sécurité — consommée et vidée par le nœud security_gate ───────
+    # Contient text_fields et deterministic_injection_flag.
+    # Le nœud security_gate le remet à None après traitement.
+    security_input: dict | None
+
     # ── Résultats des agents (un par agent, écrasable) ────────────────────────
     intake_result: ClaimIntakeResult | None
     intake_status: IntakeStatus | None       # promu pour le routage du graphe

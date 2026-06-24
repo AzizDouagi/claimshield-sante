@@ -37,6 +37,123 @@ class SecurityDecision(str, Enum):
     QUARANTINE = "QUARANTINE"
 
 
+class InputType(str, Enum):
+    """Type de l'entrée soumise à l'évaluation de sécurité."""
+
+    FILE = "file"
+    TEXT = "text"
+    URL = "url"
+    TOOL = "tool"
+    AGENT_OUTPUT = "agent_output"
+
+
+class SeverityLevel(str, Enum):
+    """Niveau de sévérité d'une anomalie de sécurité."""
+
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFO = "INFO"
+
+
+class FindingCode(str, Enum):
+    """Codes stables identifiant le type d'anomalie de sécurité.
+
+    Ces codes ne changent pas entre versions — seul le message peut évoluer.
+    Ils ne contiennent aucune donnée métier ou médicale.
+    """
+
+    UNSUPPORTED_EXTENSION = "UNSUPPORTED_EXTENSION"
+    UNSUPPORTED_MIME = "UNSUPPORTED_MIME"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+    EMPTY_FILE = "EMPTY_FILE"
+    FILE_METADATA_INCOMPLETE = "FILE_METADATA_INCOMPLETE"
+    MIME_EXTENSION_MISMATCH = "MIME_EXTENSION_MISMATCH"
+    PATH_TRAVERSAL = "PATH_TRAVERSAL"
+    ABSOLUTE_PATH_FORBIDDEN = "ABSOLUTE_PATH_FORBIDDEN"
+    PATH_NULL_BYTE = "PATH_NULL_BYTE"
+    PATH_OUTSIDE_STORAGE = "PATH_OUTSIDE_STORAGE"
+    STORAGE_ZONE_FORBIDDEN = "STORAGE_ZONE_FORBIDDEN"
+    EXTERNAL_URL_FORBIDDEN = "EXTERNAL_URL_FORBIDDEN"
+    PRIVATE_NETWORK_URL = "PRIVATE_NETWORK_URL"
+    DANGEROUS_URL_SCHEME = "DANGEROUS_URL_SCHEME"
+    MALFORMED_URL = "MALFORMED_URL"
+    URL_CREDENTIALS_FORBIDDEN = "URL_CREDENTIALS_FORBIDDEN"
+    PROMPT_INJECTION_DETECTED = "PROMPT_INJECTION_DETECTED"
+    SECRET_ACCESS_ATTEMPT = "SECRET_ACCESS_ATTEMPT"
+    SHELL_ACCESS_ATTEMPT = "SHELL_ACCESS_ATTEMPT"
+    UNAUTHORIZED_TOOL = "UNAUTHORIZED_TOOL"
+    WRITE_PATH_FORBIDDEN = "WRITE_PATH_FORBIDDEN"
+    INVALID_AGENT_OUTPUT = "INVALID_AGENT_OUTPUT"
+    SUSPICIOUS_DOCUMENT_CONTENT = "SUSPICIOUS_DOCUMENT_CONTENT"
+    SUSPICIOUS_CONTENT = "SUSPICIOUS_CONTENT"
+    POLICY_VIOLATION = "POLICY_VIOLATION"
+
+    # Alias conservés pour compatibilité avec les étapes précédentes.
+    PROMPT_INJECTION = "PROMPT_INJECTION_DETECTED"
+    XSS_ATTEMPT = "SUSPICIOUS_DOCUMENT_CONTENT"
+    FORBIDDEN_EXTENSION = "UNSUPPORTED_EXTENSION"
+    FORBIDDEN_MIME = "UNSUPPORTED_MIME"
+
+
+SECURITY_CODE_DESCRIPTIONS: dict[FindingCode, str] = {
+    FindingCode.UNSUPPORTED_EXTENSION: "Extension de fichier non autorisée.",
+    FindingCode.UNSUPPORTED_MIME: "Type MIME détecté non autorisé.",
+    FindingCode.FILE_TOO_LARGE: "Taille réelle du fichier supérieure à la limite.",
+    FindingCode.EMPTY_FILE: "Fichier vide refusé.",
+    FindingCode.FILE_METADATA_INCOMPLETE: "Métadonnées fichier insuffisantes.",
+    FindingCode.MIME_EXTENSION_MISMATCH: "Incohérence entre extension et MIME détecté.",
+    FindingCode.PATH_TRAVERSAL: "Tentative de traversée de répertoire.",
+    FindingCode.ABSOLUTE_PATH_FORBIDDEN: "Chemin absolu interdit.",
+    FindingCode.PATH_NULL_BYTE: "Caractère nul interdit dans un chemin.",
+    FindingCode.PATH_OUTSIDE_STORAGE: "Chemin résolu hors de la racine storage.",
+    FindingCode.STORAGE_ZONE_FORBIDDEN: "Zone de stockage non autorisée.",
+    FindingCode.EXTERNAL_URL_FORBIDDEN: "URL externe refusée par défaut.",
+    FindingCode.PRIVATE_NETWORK_URL: "URL vers localhost, loopback ou réseau privé.",
+    FindingCode.DANGEROUS_URL_SCHEME: "Schéma d'URL dangereux ou non autorisé.",
+    FindingCode.MALFORMED_URL: "URL absente ou malformée.",
+    FindingCode.URL_CREDENTIALS_FORBIDDEN: "Identifiants présents dans l'URL.",
+    FindingCode.PROMPT_INJECTION_DETECTED: "Tentative d'injection de prompt détectée.",
+    FindingCode.SECRET_ACCESS_ATTEMPT: "Tentative d'accès à un secret.",
+    FindingCode.SHELL_ACCESS_ATTEMPT: "Tentative d'accès shell, terminal ou commande.",
+    FindingCode.UNAUTHORIZED_TOOL: "Outil ou agent demandeur non autorisé.",
+    FindingCode.WRITE_PATH_FORBIDDEN: "Écriture demandée hors des zones autorisées.",
+    FindingCode.INVALID_AGENT_OUTPUT: "Sortie d'agent invalide ou dangereuse.",
+    FindingCode.SUSPICIOUS_DOCUMENT_CONTENT: "Contenu documentaire suspect.",
+    FindingCode.SUSPICIOUS_CONTENT: "Contenu suspect non classé plus précisément.",
+    FindingCode.POLICY_VIOLATION: "Violation générique de politique de sécurité.",
+}
+
+SECURITY_CODE_SEVERITIES: dict[FindingCode, SeverityLevel] = {
+    FindingCode.UNSUPPORTED_EXTENSION: SeverityLevel.HIGH,
+    FindingCode.UNSUPPORTED_MIME: SeverityLevel.HIGH,
+    FindingCode.FILE_TOO_LARGE: SeverityLevel.HIGH,
+    FindingCode.EMPTY_FILE: SeverityLevel.HIGH,
+    FindingCode.FILE_METADATA_INCOMPLETE: SeverityLevel.HIGH,
+    FindingCode.MIME_EXTENSION_MISMATCH: SeverityLevel.MEDIUM,
+    FindingCode.PATH_TRAVERSAL: SeverityLevel.CRITICAL,
+    FindingCode.ABSOLUTE_PATH_FORBIDDEN: SeverityLevel.CRITICAL,
+    FindingCode.PATH_NULL_BYTE: SeverityLevel.CRITICAL,
+    FindingCode.PATH_OUTSIDE_STORAGE: SeverityLevel.CRITICAL,
+    FindingCode.STORAGE_ZONE_FORBIDDEN: SeverityLevel.HIGH,
+    FindingCode.EXTERNAL_URL_FORBIDDEN: SeverityLevel.HIGH,
+    FindingCode.PRIVATE_NETWORK_URL: SeverityLevel.CRITICAL,
+    FindingCode.DANGEROUS_URL_SCHEME: SeverityLevel.HIGH,
+    FindingCode.MALFORMED_URL: SeverityLevel.HIGH,
+    FindingCode.URL_CREDENTIALS_FORBIDDEN: SeverityLevel.HIGH,
+    FindingCode.PROMPT_INJECTION_DETECTED: SeverityLevel.CRITICAL,
+    FindingCode.SECRET_ACCESS_ATTEMPT: SeverityLevel.CRITICAL,
+    FindingCode.SHELL_ACCESS_ATTEMPT: SeverityLevel.CRITICAL,
+    FindingCode.UNAUTHORIZED_TOOL: SeverityLevel.CRITICAL,
+    FindingCode.WRITE_PATH_FORBIDDEN: SeverityLevel.HIGH,
+    FindingCode.INVALID_AGENT_OUTPUT: SeverityLevel.HIGH,
+    FindingCode.SUSPICIOUS_DOCUMENT_CONTENT: SeverityLevel.HIGH,
+    FindingCode.SUSPICIOUS_CONTENT: SeverityLevel.MEDIUM,
+    FindingCode.POLICY_VIOLATION: SeverityLevel.MEDIUM,
+}
+
+
 class DataClassification(str, Enum):
     SYNTHETIC_TEST_DATA = "SYNTHETIC_TEST_DATA"
     ANONYMIZED = "ANONYMIZED"

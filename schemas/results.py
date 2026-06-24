@@ -9,22 +9,43 @@ Chaque résultat :
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from schemas.domain import (
     DataClassification,
     ExtractedData,
     FileStatus,
+    FindingCode,
+    InputType,
     IntakeStatus,
     Recommendation,
     SecurityDecision,
+    SeverityLevel,
     StrictModel,
     VerificationStatus,
 )
+
+_ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[/\\]|\\\\)")
+_SECRET_HINT_RE = re.compile(
+    r"(?:api[_-]?key|secret\s*[:=]|password\s*[:=]|token\s*[:=]|bearer\s+[a-z0-9._~+/=-]+)",
+    re.IGNORECASE,
+)
+
+
+def _reject_security_leak(value: str | None, field_name: str) -> str | None:
+    """Refuse les valeurs qui ne doivent jamais être persistées dans le gate."""
+    if value is None:
+        return value
+    if _ABSOLUTE_PATH_RE.match(value):
+        raise ValueError(f"Chemin absolu interdit dans {field_name}")
+    if _SECRET_HINT_RE.search(value):
+        raise ValueError(f"Secret potentiel interdit dans {field_name}")
+    return value
 
 
 # ── 1. Claim Intake Agent ─────────────────────────────────────────────────────
@@ -92,14 +113,145 @@ class ClaimIntakeResult(StrictModel):
 # ── 2. Security Gate Agent ────────────────────────────────────────────────────
 
 
-class SecurityGateResult(StrictModel):
-    """ALLOW / BLOCK / QUARANTINE avant chaque étape sensible."""
+class SecurityFinding(StrictModel):
+    """Anomalie de sécurité détectée lors de l'évaluation.
 
-    case_id: str
+    Le champ `evidence` est volontairement limité et ne contient jamais
+    de document brut, de secret ou de donnée personnelle complète.
+    """
+
+    code: FindingCode = Field(..., description="Code stable de l'anomalie")
+    severity: SeverityLevel = Field(..., description="Niveau de sévérité")
+    description: str = Field(..., min_length=1, description="Description compréhensible")
+    detection_source: str = Field(
+        ...,
+        description="Source de la détection (ex. 'regex_scanner')",
+    )
+    affected_element: str = Field(..., description="Champ ou élément concerné")
+    evidence: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Preuve minimisée — tronquée, sans secret ni document brut",
+    )
+
+    @field_validator(
+        "description",
+        "detection_source",
+        "affected_element",
+        "evidence",
+    )
+    @classmethod
+    def no_sensitive_value(cls, v: str | None, info) -> str | None:
+        return _reject_security_leak(v, info.field_name)
+
+
+class SecurityAuditEntry(StrictModel):
+    """Événement d'audit minimal embarqué dans SecurityGateResult.
+
+    Complément léger de l'AuditEvent global — ne contient pas de secret.
+    """
+
+    claim_id: str = Field(default="", description="Identifiant du dossier contrôlé")
+    actor: str = Field(default="security_gate_agent")
+    action: str = Field(default="security_evaluation")
+    input_type: InputType | None = Field(
+        default=None,
+        description="Type d'entrée contrôlée",
+    )
+    outcome: str = Field(
+        ...,
+        description="Valeur de SecurityDecision ayant conclu l'évaluation",
+    )
+    decision: SecurityDecision | None = Field(
+        default=None,
+        description="Décision structurée du Security Gate",
+    )
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    policy_applied: str = Field(
+        default="default",
+        description="Nom de la SecurityPolicy utilisée",
+    )
+    policy_version: str = Field(
+        default="1.0.0",
+        description="Version de la SecurityPolicy utilisée",
+    )
+    reason_codes: list[FindingCode] = Field(
+        default_factory=list,
+        description="Codes stables des motifs de décision",
+    )
+    file_sha256: Annotated[str, Field(min_length=64, max_length=64)] | None = Field(
+        default=None,
+        description="SHA-256 du fichier concerné, si disponible",
+    )
+
+    @field_validator(
+        "claim_id",
+        "actor",
+        "action",
+        "outcome",
+        "policy_applied",
+        "policy_version",
+        "file_sha256",
+    )
+    @classmethod
+    def no_sensitive_value(cls, v: str | None, info) -> str | None:
+        return _reject_security_leak(v, info.field_name)
+
+
+class SecurityGateResult(StrictModel):
+    """Décision de sécurité ALLOW / BLOCK / QUARANTINE.
+
+    Invariants :
+      - `reasons` contient au moins un motif (min_length=1).
+      - `policy_version` identifie la politique ayant produit la décision.
+      - `findings` est la liste structurée des anomalies détectées.
+      - `evaluated_at` et `audit_entry` sont renseignés par l'agent.
+      - Le schéma est JSON-sérialisable (StrictModel Pydantic).
+      - Aucun document brut, secret ou chemin absolu.
+    """
+
+    claim_id: str
     decision: SecurityDecision
+    findings: list[SecurityFinding] = Field(
+        default_factory=list,
+        description="Liste structurée des anomalies détectées",
+    )
+    reason_codes: list[FindingCode] = Field(
+        default_factory=list,
+        description="Codes stables des motifs de la décision",
+    )
+    applied_policy: str = Field(
+        default="default",
+        description="Nom de la SecurityPolicy appliquée",
+    )
+    policy_version: str = Field(default="1.0.0", description="Version de la SecurityPolicy")
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    next_allowed_action: str = Field(
+        default="",
+        description="Action suivante autorisée après cette décision",
+    )
+    audit_entry: SecurityAuditEntry | None = Field(
+        default=None,
+        description="Événement d'audit minimal — renseigné par l'agent",
+    )
     prompt_injection_detected: bool | None = None
     blocked_fields: list[str] = Field(default_factory=list)
-    reasons: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(
+        min_length=1,
+        description="Au moins un motif humainement lisible obligatoire",
+    )
+
+    @field_validator("claim_id", "applied_policy", "policy_version", "next_allowed_action")
+    @classmethod
+    def no_sensitive_scalar(cls, v: str | None, info) -> str | None:
+        return _reject_security_leak(v, info.field_name)
+
+    @field_validator("blocked_fields", "reasons")
+    @classmethod
+    def no_sensitive_list(cls, v: list[str], info) -> list[str]:
+        for item in v:
+            _reject_security_leak(item, info.field_name)
+        return v
 
 
 # ── 3. Privacy Agent ──────────────────────────────────────────────────────────

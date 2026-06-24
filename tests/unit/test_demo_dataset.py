@@ -200,11 +200,12 @@ def test_security_gate_result_valide(case_id: str):
     gt = load_gt(case_id)
     es = gt["expected_security"]
     decision = "BLOCK" if es.get("status") == "FAIL" else "ALLOW"
+    reasons = es.get("reasons") or ["Aucune menace détectée — dossier autorisé"]
     SecurityGateResult(
-        case_id=case_id,
+        claim_id=case_id,
         decision=SecurityDecision(decision),
         prompt_injection_detected=es.get("prompt_injection_detected"),
-        reasons=es.get("reasons", []),
+        reasons=reasons,
     )
 
 
