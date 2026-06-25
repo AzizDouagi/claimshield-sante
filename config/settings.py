@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +76,17 @@ class Settings(BaseSettings):
     langgraph_checkpoint_db: Path = Field(
         _PROJECT_ROOT / "storage" / "checkpoints.db",
         alias="LANGGRAPH_CHECKPOINT_DB",
+    )
+
+    # ── Pseudonymisation ─────────────────────────────────────────────────────
+    pseudonymization_key: SecretStr = Field(
+        default=SecretStr("claimshield-dev-pseudonymization-key-change-in-production"),
+        alias="PSEUDONYMIZATION_KEY",
+        description=(
+            "Clé secrète HMAC-SHA256 pour la pseudonymisation des identifiants patients. "
+            "Ne jamais écrire la valeur réelle dans le code ni dans les logs. "
+            "Valeur par défaut = clé de développement uniquement."
+        ),
     )
 
     # ── Sécurité fichiers ─────────────────────────────────────────────────────

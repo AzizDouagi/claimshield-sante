@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, computed_field, field_validator
 
 from schemas.domain import (
     DataClassification,
@@ -23,6 +23,8 @@ from schemas.domain import (
     FindingCode,
     InputType,
     IntakeStatus,
+    PrivacyCode,
+    PrivacyDecision,
     Recommendation,
     SecurityDecision,
     SeverityLevel,
@@ -257,15 +259,112 @@ class SecurityGateResult(StrictModel):
 # ── 3. Privacy Agent ──────────────────────────────────────────────────────────
 
 
+class PrivacyAuditEntry(StrictModel):
+    """Trace d'audit minimisée embarquée dans PrivacyResult.
+
+    Contient uniquement des métadonnées de traitement — jamais de données
+    personnelles, de secret, de chemin absolu ni de texte OCR brut.
+    Conforme aux mêmes règles que SecurityAuditEntry.
+    """
+
+    claim_id: str = Field(default="", description="Identifiant du dossier traité")
+    actor: str = Field(default="privacy_agent", description="Agent ayant produit la vue")
+    action: str = Field(default="view_request", description="Action effectuée")
+    role: str = Field(
+        ...,
+        description="Rôle du demandeur (valeur de ReaderRole) ou 'UNKNOWN' si absent",
+    )
+    outcome: str = Field(
+        ...,
+        description="Valeur de VerificationStatus ayant conclu le traitement",
+    )
+    decision: VerificationStatus | None = Field(
+        default=None,
+        description="Décision structurée du Privacy Agent",
+    )
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    policy_version: str = Field(
+        default="1.0.0",
+        description="Version de la politique d'accès appliquée",
+    )
+    redacted_count: int = Field(
+        default=0,
+        ge=0,
+        description="Nombre de champs refusés par DENY-by-default",
+    )
+    view_built: bool = Field(
+        default=False,
+        description="Vue minimisée construite avec succès (claim_data fourni et valide)",
+    )
+    pseudonymization_applied: bool = Field(
+        default=False,
+        description="Pseudonymisation des identifiants personnels appliquée",
+    )
+    reason_codes: list[PrivacyCode] = Field(
+        default_factory=list,
+        description="Codes stables identifiant la cause de la décision ou d'une erreur",
+    )
+
+    @field_validator("claim_id", "actor", "action", "role", "outcome", "policy_version")
+    @classmethod
+    def no_sensitive_value(cls, v: str | None, info) -> str | None:
+        return _reject_security_leak(v, info.field_name)
+
+
 class PrivacyResult(StrictModel):
-    """Vues minimisées selon le rôle du lecteur."""
+    """Résultat du Privacy Agent — vues minimisées et décision PASS/NEEDS_REVIEW/FAIL.
+
+    Le champ `decision` est calculé automatiquement depuis `status` :
+      PASS / NEEDS_REVIEW → PrivacyDecision.ALLOW
+      FAIL               → PrivacyDecision.BLOCK
+    """
 
     case_id: str
     status: VerificationStatus
     data_classification: DataClassification
     contains_real_personal_data: bool
-    masked_fields: list[str] = Field(default_factory=list)
-    reasons: list[str] = Field(default_factory=list)
+    redacted_fields: list[str] = Field(
+        default_factory=list,
+        description="Champs refusés par la politique DENY-by-default pour ce rôle",
+    )
+    reasons: list[str] = Field(
+        default_factory=list,
+        description="Motifs lisibles — informations et alertes (PASS, NEEDS_REVIEW, FAIL)",
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Motifs de blocage — non vide uniquement quand status == FAIL",
+    )
+    policy_version: str = Field(
+        default="1.0.0",
+        description="Version de la politique d'accès appliquée",
+    )
+    reason_codes: list[PrivacyCode] = Field(
+        default_factory=list,
+        description="Codes stables identifiant la cause de la décision ou d'une erreur",
+    )
+    view: dict | None = Field(
+        default=None,
+        description="Vue minimisée construite selon le rôle (JSON-sérialisable)",
+    )
+    view_role: str | None = Field(
+        default=None,
+        description="Rôle ayant produit la vue (valeur de PrivacyRole)",
+    )
+    audit_entry: PrivacyAuditEntry | None = Field(
+        default=None,
+        description="Trace d'audit minimisée du traitement privacy",
+    )
+
+    @computed_field
+    @property
+    def decision(self) -> PrivacyDecision:
+        """Décision binaire dérivée du statut : ALLOW si PASS/NEEDS_REVIEW, BLOCK si FAIL."""
+        return (
+            PrivacyDecision.BLOCK
+            if self.status == VerificationStatus.FAIL
+            else PrivacyDecision.ALLOW
+        )
 
 
 # ── 4. Identity & Coverage Agent ─────────────────────────────────────────────

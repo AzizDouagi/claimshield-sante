@@ -91,6 +91,11 @@ class ClaimState(TypedDict, total=False):
     # Le nœud security_gate le remet à None après traitement.
     security_input: dict | None
 
+    # ── Entrée privacy — consommée et vidée par le nœud privacy ──────────────
+    # Contient role, data_classification, contains_real_personal_data, etc.
+    # Le nœud privacy le remet à None après traitement.
+    privacy_input: dict | None
+
     # ── Résultats des agents (un par agent, écrasable) ────────────────────────
     intake_result: ClaimIntakeResult | None
     intake_status: IntakeStatus | None       # promu pour le routage du graphe

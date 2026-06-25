@@ -75,9 +75,17 @@ service-account.json
 storage/incoming/*
 storage/quarantine/*
 storage/temporary/*
+storage/inbox/
+storage/rejected/
+storage/processed/
+storage/manifests/
 !storage/incoming/.gitkeep
 !storage/quarantine/.gitkeep
 !storage/temporary/.gitkeep
+
+# Backups datasets (données runtime, pas de code)
+datasets/fixtures/backups/
+datasets/fixtures/metadata/ground_truth_backups/
 
 # Docker
 .dockerenv

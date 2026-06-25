@@ -37,6 +37,19 @@ class SecurityDecision(str, Enum):
     QUARANTINE = "QUARANTINE"
 
 
+class PrivacyDecision(str, Enum):
+    """Décision d'accès du Privacy Agent — binaire par design.
+
+    ALLOW — accès accordé (VerificationStatus.PASS ou NEEDS_REVIEW).
+            La vue minimisée est produite ; une revue humaine peut être requise.
+    BLOCK — accès refusé (VerificationStatus.FAIL).
+            Aucune vue n'est produite ; l'agent a bloqué l'accès.
+    """
+
+    ALLOW = "ALLOW"
+    BLOCK = "BLOCK"
+
+
 class InputType(str, Enum):
     """Type de l'entrée soumise à l'évaluation de sécurité."""
 
@@ -154,10 +167,74 @@ SECURITY_CODE_SEVERITIES: dict[FindingCode, SeverityLevel] = {
 }
 
 
+class PrivacyCode(str, Enum):
+    """Codes stables du Privacy Agent — identifient la cause d'une décision ou d'une erreur.
+
+    Ces codes ne changent pas entre versions — seul le message associé peut évoluer.
+    Ils ne contiennent aucune donnée personnelle, médicale ni confidentielle.
+    Utilisés dans PrivacyResult.reason_codes et PrivacyAuditEntry.reason_codes.
+    """
+
+    MISSING_ROLE = "MISSING_ROLE"
+    UNKNOWN_ROLE = "UNKNOWN_ROLE"
+    UNKNOWN_POLICY = "UNKNOWN_POLICY"
+    MISSING_PSEUDONYMIZATION_KEY = "MISSING_PSEUDONYMIZATION_KEY"
+    UNMASKED_IDENTIFIER = "UNMASKED_IDENTIFIER"
+    FORBIDDEN_FIELD_EXPOSED = "FORBIDDEN_FIELD_EXPOSED"
+    INVALID_PRIVACY_INPUT = "INVALID_PRIVACY_INPUT"
+    INVALID_PRIVACY_OUTPUT = "INVALID_PRIVACY_OUTPUT"
+    PSEUDONYMIZATION_ERROR = "PSEUDONYMIZATION_ERROR"
+
+
+PRIVACY_CODE_DESCRIPTIONS: dict[PrivacyCode, str] = {
+    PrivacyCode.MISSING_ROLE: (
+        "Rôle absent — champ obligatoire pour accéder à une vue minimisée."
+    ),
+    PrivacyCode.UNKNOWN_ROLE: (
+        "Rôle inconnu — valeur hors de l'énumération ReaderRole."
+    ),
+    PrivacyCode.UNKNOWN_POLICY: (
+        "Politique d'accès introuvable pour ce rôle — incohérence interne."
+    ),
+    PrivacyCode.MISSING_PSEUDONYMIZATION_KEY: (
+        "Clé HMAC de pseudonymisation inaccessible ou vide — blocage préventif."
+    ),
+    PrivacyCode.UNMASKED_IDENTIFIER: (
+        "Identifiant sans le préfixe de pseudonymisation attendu (PAT-…, PRV-…)."
+    ),
+    PrivacyCode.FORBIDDEN_FIELD_EXPOSED: (
+        "Champ secret ou identifiant personnel brut exposé dans la vue minimisée."
+    ),
+    PrivacyCode.INVALID_PRIVACY_INPUT: (
+        "Entrée PrivacyInput invalide selon le schéma Pydantic — validation échouée."
+    ),
+    PrivacyCode.INVALID_PRIVACY_OUTPUT: (
+        "Vue minimisée invalide — ne respecte pas le schéma Pydantic du rôle."
+    ),
+    PrivacyCode.PSEUDONYMIZATION_ERROR: (
+        "Erreur technique lors de la pseudonymisation — traitement bloqué."
+    ),
+}
+
+
 class DataClassification(str, Enum):
     SYNTHETIC_TEST_DATA = "SYNTHETIC_TEST_DATA"
     ANONYMIZED = "ANONYMIZED"
     CONFIDENTIAL = "CONFIDENTIAL"
+
+
+class ReaderRole(str, Enum):
+    """Rôle du lecteur déterminant la vue minimisée autorisée.
+
+    Quatre rôles stables — politique par défaut DENY.
+    Toute valeur absente de cette énumération est automatiquement rejetée.
+    Aucun rôle n'a accès à l'intégralité des champs connus du domaine.
+    """
+
+    ADMINISTRATIVE_MANAGER = "ADMINISTRATIVE_MANAGER"
+    MEDICAL_REVIEWER = "MEDICAL_REVIEWER"
+    FRAUD_ANALYST = "FRAUD_ANALYST"
+    AUDITOR = "AUDITOR"
 
 
 class AuthorizationStatus(str, Enum):
