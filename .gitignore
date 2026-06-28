@@ -42,6 +42,7 @@ CLAUDE.md
 # Logs
 logs/
 *.log
+.coverage
 
 # OS
 .DS_Store
@@ -79,6 +80,7 @@ storage/inbox/
 storage/rejected/
 storage/processed/
 storage/manifests/
+storage/artifacts/
 !storage/incoming/.gitkeep
 !storage/quarantine/.gitkeep
 !storage/temporary/.gitkeep
@@ -89,4 +91,3 @@ datasets/fixtures/metadata/ground_truth_backups/
 
 # Docker
 .dockerenv
-

@@ -23,7 +23,7 @@ from schemas.results import (
     CoverageResult,
     SecurityGateResult,
 )
-from schemas.domain import Recommendation, VerificationStatus, SecurityDecision
+from schemas.domain import DocumentType, ExtractionStatus, OcrSource, Recommendation, VerificationStatus, SecurityDecision
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "datasets" / "fixtures" / "valid"
 
@@ -291,7 +291,16 @@ def test_all_models_json_serializable():
             coverage=res.CoverageResult(status=dom.VerificationStatus.PASS),
         ),
         res.FhirValidatorResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS, bundle_expected=True),
-        res.DocumentOcrResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
+        res.DocumentOcrResult(
+            claim_id="CLM-0001",
+            file_path="incoming/CLM-0001/facture.pdf",
+            sha256="a" * 64,
+            mime_type="application/pdf",
+            extraction_status=dom.ExtractionStatus.SUCCESS,
+            status=dom.VerificationStatus.PASS,
+            document_type=dom.DocumentType.INVOICE,
+            ocr_source=dom.OcrSource.PDF_TEXT,
+        ),
         res.MedicalCodingResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
         res.ClinicalConsistencyResult.model_validate({"case_id": "CLM-0001", "status": "PASS"}),
         res.FraudDetectionResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),

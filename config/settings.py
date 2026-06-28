@@ -101,9 +101,32 @@ class Settings(BaseSettings):
         alias="CLAIMSHIELD_ALLOWED_MIME_TYPES",
     )
 
+    # ── Document/OCR Agent ───────────────────────────────────────────────────
+    ocr_enabled: bool = Field(True, alias="OCR_ENABLED")
+    ocr_language: str = Field("eng", alias="OCR_LANGUAGE")
+    ocr_min_confidence: float = Field(0.75, alias="OCR_MIN_CONFIDENCE")
+    ocr_max_pages: int = Field(20, alias="OCR_MAX_PAGES")
+    ocr_max_text_length: int = Field(100_000, alias="OCR_MAX_TEXT_LENGTH")
+    ocr_min_chars_per_page: int = Field(20, alias="OCR_MIN_CHARS_PER_PAGE")
+    ocr_thresholds_version: str = Field("ocr-thresholds-v1", alias="OCR_THRESHOLDS_VERSION")
+
     @field_validator("claimshield_max_file_size_mb", "claimshield_max_folder_size_mb", "claimshield_max_files_per_folder")
     @classmethod
     def _doit_etre_positif(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} doit être strictement positif, reçu : {v}")
+        return v
+
+    @field_validator("ocr_min_confidence")
+    @classmethod
+    def _ocr_confidence_valide(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"ocr_min_confidence doit être entre 0.0 et 1.0, reçu : {v}")
+        return v
+
+    @field_validator("ocr_max_pages", "ocr_max_text_length", "ocr_min_chars_per_page")
+    @classmethod
+    def _ocr_limites_positives(cls, v: int, info) -> int:
         if v <= 0:
             raise ValueError(f"{info.field_name} doit être strictement positif, reçu : {v}")
         return v

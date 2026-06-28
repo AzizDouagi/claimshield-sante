@@ -1,7 +1,7 @@
 {
   "case_id": "CLM-0003",
   "claimshield_id": "CLM-0003",
-  "generated_at": "2026-06-18T19:31:16.454227+00:00",
+  "generated_at": "2026-06-27T13:30:02.248848+00:00",
   "synthetic": true,
   "dataset": {
     "source_generator": "Synthea",
@@ -95,6 +95,22 @@
       "size_bytes": 2977,
       "sha256": "2f69fbb8ac7706a569aba10108d64e97dd4bf5c6bba5f58e330b6548e9b8e123",
       "required": true
+    },
+    {
+      "filename": "facture_image_CLM-0003.png",
+      "size_bytes": 337176,
+      "sha256": "87e9f090c09fafaf323bd60ee6ea2823fbe7e20f60db01bebc6aa03eeeaedb66",
+      "required": false,
+      "image_fixture": true,
+      "purpose": "OCR agent test fixture — données synthétiques"
+    },
+    {
+      "filename": "document_illisible_CLM-0003.png",
+      "size_bytes": 3301540,
+      "sha256": "c2e6e664e84af9021f74970e0a938936e9b5042828cf6e6a4f5513b5ce22172a",
+      "required": false,
+      "image_fixture": true,
+      "purpose": "OCR agent test fixture — données synthétiques"
     }
   ],
   "synthea_sources_used": [

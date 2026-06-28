@@ -1,7 +1,7 @@
 {
   "case_id": "CLM-0002",
   "claimshield_id": "CLM-0002",
-  "generated_at": "2026-06-18T19:31:16.429891+00:00",
+  "generated_at": "2026-06-27T13:30:02.246867+00:00",
   "synthetic": true,
   "dataset": {
     "source_generator": "Synthea",
@@ -95,6 +95,14 @@
       "size_bytes": 2785,
       "sha256": "4c9b7d26e66cc2cb5b4933c5085a9756bb622c658a08c8f60fc1a2e53be03b64",
       "required": true
+    },
+    {
+      "filename": "ordonnance_image_CLM-0002.jpg",
+      "size_bytes": 189995,
+      "sha256": "85aefc383e5b6e742d2b93b13f09e8af16959ac61d76e9e204191c40b0c04e59",
+      "required": false,
+      "image_fixture": true,
+      "purpose": "OCR agent test fixture — données synthétiques"
     }
   ],
   "synthea_sources_used": [

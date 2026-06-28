@@ -338,6 +338,94 @@ PositiveDecimal = Annotated[Decimal, Field(gt=Decimal("0"))]
 NonNegativeDecimal = Annotated[Decimal, Field(ge=Decimal("0"))]
 
 
+# ── Enums Document/OCR Agent ─────────────────────────────────────────────────
+
+
+class DocumentType(str, Enum):
+    """Type de document médical identifié par l'agent OCR.
+
+    Les valeurs sont stables entre versions — seul le message peut évoluer.
+    La classification combine : nom de fichier > type MIME > mots-clés.
+    """
+
+    INVOICE = "INVOICE"               # facture médicale
+    PRESCRIPTION = "PRESCRIPTION"     # ordonnance médicale
+    CLAIM_REQUEST = "CLAIM_REQUEST"   # demande de remboursement
+    FHIR_BUNDLE = "FHIR_BUNDLE"       # bundle FHIR R4 (JSON)
+    UNKNOWN = "UNKNOWN"               # type non identifié
+    UNSUPPORTED = "UNSUPPORTED"       # type MIME non géré par l'agent
+
+
+class OcrSource(str, Enum):
+    """Origine de l'extraction textuelle pour la traçabilité de provenance."""
+
+    PDF_TEXT = "PDF_TEXT"        # texte natif extrait de pypdf
+    PDF_OCR = "PDF_OCR"          # PDF scanné — OCR appliqué sur les images de pages
+    IMAGE_OCR = "IMAGE_OCR"      # fichier image (PNG/JPEG) — OCR appliqué
+    UNSUPPORTED = "UNSUPPORTED"  # type MIME non pris en charge par l'agent
+
+
+class OcrCode(str, Enum):
+    """Codes stables identifiant les cas d'erreur et d'alerte du Document/OCR Agent.
+
+    Ces codes ne changent pas entre versions — seul le message peut évoluer.
+    """
+
+    SECURITY_GATE_NOT_ALLOW = "SECURITY_GATE_NOT_ALLOW"
+    FILE_NOT_IN_INCOMING = "FILE_NOT_IN_INCOMING"
+    SHA256_MISMATCH = "SHA256_MISMATCH"
+    UNSUPPORTED_MIME_TYPE = "UNSUPPORTED_MIME_TYPE"
+    PDF_EXTRACTION_ERROR = "PDF_EXTRACTION_ERROR"
+    OCR_ENGINE_UNAVAILABLE = "OCR_ENGINE_UNAVAILABLE"
+    OCR_EXTRACTION_ERROR = "OCR_EXTRACTION_ERROR"
+    UNREADABLE_DOCUMENT = "UNREADABLE_DOCUMENT"
+    INVALID_OCR_INPUT = "INVALID_OCR_INPUT"
+    OCR_TEXT_SUSPICIOUS = "OCR_TEXT_SUSPICIOUS"
+
+
+OCR_CODE_DESCRIPTIONS: dict[str, str] = {
+    OcrCode.SECURITY_GATE_NOT_ALLOW: "Le Security Gate n'a pas accordé l'autorisation ALLOW.",
+    OcrCode.FILE_NOT_IN_INCOMING: "Le fichier n'est pas dans la zone incoming/ assainie.",
+    OcrCode.SHA256_MISMATCH: "L'empreinte SHA-256 du fichier ne correspond pas aux métadonnées.",
+    OcrCode.UNSUPPORTED_MIME_TYPE: "Le type MIME du fichier n'est pas pris en charge par l'agent OCR.",
+    OcrCode.PDF_EXTRACTION_ERROR: "Erreur lors de l'extraction du texte natif du PDF.",
+    OcrCode.OCR_ENGINE_UNAVAILABLE: "Le moteur OCR (Tesseract) n'est pas disponible.",
+    OcrCode.OCR_EXTRACTION_ERROR: "Erreur lors de l'extraction OCR du document.",
+    OcrCode.UNREADABLE_DOCUMENT: "Le document est illisible — score de confiance insuffisant.",
+    OcrCode.INVALID_OCR_INPUT: "L'entrée de l'agent OCR est invalide (erreur de validation Pydantic).",
+    OcrCode.OCR_TEXT_SUSPICIOUS: "Le texte extrait contient une instruction ou exfiltration suspecte.",
+}
+
+
+class ExtractionStatus(str, Enum):
+    """Statut fin de l'étape d'extraction du Document/OCR Agent.
+
+    Complète VerificationStatus (signal LangGraph générique) avec une
+    sémantique propre à l'OCR. Les deux coexistent dans DocumentOcrResult.
+
+    SUCCESS      — tous les champs essentiels extraits, confiance ≥ 0.65
+    NEEDS_REVIEW — document lisible mais extraction partielle ou incertaine
+    FAILED       — document illisible ou erreur moteur OCR
+    SKIPPED      — fichier non-OCR (ex : JSON FHIR traité par un autre agent)
+    BLOCKED      — menace détectée (gate non-ALLOW, SHA mismatch, zone invalide)
+    """
+
+    SUCCESS = "SUCCESS"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    BLOCKED = "BLOCKED"
+
+
+EXTRACTION_STATUS_DESCRIPTIONS: dict[str, str] = {
+    ExtractionStatus.SUCCESS: "Tous les champs essentiels extraits avec une confiance suffisante.",
+    ExtractionStatus.NEEDS_REVIEW: "Document lisible, mais extraction partielle ou ambiguë — revue humaine recommandée.",
+    ExtractionStatus.FAILED: "Document illisible ou erreur critique lors de l'extraction.",
+    ExtractionStatus.SKIPPED: "Extraction OCR non applicable pour ce type de fichier (traité par un autre agent).",
+    ExtractionStatus.BLOCKED: "Extraction bloquée : menace détectée ou pré-condition de sécurité non satisfaite.",
+}
+
+
 # ── Modèles de base ──────────────────────────────────────────────────────────
 
 

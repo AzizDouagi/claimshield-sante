@@ -10,7 +10,7 @@ Chaque résultat :
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated
 
@@ -18,11 +18,15 @@ from pydantic import Field, computed_field, field_validator
 
 from schemas.domain import (
     DataClassification,
+    DocumentType,
+    ExtractionStatus,
     ExtractedData,
     FileStatus,
     FindingCode,
     InputType,
     IntakeStatus,
+    OcrCode,
+    OcrSource,
     PrivacyCode,
     PrivacyDecision,
     Recommendation,
@@ -415,17 +419,241 @@ class FhirValidatorResult(StrictModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+# ── Champs essentiels — Document/OCR Agent (Étape 7) ─────────────────────────
+
+
+class MonetaryAmount(StrictModel):
+    """Montant monétaire avec devise — jamais de float."""
+
+    amount: Decimal = Field(..., ge=Decimal("0"), description="Montant en Decimal")
+    currency: str = Field(default="USD", min_length=1, max_length=3)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_amount(cls, v: object) -> Decimal:
+        if isinstance(v, Decimal):
+            return v
+        return Decimal(str(v))
+
+
+class MedicalItem(StrictModel):
+    """Acte médical ou médicament extrait d'un document."""
+
+    description: str = Field(..., min_length=1)
+    code: str | None = None
+    quantity: int = Field(default=1, ge=1)
+    unit_amount: MonetaryAmount | None = None
+
+
+ESSENTIAL_FIELD_NAMES: frozenset[str] = frozenset({
+    "patient_identifier",
+    "document_reference",
+    "document_date",
+    "service_date",
+    "provider_identifier_or_name",
+    "total_amount",
+    "requested_amount",
+    "medical_items",
+})
+
+
+class EssentialFields(StrictModel):
+    """Les huit champs essentiels à extraire de tout document médical.
+
+    Règles :
+      - None si le champ n'est pas détecté (ne jamais inventer une valeur absente).
+      - Montants en Decimal via MonetaryAmount — jamais de float.
+      - Dates en date Python — jamais de string brute.
+      - Valeur brute conservée dans DocumentExtraction.fields[...].value (ExtractedField).
+      - Ne pas corriger silencieusement une valeur ambiguë.
+    """
+
+    patient_identifier: str | None = None
+    document_reference: str | None = None
+    document_date: date | None = None
+    service_date: date | None = None
+    provider_identifier_or_name: str | None = None
+    total_amount: MonetaryAmount | None = None
+    requested_amount: MonetaryAmount | None = None
+    medical_items: list[MedicalItem] = Field(default_factory=list)
+
+
 # ── 6. Document & OCR Agent ───────────────────────────────────────────────────
 
 
-class DocumentOcrResult(StrictModel):
-    """Classification des pièces et extraction des champs avec provenance."""
+class DocumentPageContent(StrictModel):
+    """Contenu extrait d'une page — jamais exécuté, jamais interprété comme instruction."""
 
-    case_id: str
+    page_number: int = Field(..., ge=1)
+    text: str
+    char_count: int = Field(..., ge=0)
+    ocr_source: OcrSource
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class PageText(StrictModel):
+    """Page OCR enrichie — utilisée dans DocumentExtraction."""
+
+    page_number: int = Field(..., ge=1)
+    text: str
+    char_count: int = Field(..., ge=0)
+    method: OcrSource
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    is_text_based: bool = True
+
+
+class FieldProvenance(StrictModel):
+    """Traçabilité complète d'un champ extrait — assure l'auditabilité document par document.
+
+    Jamais de donnée personnelle dans les champs d'infrastructure (filename, sha256, method).
+    source_text est tronqué à 200 caractères.
+    """
+
+    filename: str = Field(..., min_length=1, max_length=255)
+    sha256: str = Field(default="", description="SHA-256 du fichier source (64 hex ou vide)")
+    page_number: int | None = Field(None, ge=1)
+    method: OcrSource
+    source_text: str = Field(default="", description="Extrait utile du texte source (≤ 200 car.)")
+    position: dict[str, int] | None = Field(
+        default=None,
+        description="Position dans le texte source si disponible : {'start': int, 'end': int}",
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    parser_version: str = Field(..., min_length=1)
+    extracted_at: datetime
+
+    @field_validator("filename")
+    @classmethod
+    def _no_absolute_filename(cls, v: str) -> str:
+        if re.match(r"^(?:/|[A-Za-z]:[/\\]|\\\\)", v):
+            raise ValueError(f"Chemin absolu interdit dans filename : {v!r}")
+        return v
+
+    @field_validator("sha256")
+    @classmethod
+    def _valid_sha256_or_empty(cls, v: str) -> str:
+        if v and not re.fullmatch(r"[0-9a-f]{64}", v.lower()):
+            raise ValueError(f"SHA-256 invalide (64 hex ou vide) : {v!r}")
+        return v.lower()
+
+    @field_validator("source_text")
+    @classmethod
+    def _truncate_source_text(cls, v: str) -> str:
+        return v[:200]
+
+    @field_validator("position")
+    @classmethod
+    def _valid_position(cls, v: dict[str, int] | None) -> dict[str, int] | None:
+        if v is None:
+            return v
+        if set(v) != {"start", "end"}:
+            raise ValueError("position doit contenir exactement start et end")
+        if v["start"] < 0 or v["end"] < v["start"]:
+            raise ValueError("position invalide")
+        return v
+
+
+class ExtractedField(StrictModel):
+    """Champ extrait avec valeur brute, valeur normalisée, provenance et indicateurs de confiance."""
+
+    field_name: str = Field(..., min_length=1)
+    value: str
+    normalized_value: str = ""
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    provenance: FieldProvenance | None = None
+    warnings: list[str] = Field(default_factory=list)
+    requires_review: bool = False
+
+
+class DocumentClassification(StrictModel):
+    """Résultat Pydantic de la classification du type de document médical."""
+
+    document_type: DocumentType
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    classification_source: str = Field(
+        ..., description="Signal utilisé : filename | mime | keywords | combined | unknown"
+    )
+    is_ambiguous: bool = False
+    scores: dict[str, float] = Field(default_factory=dict)
+    rules_version: str = "document-classifier-rules-v1"
+
+
+class DocumentExtraction(StrictModel):
+    """Vue riche et structurée de l'extraction pour un document unique.
+
+    Coexiste avec DocumentOcrResult (vue plate LangGraph).
+    Contient la provenance complète de chaque champ extrait.
+    """
+
+    claim_id: str = Field(..., min_length=1, max_length=50)
+    document_id: str = Field(..., min_length=1, max_length=100)
+    classification: DocumentClassification
+    pages: list[PageText] = Field(default_factory=list)
+    full_text: str = ""
+    fields: dict[str, ExtractedField] = Field(default_factory=dict)
+    extraction_status: ExtractionStatus
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    is_readable: bool = False
+    human_review_required: bool = False
+    human_review_reasons: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    extracted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    essential_fields: EssentialFields | None = Field(
+        default=None,
+        description="Les huit champs essentiels extraits et typés (Étape 7)",
+    )
+    artifact_id: str | None = None
+    artifact_path: str | None = None
+    security_findings: list[SecurityFinding] = Field(default_factory=list)
+
+
+class DocumentOcrAuditEntry(StrictModel):
+    """Trace d'audit minimisée — jamais de donnée personnelle ni de secret."""
+
+    claim_id: str
+    file_path: str
+    sha256_verified: bool
+    document_type: DocumentType
+    ocr_source: OcrSource
+    page_count: int = Field(..., ge=0)
+    total_chars: int = Field(..., ge=0)
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+    is_readable: bool
+    human_review_required: bool
+    reason_codes: list[OcrCode] = Field(default_factory=list)
+    evaluated_at: datetime
+    extraction_status: ExtractionStatus
     status: VerificationStatus
-    extracted: ExtractedData | None = None
+
+
+class DocumentOcrResult(StrictModel):
+    """Résultat de classification et d'extraction avec provenance complète."""
+
+    claim_id: str
+    file_path: str
+    sha256: str
+    mime_type: str
+    extraction_status: ExtractionStatus
+    status: VerificationStatus
+    document_type: DocumentType
+    ocr_source: OcrSource
+    pages: list[DocumentPageContent] = Field(default_factory=list)
+    full_text: str = ""
+    extracted_fields: dict[str, ExtractedField] = Field(default_factory=dict)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    is_readable: bool = False
+    human_review_required: bool = False
+    human_review_reasons: list[str] = Field(default_factory=list)
+    reason_codes: list[OcrCode] = Field(default_factory=list)
     unreadable_documents: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    audit_entry: DocumentOcrAuditEntry | None = None
+    extraction: DocumentExtraction | None = None
+    artifact_id: str | None = None
+    artifact_path: str | None = None
+    security_findings: list[SecurityFinding] = Field(default_factory=list)
 
 
 # ── 7. Medical Coding Agent ───────────────────────────────────────────────────
