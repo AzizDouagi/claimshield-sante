@@ -369,8 +369,22 @@ class OcrCode(str, Enum):
     """Codes stables identifiant les cas d'erreur et d'alerte du Document/OCR Agent.
 
     Ces codes ne changent pas entre versions — seul le message peut évoluer.
+    Ils ne contiennent aucune donnée personnelle ni médicale.
+
+    Codes historiques (Étapes 4–17) :
+      SECURITY_GATE_NOT_ALLOW, FILE_NOT_IN_INCOMING, SHA256_MISMATCH,
+      UNSUPPORTED_MIME_TYPE, PDF_EXTRACTION_ERROR, OCR_ENGINE_UNAVAILABLE,
+      OCR_EXTRACTION_ERROR, UNREADABLE_DOCUMENT, INVALID_OCR_INPUT, OCR_TEXT_SUSPICIOUS
+
+    Codes étendus (Étape 18) — granularité fine par étape du pipeline :
+      DOCUMENT_NOT_FOUND, DOCUMENT_NOT_ALLOWED, DOCUMENT_HASH_MISMATCH,
+      UNSUPPORTED_DOCUMENT_TYPE, PDF_READ_ERROR, PDF_ENCRYPTED, IMAGE_READ_ERROR,
+      OCR_UNAVAILABLE, OCR_FAILED, EMPTY_EXTRACTED_TEXT, DOCUMENT_CLASSIFICATION_FAILED,
+      PARSER_FAILED, REQUIRED_FIELD_MISSING, LOW_CONFIDENCE, AMBIGUOUS_VALUE,
+      INVALID_DATE, INVALID_AMOUNT, HIDDEN_PROMPT_INJECTION, INVALID_OCR_OUTPUT
     """
 
+    # ── Codes historiques (Étapes 4–17) ──────────────────────────────────────
     SECURITY_GATE_NOT_ALLOW = "SECURITY_GATE_NOT_ALLOW"
     FILE_NOT_IN_INCOMING = "FILE_NOT_IN_INCOMING"
     SHA256_MISMATCH = "SHA256_MISMATCH"
@@ -381,6 +395,27 @@ class OcrCode(str, Enum):
     UNREADABLE_DOCUMENT = "UNREADABLE_DOCUMENT"
     INVALID_OCR_INPUT = "INVALID_OCR_INPUT"
     OCR_TEXT_SUSPICIOUS = "OCR_TEXT_SUSPICIOUS"
+
+    # ── Codes étendus (Étape 18) — granularité fine par étape du pipeline ────
+    DOCUMENT_NOT_FOUND = "DOCUMENT_NOT_FOUND"
+    DOCUMENT_NOT_ALLOWED = "DOCUMENT_NOT_ALLOWED"
+    DOCUMENT_HASH_MISMATCH = "DOCUMENT_HASH_MISMATCH"
+    UNSUPPORTED_DOCUMENT_TYPE = "UNSUPPORTED_DOCUMENT_TYPE"
+    PDF_READ_ERROR = "PDF_READ_ERROR"
+    PDF_ENCRYPTED = "PDF_ENCRYPTED"
+    IMAGE_READ_ERROR = "IMAGE_READ_ERROR"
+    OCR_UNAVAILABLE = "OCR_UNAVAILABLE"
+    OCR_FAILED = "OCR_FAILED"
+    EMPTY_EXTRACTED_TEXT = "EMPTY_EXTRACTED_TEXT"
+    DOCUMENT_CLASSIFICATION_FAILED = "DOCUMENT_CLASSIFICATION_FAILED"
+    PARSER_FAILED = "PARSER_FAILED"
+    REQUIRED_FIELD_MISSING = "REQUIRED_FIELD_MISSING"
+    LOW_CONFIDENCE = "LOW_CONFIDENCE"
+    AMBIGUOUS_VALUE = "AMBIGUOUS_VALUE"
+    INVALID_DATE = "INVALID_DATE"
+    INVALID_AMOUNT = "INVALID_AMOUNT"
+    HIDDEN_PROMPT_INJECTION = "HIDDEN_PROMPT_INJECTION"
+    INVALID_OCR_OUTPUT = "INVALID_OCR_OUTPUT"
 
 
 OCR_CODE_DESCRIPTIONS: dict[str, str] = {
@@ -394,6 +429,166 @@ OCR_CODE_DESCRIPTIONS: dict[str, str] = {
     OcrCode.UNREADABLE_DOCUMENT: "Le document est illisible — score de confiance insuffisant.",
     OcrCode.INVALID_OCR_INPUT: "L'entrée de l'agent OCR est invalide (erreur de validation Pydantic).",
     OcrCode.OCR_TEXT_SUSPICIOUS: "Le texte extrait contient une instruction ou exfiltration suspecte.",
+}
+
+OCR_ERROR_CODE_DESCRIPTIONS: dict[OcrCode, str] = {
+    # ── Codes historiques ──────────────────────────────────────────────────
+    OcrCode.SECURITY_GATE_NOT_ALLOW: (
+        "Le Security Gate n'a pas accordé l'autorisation ALLOW — extraction bloquée."
+    ),
+    OcrCode.FILE_NOT_IN_INCOMING: (
+        "Le fichier n'est pas dans la zone incoming/ assainie — accès refusé."
+    ),
+    OcrCode.SHA256_MISMATCH: (
+        "L'empreinte SHA-256 du fichier ne correspond pas aux métadonnées — intégrité compromise."
+    ),
+    OcrCode.UNSUPPORTED_MIME_TYPE: (
+        "Le type MIME du fichier n'est pas pris en charge par l'agent OCR."
+    ),
+    OcrCode.PDF_EXTRACTION_ERROR: (
+        "Erreur lors de l'extraction du texte natif ou des images du PDF."
+    ),
+    OcrCode.OCR_ENGINE_UNAVAILABLE: (
+        "Le moteur OCR (Tesseract) n'est pas disponible sur ce système."
+    ),
+    OcrCode.OCR_EXTRACTION_ERROR: (
+        "Erreur lors de l'extraction OCR du document — résultat partiel ou nul."
+    ),
+    OcrCode.UNREADABLE_DOCUMENT: (
+        "Le document est illisible — score de confiance global insuffisant."
+    ),
+    OcrCode.INVALID_OCR_INPUT: (
+        "L'entrée DocumentOcrInput est invalide — erreur de validation Pydantic."
+    ),
+    OcrCode.OCR_TEXT_SUSPICIOUS: (
+        "Le texte extrait contient une instruction ou tentative d'exfiltration suspecte."
+    ),
+    # ── Codes étendus (Étape 18) ───────────────────────────────────────────
+    OcrCode.DOCUMENT_NOT_FOUND: (
+        "Le document demandé est introuvable dans la zone de stockage assainie."
+    ),
+    OcrCode.DOCUMENT_NOT_ALLOWED: (
+        "Le document n'est pas autorisé par la politique de sécurité en vigueur."
+    ),
+    OcrCode.DOCUMENT_HASH_MISMATCH: (
+        "L'empreinte SHA-256 calculée ne correspond pas à l'empreinte déclarée dans le manifeste."
+    ),
+    OcrCode.UNSUPPORTED_DOCUMENT_TYPE: (
+        "Le type de document identifié n'est pas pris en charge par ce pipeline."
+    ),
+    OcrCode.PDF_READ_ERROR: (
+        "Erreur de lecture du fichier PDF — fichier corrompu ou inaccessible."
+    ),
+    OcrCode.PDF_ENCRYPTED: (
+        "Le PDF est protégé par un mot de passe — déchiffrement requis avant extraction."
+    ),
+    OcrCode.IMAGE_READ_ERROR: (
+        "Erreur de lecture du fichier image — fichier corrompu ou format non supporté."
+    ),
+    OcrCode.OCR_UNAVAILABLE: (
+        "Le moteur OCR n'est pas disponible ou n'a pas pu être initialisé."
+    ),
+    OcrCode.OCR_FAILED: (
+        "L'extraction OCR a échoué — moteur disponible mais traitement impossible."
+    ),
+    OcrCode.EMPTY_EXTRACTED_TEXT: (
+        "Le texte extrait est vide — aucune donnée textuelle exploitable dans le document."
+    ),
+    OcrCode.DOCUMENT_CLASSIFICATION_FAILED: (
+        "Impossible de déterminer le type du document à partir du contenu et des métadonnées."
+    ),
+    OcrCode.PARSER_FAILED: (
+        "Le parseur de champs n'a pas pu analyser la structure du document."
+    ),
+    OcrCode.REQUIRED_FIELD_MISSING: (
+        "Un ou plusieurs champs essentiels sont absents du document extrait."
+    ),
+    OcrCode.LOW_CONFIDENCE: (
+        "Le score de confiance de l'extraction est inférieur au seuil minimal acceptable."
+    ),
+    OcrCode.AMBIGUOUS_VALUE: (
+        "Une valeur extraite est ambiguë et ne peut pas être interprétée de façon déterministe."
+    ),
+    OcrCode.INVALID_DATE: (
+        "Une date extraite est invalide ou ne respecte pas le format attendu."
+    ),
+    OcrCode.INVALID_AMOUNT: (
+        "Un montant extrait est invalide, négatif ou non conforme au format monétaire attendu."
+    ),
+    OcrCode.HIDDEN_PROMPT_INJECTION: (
+        "Une tentative d'injection de prompt masquée a été détectée dans le texte extrait."
+    ),
+    OcrCode.INVALID_OCR_OUTPUT: (
+        "La sortie produite par l'agent OCR ne respecte pas le schéma Pydantic attendu."
+    ),
+}
+
+OCR_ERROR_CODE_SEVERITIES: dict[OcrCode, SeverityLevel] = {
+    # ── Codes historiques ──────────────────────────────────────────────────
+    OcrCode.SECURITY_GATE_NOT_ALLOW: SeverityLevel.CRITICAL,
+    OcrCode.FILE_NOT_IN_INCOMING: SeverityLevel.HIGH,
+    OcrCode.SHA256_MISMATCH: SeverityLevel.CRITICAL,
+    OcrCode.UNSUPPORTED_MIME_TYPE: SeverityLevel.HIGH,
+    OcrCode.PDF_EXTRACTION_ERROR: SeverityLevel.HIGH,
+    OcrCode.OCR_ENGINE_UNAVAILABLE: SeverityLevel.HIGH,
+    OcrCode.OCR_EXTRACTION_ERROR: SeverityLevel.HIGH,
+    OcrCode.UNREADABLE_DOCUMENT: SeverityLevel.MEDIUM,
+    OcrCode.INVALID_OCR_INPUT: SeverityLevel.HIGH,
+    OcrCode.OCR_TEXT_SUSPICIOUS: SeverityLevel.CRITICAL,
+    # ── Codes étendus (Étape 18) ───────────────────────────────────────────
+    OcrCode.DOCUMENT_NOT_FOUND: SeverityLevel.HIGH,
+    OcrCode.DOCUMENT_NOT_ALLOWED: SeverityLevel.HIGH,
+    OcrCode.DOCUMENT_HASH_MISMATCH: SeverityLevel.CRITICAL,
+    OcrCode.UNSUPPORTED_DOCUMENT_TYPE: SeverityLevel.MEDIUM,
+    OcrCode.PDF_READ_ERROR: SeverityLevel.HIGH,
+    OcrCode.PDF_ENCRYPTED: SeverityLevel.HIGH,
+    OcrCode.IMAGE_READ_ERROR: SeverityLevel.HIGH,
+    OcrCode.OCR_UNAVAILABLE: SeverityLevel.HIGH,
+    OcrCode.OCR_FAILED: SeverityLevel.HIGH,
+    OcrCode.EMPTY_EXTRACTED_TEXT: SeverityLevel.MEDIUM,
+    OcrCode.DOCUMENT_CLASSIFICATION_FAILED: SeverityLevel.MEDIUM,
+    OcrCode.PARSER_FAILED: SeverityLevel.HIGH,
+    OcrCode.REQUIRED_FIELD_MISSING: SeverityLevel.MEDIUM,
+    OcrCode.LOW_CONFIDENCE: SeverityLevel.LOW,
+    OcrCode.AMBIGUOUS_VALUE: SeverityLevel.LOW,
+    OcrCode.INVALID_DATE: SeverityLevel.LOW,
+    OcrCode.INVALID_AMOUNT: SeverityLevel.LOW,
+    OcrCode.HIDDEN_PROMPT_INJECTION: SeverityLevel.CRITICAL,
+    OcrCode.INVALID_OCR_OUTPUT: SeverityLevel.HIGH,
+}
+
+OCR_ERROR_CODE_RETRYABLE: dict[OcrCode, bool] = {
+    # ── Codes historiques ──────────────────────────────────────────────────
+    OcrCode.SECURITY_GATE_NOT_ALLOW: False,
+    OcrCode.FILE_NOT_IN_INCOMING: False,
+    OcrCode.SHA256_MISMATCH: False,
+    OcrCode.UNSUPPORTED_MIME_TYPE: False,
+    OcrCode.PDF_EXTRACTION_ERROR: True,   # peut être une erreur I/O transitoire
+    OcrCode.OCR_ENGINE_UNAVAILABLE: True, # le moteur peut redevenir disponible
+    OcrCode.OCR_EXTRACTION_ERROR: True,   # peut être une erreur transitoire
+    OcrCode.UNREADABLE_DOCUMENT: False,
+    OcrCode.INVALID_OCR_INPUT: False,
+    OcrCode.OCR_TEXT_SUSPICIOUS: False,
+    # ── Codes étendus (Étape 18) ───────────────────────────────────────────
+    OcrCode.DOCUMENT_NOT_FOUND: False,    # fichier absent — pas de retry utile
+    OcrCode.DOCUMENT_NOT_ALLOWED: False,  # politique — décision humaine requise
+    OcrCode.DOCUMENT_HASH_MISMATCH: False, # violation d'intégrité — pas de retry
+    OcrCode.UNSUPPORTED_DOCUMENT_TYPE: False,
+    OcrCode.PDF_READ_ERROR: True,         # peut être une erreur I/O transitoire
+    OcrCode.PDF_ENCRYPTED: False,         # nécessite une clé — décision humaine
+    OcrCode.IMAGE_READ_ERROR: True,       # peut être une erreur I/O transitoire
+    OcrCode.OCR_UNAVAILABLE: True,        # le moteur peut redevenir disponible
+    OcrCode.OCR_FAILED: True,             # peut être une erreur transitoire
+    OcrCode.EMPTY_EXTRACTED_TEXT: False,  # document sans contenu textuel
+    OcrCode.DOCUMENT_CLASSIFICATION_FAILED: False,
+    OcrCode.PARSER_FAILED: False,         # structure du document non conforme
+    OcrCode.REQUIRED_FIELD_MISSING: False,
+    OcrCode.LOW_CONFIDENCE: False,        # qualité insuffisante — revue humaine
+    OcrCode.AMBIGUOUS_VALUE: False,       # revue humaine requise
+    OcrCode.INVALID_DATE: False,
+    OcrCode.INVALID_AMOUNT: False,
+    OcrCode.HIDDEN_PROMPT_INJECTION: False, # menace — pas de retry
+    OcrCode.INVALID_OCR_OUTPUT: False,    # schéma invalide — correctif requis
 }
 
 
@@ -475,6 +670,18 @@ class DocumentInfo(StrictModel):
 
 
 class ExtractedData(StrictModel):
+    """Données extraites consolidées d'un dossier de remboursement.
+
+    Garanties Étape 19 :
+      - Montants (`total_billed`, `amount_requested`, `patient_share`) en `Decimal`
+        — jamais de `float` pour éviter les erreurs d'arrondi monétaire.
+      - Dates (`service_date`) en `date` Python — jamais de chaîne brute.
+      - Provenance : `dict[str, str]` mappant chaque nom de champ vers
+        "filename:page_N" (source de l'extraction).
+      - Champs inconnus interdits via `StrictModel` (`extra="forbid"`) —
+        toute clé hors schéma lève immédiatement une `ValidationError`.
+    """
+
     patient_name: str | None = None
     patient_id: str | None = None
     payer_name: str | None = None
@@ -491,7 +698,10 @@ class ExtractedData(StrictModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     provenance: dict[str, str] = Field(
         default_factory=dict,
-        description="Champ → nom de fichier source + numéro de page",
+        description=(
+            "Provenance champ-par-champ : clé = nom du champ, "
+            "valeur = 'nom_fichier:page_N' indiquant la source de l'extraction"
+        ),
     )
 
     @field_validator("total_billed", "amount_requested", "patient_share", mode="before")

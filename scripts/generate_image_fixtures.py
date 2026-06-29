@@ -111,7 +111,6 @@ def generate_facture_clm0001() -> Path:
     img, draw = _blank_page()
     W = 1240
 
-    fn_title = _bold_font(36)
     fn_body = _font(24)
     fn_small = _font(20)
     fn_label = _bold_font(22)
@@ -217,7 +216,6 @@ def generate_ordonnance_clm0002() -> Path:
     img, draw = _blank_page()
     W = 1240
 
-    fn_title = _bold_font(34)
     fn_body = _font(24)
     fn_small = _font(20)
     fn_label = _bold_font(22)
@@ -459,10 +457,10 @@ def main() -> None:
     })
 
     print("\nRésumé :")
-    print(f"  CLM-0001 : facture_image_CLM-0001.png  (PNG, lisible)")
-    print(f"  CLM-0002 : ordonnance_image_CLM-0002.jpg  (JPEG, lisible)")
-    print(f"  CLM-0003 : facture_image_CLM-0003.png  (PNG, qualité réduite)")
-    print(f"  CLM-0003 : document_illisible_CLM-0003.png  (PNG, bruit intense — test illisibilité)")
+    print("  CLM-0001 : facture_image_CLM-0001.png  (PNG, lisible)")
+    print("  CLM-0002 : ordonnance_image_CLM-0002.jpg  (JPEG, lisible)")
+    print("  CLM-0003 : facture_image_CLM-0003.png  (PNG, qualité réduite)")
+    print("  CLM-0003 : document_illisible_CLM-0003.png  (PNG, bruit intense — test illisibilité)")
     print("\nTerminé.")
 
 

@@ -23,7 +23,7 @@ from schemas.results import (
     CoverageResult,
     SecurityGateResult,
 )
-from schemas.domain import DocumentType, ExtractionStatus, OcrSource, Recommendation, VerificationStatus, SecurityDecision
+from schemas.domain import Recommendation, VerificationStatus, SecurityDecision
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "datasets" / "fixtures" / "valid"
 

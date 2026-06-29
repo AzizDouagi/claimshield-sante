@@ -1,0 +1,45 @@
+ruleset:
+  name: authorization-rules
+  version: 1.0.0
+  effective_from: '2026-01-01'
+  description: Règles déterministes de pré-autorisation et de codes de refus.
+  parameters:
+    denial_codes:
+    - NO_COVERAGE
+    - POLICY_EXPIRED
+    - BENEFIT_EXHAUSTED
+    - PREAUTH_REQUIRED
+    - DUPLICATE_CLAIM
+    - INVALID_PATIENT_ID
+    denial_severity:
+      NO_COVERAGE: CRITICAL
+      POLICY_EXPIRED: HIGH
+      BENEFIT_EXHAUSTED: HIGH
+      PREAUTH_REQUIRED: MEDIUM
+      DUPLICATE_CLAIM: HIGH
+      INVALID_PATIENT_ID: CRITICAL
+  thresholds:
+    preauth_threshold_usd: '3000.00'
+    preauth_procedure_count: 5
+    preauth_medication_count: 10
+  result_codes:
+  - NO_COVERAGE
+  - POLICY_EXPIRED
+  - BENEFIT_EXHAUSTED
+  - PREAUTH_REQUIRED
+  - DUPLICATE_CLAIM
+  - INVALID_PATIENT_ID
+  status: active
+rules:
+- id: PREAUTH_REQUIRED_BY_AMOUNT
+  enabled: true
+  severity: blocking
+  description: Une pré-autorisation est requise au-dessus du seuil de montant configuré.
+- id: PREAUTH_REQUIRED_BY_VOLUME
+  enabled: true
+  severity: review
+  description: Une pré-autorisation est requise au-dessus des seuils de volume configurés.
+- id: DENIAL_CODE_ALLOWED
+  enabled: true
+  severity: blocking
+  description: Tout code de refus doit appartenir à la liste versionnée.

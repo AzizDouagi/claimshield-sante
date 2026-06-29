@@ -35,10 +35,10 @@ python-magic>=0.4.27
 cryptography>=43.0
 
 # ── Validation FHIR R4 (Étape 8) ─────────────────────────────────────────────
-fhir.resources>=8.0.0
+fhir.resources==8.2.0
 
 # ── Configuration via fichiers YAML (Étape 8 — config/rules/*.yaml) ──────────
-PyYAML>=6.0
+PyYAML==6.0.3
 
 # ── Détection de doublons — fuzzy matching (Étape 12) ────────────────────────
 rapidfuzz>=3.10.0

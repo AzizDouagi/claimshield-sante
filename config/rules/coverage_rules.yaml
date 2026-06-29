@@ -1,0 +1,96 @@
+ruleset:
+  name: coverage-rules
+  version: 1.0.0
+  effective_from: '2026-01-01'
+  description: Règles déterministes de vérification de couverture assurance.
+  parameters:
+    currency: USD
+    required_fields:
+    - payer_name
+    - amount_requested
+    optional_fields:
+    - coverage_rate
+    - patient_share
+    - policy_active
+  thresholds:
+    coverage_rate_bounds:
+      min: '0.00'
+      max: '1.00'
+    low_coverage_threshold: '0.50'
+    high_amount_threshold: '10000.00'
+    preauth_threshold_usd: '3000.00'
+    preauth_procedure_count: 5
+  result_codes:
+  - PASS
+  - NEEDS_REVIEW
+  - FAIL
+  status: active
+rules:
+- id: CONTRACT_EXISTS
+  enabled: true
+  severity: blocking
+  description: Le contrat synthétique référencé doit exister.
+  operator: exists
+- id: CONTRACT_ACTIVE
+  enabled: true
+  severity: blocking
+  description: Le contrat doit être actif.
+  operator: equals
+  left: contract.status
+  right: active
+- id: SERVICE_DATE_ON_OR_AFTER_START
+  enabled: true
+  severity: blocking
+  description: La date de soin doit être postérieure ou égale à la date de début.
+  operator: greater_than_or_equal
+  left: service_date
+  right: contract.start_date
+- id: SERVICE_DATE_ON_OR_BEFORE_END
+  enabled: true
+  severity: blocking
+  description: La date de soin doit être antérieure ou égale à la date de fin.
+  operator: less_than_or_equal
+  left: service_date
+  right: contract.end_date
+- id: CURRENCY_MATCHES_CONTRACT
+  enabled: true
+  severity: blocking
+  description: La devise du dossier doit correspondre à celle du contrat.
+  operator: equals
+  left: claim.currency
+  right: contract.currency
+- id: REQUESTED_AMOUNT_POSITIVE
+  enabled: true
+  severity: blocking
+  description: Le montant demandé doit être strictement positif.
+  operator: greater_than
+  value: 0
+- id: REQUESTED_NOT_GREATER_THAN_TOTAL
+  enabled: true
+  severity: blocking
+  description: Le montant demandé ne doit pas dépasser le montant total.
+  operator: less_than_or_equal
+  left: requested_amount
+  right: total_amount
+- id: REQUESTED_NOT_GREATER_THAN_AVAILABLE_LIMIT
+  enabled: true
+  severity: blocking
+  description: Le montant demandé ne doit pas dépasser le plafond disponible.
+  operator: less_than_or_equal
+  left: requested_amount
+  right: contract.available_limit
+- id: PROCEDURE_CODE_COVERED
+  enabled: true
+  severity: blocking
+  description: Chaque acte demandé doit appartenir aux actes couverts.
+  operator: contains_all
+- id: PROCEDURE_CODE_NOT_EXCLUDED
+  enabled: true
+  severity: blocking
+  description: Aucun acte demandé ne doit appartenir aux exclusions.
+  operator: excludes_all
+- id: PREAUTHORIZATION_PRESENT_WHEN_REQUIRED
+  enabled: true
+  severity: review
+  description: Une préautorisation doit être présente lorsqu'elle est obligatoire.
+  operator: required_if_in

@@ -10,7 +10,16 @@ import re
 
 from pydantic import Field, field_validator
 
-from schemas.domain import ExtractionStatus, OcrCode, OcrSource, SecurityDecision, StrictModel
+from schemas.domain import (
+    OCR_ERROR_CODE_DESCRIPTIONS,
+    OCR_ERROR_CODE_RETRYABLE,
+    OCR_ERROR_CODE_SEVERITIES,
+    ExtractionStatus,
+    OcrCode,
+    OcrSource,
+    SecurityDecision,
+    StrictModel,
+)
 from schemas.results import (
     DocumentClassification,
     DocumentExtraction,
@@ -22,6 +31,7 @@ from schemas.results import (
     FieldProvenance,
     MedicalItem,
     MonetaryAmount,
+    OcrError,
     PageText,
 )
 from schemas.results import ESSENTIAL_FIELD_NAMES
@@ -40,7 +50,11 @@ __all__ = [
     "FieldProvenance",
     "MedicalItem",
     "MonetaryAmount",
+    "OCR_ERROR_CODE_DESCRIPTIONS",
+    "OCR_ERROR_CODE_RETRYABLE",
+    "OCR_ERROR_CODE_SEVERITIES",
     "OcrCode",
+    "OcrError",
     "OcrSource",
     "PageText",
 ]

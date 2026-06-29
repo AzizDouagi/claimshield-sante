@@ -1,0 +1,67 @@
+[
+  {
+    "policy_number": "POL-0001",
+    "patient_pseudonym": "PAT-001",
+    "start_date": "2026-01-01",
+    "end_date": "2026-12-31",
+    "status": "active",
+    "currency": "USD",
+    "annual_limit": "5000.00",
+    "covered_procedure_codes": ["11429006", "34043003", "43789009"],
+    "excluded_procedure_codes": ["PROC-COSMETIC"],
+    "preauthorization_required_for": ["PROC-IRM", "416940007"],
+    "contract_version": "1.0.0"
+  },
+  {
+    "policy_number": "POL-0015",
+    "patient_pseudonym": "PAT-A8F3C921",
+    "start_date": "2026-01-01",
+    "end_date": "2026-12-31",
+    "status": "active",
+    "currency": "USD",
+    "annual_limit": "5000.00",
+    "covered_procedure_codes": ["11429006", "225362009", "241589008"],
+    "excluded_procedure_codes": ["PROC-COSMETIC"],
+    "preauthorization_required_for": ["PROC-IRM"],
+    "contract_version": "1.0.0"
+  },
+  {
+    "policy_number": "POL-0024",
+    "patient_pseudonym": "PAT-B71D09E4",
+    "start_date": "2026-02-01",
+    "end_date": "2026-12-31",
+    "status": "active",
+    "currency": "USD",
+    "annual_limit": "7500.00",
+    "covered_procedure_codes": ["11429006", "308335008", "252150009"],
+    "excluded_procedure_codes": ["PROC-EXPERIMENTAL"],
+    "preauthorization_required_for": ["169070004", "416940007"],
+    "contract_version": "1.0.0"
+  },
+  {
+    "policy_number": "POL-0032",
+    "patient_pseudonym": "PAT-C55E128A",
+    "start_date": "2026-01-01",
+    "end_date": "2026-06-30",
+    "status": "active",
+    "currency": "USD",
+    "annual_limit": "3000.00",
+    "covered_procedure_codes": ["11429006", "86198006"],
+    "excluded_procedure_codes": ["PROC-DENTAL-IMPLANT"],
+    "preauthorization_required_for": ["80146002"],
+    "contract_version": "1.0.0"
+  },
+  {
+    "policy_number": "POL-0099",
+    "patient_pseudonym": "PAT-Z9E8D7C6",
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "status": "inactive",
+    "currency": "USD",
+    "annual_limit": "1000.00",
+    "covered_procedure_codes": ["11429006"],
+    "excluded_procedure_codes": ["PROC-IRM"],
+    "preauthorization_required_for": [],
+    "contract_version": "1.0.0"
+  }
+]

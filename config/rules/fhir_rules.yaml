@@ -1,0 +1,106 @@
+ruleset:
+  name: fhir-rules
+  version: 1.0.0
+  effective_from: '2026-01-01'
+  description: Règles déterministes de validation structurelle des bundles FHIR R4.
+  parameters:
+    profile: R4
+    required_resource_types:
+    - Patient
+    optional_resource_types:
+    - Coverage
+    - Encounter
+    - Condition
+    - Procedure
+    - MedicationRequest
+    - Claim
+    - Organization
+    - Practitioner
+    bundle_types_accepted:
+    - collection
+    - transaction
+    - document
+    - batch
+    resource_required_fields:
+      Patient:
+      - resourceType
+      - id
+      Coverage:
+      - resourceType
+      - status
+      - beneficiary
+      Encounter:
+      - resourceType
+      - status
+      - subject
+    coverage_status_values:
+    - active
+    - cancelled
+    - draft
+    - entered-in-error
+    min_cardinalities:
+      Patient: 1
+    supported_profiles:
+    - R4
+    supported_resource_types:
+    - Patient
+    - Coverage
+    - Encounter
+    - Condition
+    - Procedure
+    - MedicationRequest
+    - Claim
+    - Organization
+    - Practitioner
+    reference_fields:
+      Coverage:
+      - beneficiary.reference
+      Encounter:
+      - subject.reference
+      Condition:
+      - subject.reference
+      Procedure:
+      - subject.reference
+      MedicationRequest:
+      - subject.reference
+      Claim:
+      - patient.reference
+  thresholds: {}
+  result_codes:
+  - PASS
+  - NEEDS_REVIEW
+  - FAIL
+  status: active
+rules:
+- id: FHIR_BUNDLE_STRUCTURE_VALID
+  enabled: true
+  severity: blocking
+  description: Le bundle doit respecter la structure FHIR minimale attendue.
+- id: FHIR_RESOURCE_TYPE_SUPPORTED
+  enabled: true
+  severity: review
+  description: Les resourceType présents doivent appartenir aux types locaux supportés.
+- id: FHIR_REQUIRED_RESOURCES_PRESENT
+  enabled: true
+  severity: blocking
+  description: Les ressources FHIR obligatoires doivent être présentes.
+- id: FHIR_MIN_CARDINALITY
+  enabled: true
+  severity: blocking
+  description: Les cardinalités minimales locales doivent être respectées.
+- id: FHIR_REQUIRED_FIELDS_PRESENT
+  enabled: true
+  severity: blocking
+  description: Les champs obligatoires par ressource doivent être présents.
+- id: FHIR_INTERNAL_REFERENCES_RESOLVE
+  enabled: true
+  severity: blocking
+  description: Les références internes doivent pointer vers des ressources présentes dans le bundle.
+- id: FHIR_PROFILE_SUPPORTED
+  enabled: true
+  severity: review
+  description: Les profils déclarés doivent appartenir aux profils ou règles locales supportés.
+- id: FHIR_COVERAGE_STATUS_ALLOWED
+  enabled: true
+  severity: blocking
+  description: Le statut Coverage doit appartenir aux valeurs autorisées.

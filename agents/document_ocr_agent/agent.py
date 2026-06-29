@@ -49,6 +49,7 @@ from schemas.results import (
 from security.policies import DEFAULT_POLICY
 from security.scanners import scan_text_security
 from tools.confidence import (
+    CONFIDENCE_METHOD_VERSION,
     ConfidenceBreakdown,
     compute_confidence,
     human_review_reasons,
@@ -57,7 +58,7 @@ from tools.confidence import (
     requires_human_review,
     score_extracted_fields,
 )
-from tools.document_classifier import classify_document
+from tools.document_classifier import CLASSIFIER_RULES_VERSION, classify_document
 from tools.document_parser import parse_document
 from tools.ocr import ocr_image_file
 from tools.pdf_reader import pdf_to_full_text, read_pdf
@@ -66,6 +67,40 @@ from state.claim_state import validate_state_update
 
 # Zone de stockage assainie — seul ce préfixe est accepté
 _INCOMING_PREFIX = "incoming"
+
+# Versions internes des outils du pipeline OCR
+_PARSER_VERSION = "document-parser-v1"
+
+
+def _collect_tool_versions(strategy: OcrStrategy) -> dict[str, str]:
+    """Collecte les versions des outils utilisés dans ce pipeline OCR.
+
+    Les versions de bibliothèques tierces sont lues à l'exécution.
+    Les outils indisponibles sont signalés par "unavailable".
+    """
+    versions: dict[str, str] = {
+        "classifier": CLASSIFIER_RULES_VERSION,
+        "confidence": CONFIDENCE_METHOD_VERSION,
+        "parser": _PARSER_VERSION,
+        "ocr_thresholds": strategy.thresholds_version,
+    }
+    try:
+        import pypdf
+        versions["pdf_reader"] = getattr(pypdf, "__version__", "unknown")
+    except ImportError:
+        versions["pdf_reader"] = "unavailable"
+    try:
+        import PIL
+        versions["image_processor"] = getattr(PIL, "__version__", "unknown")
+    except ImportError:
+        versions["image_processor"] = "unavailable"
+    try:
+        import pytesseract
+        tess_ver = pytesseract.get_tesseract_version()
+        versions["ocr_engine"] = str(tess_ver)
+    except Exception:
+        versions["ocr_engine"] = "unavailable"
+    return versions
 
 # Types MIME → stratégie d'extraction
 _PDF_MIME = "application/pdf"
@@ -429,10 +464,6 @@ def extract_pages(
     indique un texte insuffisant, l'OCR est tenté si activé. Les images vont
     directement vers OCR. La méthode reste conservée sur chaque page.
     """
-    pages_content: list[DocumentPageContent] = []
-    full_text = ""
-    ocr_source = OcrSource.UNSUPPORTED
-    ocr_raw_confidence = 0.0
     extraction_error: str | None = None
     reason_codes: list[OcrCode] = []
 
@@ -863,6 +894,18 @@ def run(
             f"{parse_result.field_count} champs)."
         )
 
+    # Avertissements non bloquants — distincts des erreurs bloquantes
+    warnings_out: list[str] = []
+    if extraction_error and readable:
+        warnings_out.append(f"Fallback d'extraction non bloquant : {extraction_error}")
+    if classification.is_ambiguous:
+        warnings_out.append(
+            f"Classification ambiguë ({doc_type.value}) — "
+            "résultat retenu mais revue humaine recommandée."
+        )
+
+    tool_versions = _collect_tool_versions(strategy)
+
     doc_classification = DocumentClassification(
         document_type=classification.document_type,
         confidence=classification.confidence,
@@ -895,6 +938,8 @@ def run(
         human_review_required=review_needed,
         human_review_reasons=review_reasons,
         errors=errors_out,
+        warnings=warnings_out,
+        tool_versions=tool_versions,
         extracted_at=now,
         essential_fields=parse_result.essential_fields,
         security_findings=security_findings,
@@ -924,6 +969,7 @@ def run(
         mime_type=mime,
         extraction_status=extraction_status,
         status=status,
+        classification=doc_classification,
         document_type=doc_type,
         ocr_source=ocr_source,
         pages=pages_content,
@@ -936,7 +982,9 @@ def run(
         reason_codes=reason_codes,
         unreadable_documents=[file_path_str] if not readable else [],
         errors=errors_out,
+        warnings=warnings_out,
         reasons=reasons_out,
+        tool_versions=tool_versions,
         evaluated_at=now,
         audit_entry=audit_entry,
         extraction=doc_extraction,
@@ -1057,7 +1105,10 @@ def node(state: dict) -> dict:
 
     update = {
         "ocr_result": state_result,
-        "ocr_input": None,   # consommé
+        "ocr_input": None,                       # consommé — effacé du state
+        "completed_steps": ["document_ocr_agent"],
+        "errors": list(state_result.errors),     # append-only via reducer
+        "alerts": list(state_result.warnings),   # append-only via reducer
         "audit_trail": [audit_event],
     }
     validate_state_update(update)

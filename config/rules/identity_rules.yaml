@@ -1,0 +1,35 @@
+ruleset:
+  name: identity-rules
+  version: 1.0.0
+  effective_from: '2026-01-01'
+  description: Règles déterministes de correspondance d'identité patient.
+  parameters:
+    id_sources:
+    - ocr
+    - fhir
+    - claim
+    match_mode: exact
+    required_fields:
+    - patient_id
+    - patient_name
+    mismatch_action: NEEDS_REVIEW
+    min_sources_agree: 2
+  thresholds: {}
+  result_codes:
+  - PASS
+  - NEEDS_REVIEW
+  - FAIL
+  status: active
+rules:
+- id: IDENTITY_PATIENT_ID_MATCH
+  enabled: true
+  severity: blocking
+  description: Les identifiants patient disponibles doivent concorder après normalisation.
+- id: IDENTITY_PATIENT_NAME_PRESENT
+  enabled: true
+  severity: review
+  description: Le nom patient extrait doit être présent et non vide.
+- id: IDENTITY_MIN_SOURCES_AGREE
+  enabled: true
+  severity: review
+  description: Le nombre minimal de sources concordantes doit être respecté.

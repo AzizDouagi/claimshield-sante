@@ -1,0 +1,260 @@
+ruleset:
+  name: medical-codes
+  version: 1.0.0
+  effective_from: '2026-01-01'
+  description: Table locale versionnée de codification actes/médicaments.
+  parameters:
+    system_snomed: http://snomed.info/sct
+    system_rxnorm: http://www.nlm.nih.gov/research/umls/rxnorm
+    procedures:
+      Dental consultation and report (procedure):
+        code: '34043003'
+        system: snomed
+        category: dental
+      Dental care (regime/therapy):
+        code: '225362009'
+        system: snomed
+        category: dental
+      Dental plain X-ray (procedure):
+        code: '241589008'
+        system: snomed
+        category: dental
+      Extraction of wisdom tooth:
+        code: '173421006'
+        system: snomed
+        category: dental
+      Removal of supragingival dental calculus:
+        code: '234723000'
+        system: snomed
+        category: dental
+      Application of composite dental filling:
+        code: '280115004'
+        system: snomed
+        category: dental
+      Office Visit:
+        code: '11429006'
+        system: snomed
+        category: consultation
+      General examination of patient (procedure):
+        code: '162673000'
+        system: snomed
+        category: consultation
+      Patient encounter procedure:
+        code: '308335008'
+        system: snomed
+        category: consultation
+      Encounter for problem:
+        code: '308335008'
+        system: snomed
+        category: consultation
+      Medical consultation (procedure):
+        code: '11429006'
+        system: snomed
+        category: consultation
+      Well child visit (procedure):
+        code: '170427008'
+        system: snomed
+        category: consultation
+      Complete blood count (procedure):
+        code: '43789009'
+        system: snomed
+        category: lab
+      Urinalysis (procedure):
+        code: '27171005'
+        system: snomed
+        category: lab
+      Blood glucose measurement:
+        code: '302788009'
+        system: snomed
+        category: lab
+      Lipid panel:
+        code: '252150009'
+        system: snomed
+        category: lab
+      Hemoglobin A1c measurement:
+        code: '43396009'
+        system: snomed
+        category: lab
+      Plain chest X-ray (procedure):
+        code: '399208008'
+        system: snomed
+        category: radiology
+      MRI of brain (procedure):
+        code: '416940007'
+        system: snomed
+        category: radiology
+      Computed tomography of abdomen:
+        code: '169070004'
+        system: snomed
+        category: radiology
+      Echocardiography (procedure):
+        code: '40701008'
+        system: snomed
+        category: radiology
+      Administration of influenza vaccine:
+        code: '86198006'
+        system: snomed
+        category: vaccination
+      Influenza vaccination:
+        code: '86198006'
+        system: snomed
+        category: vaccination
+      COVID-19 vaccination:
+        code: '1119349007'
+        system: snomed
+        category: vaccination
+      Appendectomy:
+        code: '80146002'
+        system: snomed
+        category: surgery
+      Cholecystectomy:
+        code: '38102005'
+        system: snomed
+        category: surgery
+      Cesarean section:
+        code: '11466000'
+        system: snomed
+        category: surgery
+    medications:
+      sodium fluoride 0.0272 MG/MG Oral Gel:
+        code: '1535362'
+        system: rxnorm
+        category: dental
+      Penicillin V 500 MG Oral Tablet:
+        code: '834060'
+        system: rxnorm
+        category: antibiotic
+      Acetaminophen 325 MG Oral Tablet:
+        code: '313782'
+        system: rxnorm
+        category: analgesic
+      Ibuprofen 200 MG Oral Tablet:
+        code: '197803'
+        system: rxnorm
+        category: analgesic
+      Aspirin 81 MG Oral Tablet:
+        code: '243670'
+        system: rxnorm
+        category: analgesic
+      Hydrocodone 5 MG / Acetaminophen 325 MG Oral Tablet:
+        code: '857005'
+        system: rxnorm
+        category: analgesic
+      lisinopril 10 MG Oral Tablet:
+        code: '314076'
+        system: rxnorm
+        category: cardiovascular
+      atorvastatin 20 MG Oral Tablet:
+        code: '617314'
+        system: rxnorm
+        category: cardiovascular
+      metoprolol succinate 25 MG Extended Release Oral Tablet:
+        code: '736866'
+        system: rxnorm
+        category: cardiovascular
+      metformin hydrochloride 500 MG Oral Tablet:
+        code: '861007'
+        system: rxnorm
+        category: metabolic
+      insulin isophane, human 70 UNT/ML / Regular Insulin, Human 30 UNT/ML Injectable Suspension:
+        code: '311048'
+        system: rxnorm
+        category: metabolic
+      albuterol 0.83 MG/ML Inhalation Solution:
+        code: '745679'
+        system: rxnorm
+        category: respiratory
+      fluticasone propionate 0.044 MG/ACTUAT Metered Dose Inhaler:
+        code: '746763'
+        system: rxnorm
+        category: respiratory
+      amoxicillin 500 MG Oral Tablet:
+        code: '723463'
+        system: rxnorm
+        category: antibiotic
+      azithromycin 250 MG Oral Tablet:
+        code: '308460'
+        system: rxnorm
+        category: antibiotic
+    keywords:
+      dental:
+      - dental
+      - tooth
+      - oral
+      - fluoride
+      - gingivitis
+      - caries
+      - calculus
+      - gingival
+      consultation:
+      - consultation
+      - encounter
+      - visit
+      - examination
+      - checkup
+      lab:
+      - blood
+      - urine
+      - glucose
+      - count
+      - panel
+      - test
+      - hemoglobin
+      - lipid
+      radiology:
+      - x-ray
+      - xray
+      - mri
+      - ct
+      - scan
+      - imaging
+      - echo
+      - ultrasound
+      vaccination:
+      - vaccine
+      - vaccination
+      - immunization
+      - influenza
+      - covid
+      surgery:
+      - surgery
+      - surgical
+      - operation
+      - appendectomy
+      - cholecystectomy
+      analgesic:
+      - acetaminophen
+      - ibuprofen
+      - aspirin
+      - pain
+      - analgesic
+      cardiovascular:
+      - lisinopril
+      - atorvastatin
+      - metoprolol
+      - cardiac
+      - heart
+      antibiotic:
+      - penicillin
+      - amoxicillin
+      - azithromycin
+      - antibiotic
+  thresholds: {}
+  result_codes:
+  - PASS
+  - NEEDS_REVIEW
+  - FAIL
+  status: active
+rules:
+- id: MEDICAL_CODE_EXACT_MATCH
+  enabled: true
+  severity: blocking
+  description: Une description identique à la table locale reçoit le code configuré.
+- id: MEDICAL_CODE_KEYWORD_MATCH_REVIEW
+  enabled: true
+  severity: review
+  description: Une correspondance par mot-clé nécessite une revue humaine.
+- id: MEDICAL_CODE_UNKNOWN_REVIEW
+  enabled: true
+  severity: review
+  description: Une description inconnue nécessite une revue humaine.

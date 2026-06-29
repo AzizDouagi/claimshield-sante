@@ -20,11 +20,13 @@ from schemas.domain import (
     DataClassification,
     DocumentType,
     ExtractionStatus,
-    ExtractedData,
     FileStatus,
     FindingCode,
     InputType,
     IntakeStatus,
+    OCR_ERROR_CODE_DESCRIPTIONS,
+    OCR_ERROR_CODE_RETRYABLE,
+    OCR_ERROR_CODE_SEVERITIES,
     OcrCode,
     OcrSource,
     PrivacyCode,
@@ -380,6 +382,7 @@ class IdentityResult(StrictModel):
     patient_name: str | None = None
     source_patient_id: str | None = None
     claim_patient_id: str | None = None
+    contract_patient_id: str | None = None
     encounter_patient_id: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
@@ -392,6 +395,14 @@ class CoverageResult(StrictModel):
     amount_requested: Decimal | None = None
     patient_share: Decimal | None = None
     policy_active: bool | None = None
+    service_date: date | None = None
+    coverage_start_date: date | None = None
+    coverage_end_date: date | None = None
+    ceiling_amount: Decimal | None = None
+    ceiling_remaining: Decimal | None = None
+    ceiling_exceeded: bool | None = None
+    preauthorization_required: bool | None = None
+    preauthorization_status: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -402,6 +413,9 @@ class IdentityCoverageResult(StrictModel):
     identity: IdentityResult
     coverage: CoverageResult
     rule_version: str = "1.0.0"
+    evidence: list[dict[str, str]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    structured_errors: list[dict[str, str]] = Field(default_factory=list)
 
 
 # ── 5. FHIR Validator Agent ───────────────────────────────────────────────────
@@ -414,6 +428,11 @@ class FhirValidatorResult(StrictModel):
     status: VerificationStatus
     bundle_expected: bool
     profile_checked: str | None = None
+    rule_version: str = "1.0.0"
+    resource_types: list[str] = Field(default_factory=list)
+    resource_count: int = 0
+    references_checked: bool = False
+    validation_scope: str = "STRUCTURAL_ONLY"
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
@@ -583,6 +602,13 @@ class DocumentExtraction(StrictModel):
 
     Coexiste avec DocumentOcrResult (vue plate LangGraph).
     Contient la provenance complète de chaque champ extrait.
+
+    Garanties :
+      - `errors` : anomalies bloquantes ayant empêché ou altéré l'extraction.
+      - `warnings` : anomalies non bloquantes — fallbacks, champs optionnels absents,
+                     confiance légèrement sous-optimale. N'empêchent pas l'extraction.
+      - `tool_versions` : versions des outils utilisés pour ce document.
+      - Tous les champs sont JSON-sérialisables via model_dump(mode="json").
     """
 
     claim_id: str = Field(..., min_length=1, max_length=50)
@@ -596,7 +622,20 @@ class DocumentExtraction(StrictModel):
     is_readable: bool = False
     human_review_required: bool = False
     human_review_reasons: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Anomalies bloquantes ayant empêché ou altéré l'extraction",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Anomalies non bloquantes — fallbacks, champs optionnels absents, "
+                    "confiance légèrement sous-optimale",
+    )
+    tool_versions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Versions des outils utilisés : pdf_reader, ocr_engine, classifier, "
+                    "confidence, parser, ocr_thresholds",
+    )
     extracted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     essential_fields: EssentialFields | None = Field(
         default=None,
@@ -605,6 +644,86 @@ class DocumentExtraction(StrictModel):
     artifact_id: str | None = None
     artifact_path: str | None = None
     security_findings: list[SecurityFinding] = Field(default_factory=list)
+    structured_errors: list[OcrError] = Field(
+        default_factory=list,
+        description="Erreurs structurées Étape 18 — code stable, sévérité, document, retryable",
+    )
+
+
+class OcrError(StrictModel):
+    """Erreur structurée du Document/OCR Agent — Étape 18.
+
+    Invariants :
+      - `code` est un code stable de OcrCode — ne change jamais entre versions.
+      - `message` est contrôlé — jamais de donnée personnelle ni de secret.
+      - `severity` et `retryable` sont dérivés des tables centralisées si non fournis.
+      - `document` désigne le fichier concerné par son nom de stockage (sans chemin absolu).
+      - `page_number` est None quand l'erreur est globale au document.
+    """
+
+    code: OcrCode = Field(..., description="Code stable identifiant la cause de l'erreur")
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Message contrôlé — aucune donnée personnelle ni secret",
+    )
+    severity: SeverityLevel = Field(..., description="Niveau de sévérité de l'erreur")
+    document: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Nom de stockage du document concerné (sans chemin absolu)",
+    )
+    page_number: int | None = Field(
+        default=None,
+        ge=1,
+        description="Numéro de page concernée — None si l'erreur est globale au document",
+    )
+    retryable: bool = Field(
+        ...,
+        description="Vrai si l'opération peut être retentée sans modification du document",
+    )
+
+    @field_validator("message", "document")
+    @classmethod
+    def _no_sensitive_value(cls, v: str, info) -> str:
+        return _reject_security_leak(v, info.field_name)
+
+    @field_validator("document")
+    @classmethod
+    def _no_absolute_path(cls, v: str) -> str:
+        if re.match(r"^(?:/|[A-Za-z]:[/\\]|\\\\)", v):
+            raise ValueError(f"Chemin absolu interdit dans document : {v!r}")
+        if ".." in v:
+            raise ValueError(f"Traversée de répertoire interdite dans document : {v!r}")
+        return v
+
+    @classmethod
+    def from_code(
+        cls,
+        code: OcrCode,
+        document: str,
+        *,
+        page_number: int | None = None,
+        message: str | None = None,
+    ) -> "OcrError":
+        """Construit une OcrError à partir d'un code stable.
+
+        Le message, la sévérité et le flag retryable sont déduits des tables
+        centralisées si non fournis — garantissant la cohérence globale.
+        """
+        resolved_message = message or OCR_ERROR_CODE_DESCRIPTIONS.get(
+            code, f"Erreur OCR : {code.value}"
+        )
+        return cls(
+            code=code,
+            message=resolved_message,
+            severity=OCR_ERROR_CODE_SEVERITIES.get(code, SeverityLevel.HIGH),
+            document=document,
+            page_number=page_number,
+            retryable=OCR_ERROR_CODE_RETRYABLE.get(code, False),
+        )
 
 
 class DocumentOcrAuditEntry(StrictModel):
@@ -627,7 +746,41 @@ class DocumentOcrAuditEntry(StrictModel):
 
 
 class DocumentOcrResult(StrictModel):
-    """Résultat de classification et d'extraction avec provenance complète."""
+    """Résultat de classification et d'extraction avec provenance complète.
+
+    Schéma Étape 19 — champs complets et garanties documentées :
+
+    Statut & classification :
+      - `extraction_status`  : ExtractionStatus fin-grain (SUCCESS/NEEDS_REVIEW/FAILED/SKIPPED/BLOCKED)
+      - `status`             : VerificationStatus LangGraph (PASS/NEEDS_REVIEW/FAIL)
+      - `classification`     : DocumentClassification complète (type, confiance, source, scores, version)
+      - `document_type`      : DocumentType déduit de la classification (raccourci)
+
+    Données extraites :
+      - `extracted_fields`   : dict[str, ExtractedField] — champs avec provenance fine
+      - `extraction`         : DocumentExtraction — vue riche complète (pages + champs + essential_fields)
+
+    Erreurs & avertissements :
+      - `errors`             : anomalies bloquantes (liste de messages contrôlés)
+      - `warnings`           : anomalies non bloquantes — fallbacks, champs optionnels absents
+      - `structured_errors`  : list[OcrError] — erreurs avec code stable, sévérité, document, retryable
+      - `reason_codes`       : list[OcrCode] — codes stables pour la machine
+      - `reasons`            : list[str] — messages lisibles pour l'humain
+
+    Scores :
+      - `confidence_score`   : score global en [0.0, 1.0]
+
+    Versions des outils :
+      - `tool_versions`      : dict[str, str] — pdf_reader, ocr_engine, classifier, confidence, parser
+
+    Artefacts :
+      - `artifact_id`        : UUID de l'artefact OCR complet écrit hors ClaimState
+      - `artifact_path`      : chemin relatif sous storage/ (jamais absolu)
+
+    Sérialisation :
+      - JSON-sérialisable via model_dump(mode="json") — garanti par StrictModel Pydantic v2.
+      - Tous les types non-JSON natifs (datetime, Decimal, Enum) sont convertis automatiquement.
+    """
 
     claim_id: str
     file_path: str
@@ -635,25 +788,51 @@ class DocumentOcrResult(StrictModel):
     mime_type: str
     extraction_status: ExtractionStatus
     status: VerificationStatus
+    classification: DocumentClassification | None = Field(
+        default=None,
+        description="Classification complète du document (type, confiance, source, scores, version)",
+    )
     document_type: DocumentType
     ocr_source: OcrSource
     pages: list[DocumentPageContent] = Field(default_factory=list)
     full_text: str = ""
     extracted_fields: dict[str, ExtractedField] = Field(default_factory=dict)
-    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Score global de confiance de l'extraction en [0.0, 1.0]",
+    )
     is_readable: bool = False
     human_review_required: bool = False
     human_review_reasons: list[str] = Field(default_factory=list)
     reason_codes: list[OcrCode] = Field(default_factory=list)
     unreadable_documents: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Anomalies bloquantes ayant empêché ou altéré l'extraction",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Anomalies non bloquantes — fallbacks, champs optionnels absents, "
+                    "confiance légèrement sous-optimale",
+    )
     reasons: list[str] = Field(default_factory=list)
+    tool_versions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Versions des outils utilisés : pdf_reader, ocr_engine, classifier, "
+                    "confidence, parser, ocr_thresholds",
+    )
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     audit_entry: DocumentOcrAuditEntry | None = None
     extraction: DocumentExtraction | None = None
     artifact_id: str | None = None
     artifact_path: str | None = None
     security_findings: list[SecurityFinding] = Field(default_factory=list)
+    structured_errors: list[OcrError] = Field(
+        default_factory=list,
+        description="Erreurs structurées Étape 18 — code stable, sévérité, document, retryable",
+    )
 
 
 # ── 7. Medical Coding Agent ───────────────────────────────────────────────────

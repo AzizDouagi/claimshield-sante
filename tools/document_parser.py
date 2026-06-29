@@ -11,7 +11,6 @@ import re
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import Decimal
 
 from schemas.domain import DocumentType, OcrSource
 from schemas.results import EssentialFields, ExtractedField, FieldProvenance, MedicalItem, MonetaryAmount

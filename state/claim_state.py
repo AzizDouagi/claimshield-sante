@@ -9,13 +9,21 @@ Règles :
 - Versionné : schema_version permet de détecter un state produit par une
   version antérieure du workflow lors d'une reprise sur checkpoint.
 
-Contenu autorisé après ingestion :
+Contenu autorisé après ingestion / OCR :
   case_id · statut ingestion · manifest structuré · métadonnées documents
   chemins relatifs · hashes SHA-256 · alertes · erreurs
+  résultats structurés d'agent (Pydantic) · métadonnées de confiance
+  références artefacts (artifact_id, artifact_path) · codes raison
 
 Contenu interdit (garanti par validate_state_update) :
-  octets bruts · PDF/images en base64 · texte OCR · chemins absolus
-  objets fichier ouverts
+  octets bruts · PDF/images en base64 · texte OCR complet (full_text)
+  pages OCR brutes (pages[]) · chemins absolus · objets fichier ouverts
+
+Règles spécifiques à l'agent Document/OCR :
+  - ocr_result doit être le résultat MINIMISÉ produit par _minimize_for_state().
+    full_text et pages doivent être vides avant d'entrer dans le state.
+  - ocr_input est consommé et remis à None par le nœud OCR.
+  - Le texte OCR complet est écrit dans un artefact externe (artifact_id / artifact_path).
 """
 
 from __future__ import annotations
@@ -96,6 +104,26 @@ class ClaimState(TypedDict, total=False):
     # Le nœud privacy le remet à None après traitement.
     privacy_input: dict | None
 
+    # ── Entrée OCR — consommée et vidée par le nœud document_ocr_agent ───────
+    # Contient claim_id, document_id, filename, mime_type, sha256, sanitized_path,
+    # security_decision, schema_version, file_index.
+    # Le nœud OCR le remet à None après traitement.
+    # Invariant : jamais de source_path absolu ni de contenu binaire dans ce champ.
+    ocr_input: dict | None
+
+    # ── Entrée identité/couverture — consommée par le nœud identity_coverage ──
+    # Contient case_id + fhir_bundle_path (chemin relatif sous incoming/).
+    # Les données d'extraction proviennent de ocr_result dans le state.
+    identity_coverage_input: dict | None
+
+    # ── Entrée FHIR — consommée par le nœud fhir_validator ───────────────────
+    # Contient case_id, fhir_bundle_path (relatif), bundle_expected.
+    fhir_input: dict | None
+
+    # ── Entrée codification — consommée par le nœud medical_coding ───────────
+    # Contient case_id, procedures (list[str]), medications (list[str]).
+    coding_input: dict | None
+
     # ── Résultats des agents (un par agent, écrasable) ────────────────────────
     intake_result: ClaimIntakeResult | None
     intake_status: IntakeStatus | None       # promu pour le routage du graphe
@@ -161,19 +189,78 @@ def _scan_for_forbidden(value: object, breadcrumb: str) -> list[str]:
     return violations
 
 
+def _check_ocr_result_minimized(result: DocumentOcrResult, breadcrumb: str) -> list[str]:
+    """Vérifie que DocumentOcrResult a été minimisé avant d'entrer dans le state.
+
+    Le texte OCR complet et les pages brutes doivent avoir été retirés par
+    _minimize_for_state() dans le nœud OCR. Seuls les résultats structurés
+    (métadonnées, champs extraits, scores, codes, audit_entry) sont autorisés.
+
+    Violations détectées :
+      - full_text non vide → document brut interdit dans le state
+      - pages non vide → pages OCR brutes interdites dans le state
+      - extraction.full_text non vide → même règle dans la vue détaillée
+      - extraction.pages non vide → même règle dans la vue détaillée
+    """
+    violations: list[str] = []
+    if result.full_text:
+        violations.append(
+            f"{breadcrumb}.full_text : texte OCR complet interdit dans le state "
+            f"({len(result.full_text)} caractères) — utiliser _minimize_for_state()"
+        )
+    if result.pages:
+        violations.append(
+            f"{breadcrumb}.pages : pages OCR brutes interdites dans le state "
+            f"({len(result.pages)} page(s)) — utiliser _minimize_for_state()"
+        )
+    if result.extraction is not None:
+        ext = result.extraction
+        if ext.full_text:
+            violations.append(
+                f"{breadcrumb}.extraction.full_text : texte OCR complet interdit "
+                f"({len(ext.full_text)} caractères)"
+            )
+        if ext.pages:
+            violations.append(
+                f"{breadcrumb}.extraction.pages : pages OCR brutes interdites "
+                f"({len(ext.pages)} page(s))"
+            )
+    return violations
+
+
+# Clés consommées (vidées à None) qui sont ignorées dans validate_state_update
+_CONSUMED_INPUT_KEYS: frozenset[str] = frozenset({
+    "intake_input",
+    "security_input",
+    "privacy_input",
+    "ocr_input",
+    "identity_coverage_input",
+    "fhir_input",
+    "coding_input",
+})
+
+
 def validate_state_update(updates: dict) -> None:
     """Vérifie qu'une mise à jour du ClaimState ne contient pas de contenu interdit.
 
-    Lève ValueError avec la liste des violations si du contenu binaire,
-    un chemin absolu ou un objet fichier ouvert est détecté.
+    Règles appliquées :
+      1. Contenu binaire (bytes, bytearray) → interdit.
+      2. Objets fichier ouverts (io.IOBase) → interdit.
+      3. Chemins absolus dans les chaînes → interdit.
+      4. DocumentOcrResult non minimisé (full_text ou pages non vides) → interdit.
 
+    Les clés d'entrée consommées (intake_input, security_input, privacy_input,
+    ocr_input) vidées à None sont ignorées sans inspection.
+
+    Lève ValueError avec la liste des violations détectées.
     À appeler par chaque nœud LangGraph avant de retourner ses mises à jour.
     """
     violations: list[str] = []
     for key, value in updates.items():
-        # intake_input vidé (None) : ne pas inspecter son contenu précédent
-        if key == "intake_input" and value is None:
+        if key in _CONSUMED_INPUT_KEYS and value is None:
             continue
+        if key == "ocr_result" and isinstance(value, DocumentOcrResult):
+            violations.extend(_check_ocr_result_minimized(value, key))
         violations.extend(_scan_for_forbidden(value, key))
 
     if violations:
