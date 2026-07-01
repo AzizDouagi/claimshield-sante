@@ -1,8 +1,10 @@
 # Security Gate Agent
 
-Agent déterministe de contrôle de sécurité des entrées sensibles du pipeline ClaimShield Santé.
+Agent LLM de contrôle de sécurité des entrées sensibles du pipeline ClaimShield Santé,
+borné par des politiques déterministes.
 
-**Agent purement déterministe - aucun appel LLM.**
+**Agent hybride : scanners et allowlists déterministes, puis décision LLM structurée
+avec garde-fou anti-déclassement.**
 
 ---
 
@@ -19,7 +21,11 @@ Pipeline d'exécution :
 5. Scan déterministe du texte, des métadonnées et sorties d'agents
 6. Contrôle des outils demandés
 7. Calcul de la sévérité maximale
-8. Retour d'un `SecurityGateResult` avec décision `ALLOW`, `BLOCK` ou `QUARANTINE`
+8. Appel du LLM de sécurité avec prompt système versionné
+9. Retour d'un `SecurityGateResult` avec décision `ALLOW`, `BLOCK` ou `QUARANTINE`
+
+Le LLM peut durcir une décision, mais ne peut pas abaisser une décision
+déterministe `BLOCK` ou `QUARANTINE` vers un statut moins strict.
 
 Le Security Gate ne remplace pas les agents métier : il protège le pipeline contre les fichiers dangereux, chemins non autorisés, URL risquées, outils non approuvés, accès secrets et prompt injections.
 
@@ -67,6 +73,7 @@ Le noeud lit les clés suivantes dans le `ClaimState` :
 | `security_input.write_path` | `str` | Non | Alias accepté pour `relative_path` |
 | `security_input.url` | `str` | Non | URL à contrôler |
 | `security_input.text_excerpt` | `str` | Non | Extrait texte limité, jamais document brut |
+| `security_input.text_source` | `str` | Non | `text_excerpt`, `pdf_text`, `ocr_preview`, `agent_output`, `tool_arguments`, `metadata` ou `url` |
 | `security_input.tool_arguments_excerpt` | `str` | Non | Alias accepté pour `text_excerpt` |
 | `security_input.requesting_agent` | `str` | Non | Agent demandeur d'un outil |
 | `security_input.deterministic_injection_flag` | `bool` | Non | Oracle de test uniquement |
@@ -105,6 +112,8 @@ SecurityGateResult(
     applied_policy="default",
     policy_version="1.1.0",
     evaluated_at=datetime(..., tzinfo=UTC),
+    confidence_score=0.95,
+    evidence_summary="Aucun signal bloquant détecté par les politiques et scanners.",
     next_allowed_action="continue_pipeline",
     audit_entry=SecurityAuditEntry(...),
     prompt_injection_detected=False,
@@ -122,6 +131,8 @@ SecurityGateResult(
 | `reason_codes` | Codes stables expliquant la décision |
 | `applied_policy` | Nom de la politique appliquée, par défaut `default` |
 | `policy_version` | Version de la politique, par défaut `1.1.0` |
+| `confidence_score` | Niveau de confiance final, borné entre `0.0` et `1.0` |
+| `evidence_summary` | Preuve minimisée, sans document brut ni secret |
 | `next_allowed_action` | Action suivante autorisée après décision |
 | `audit_entry` | Entrée d'audit minimale, sans secret ni document brut |
 | `prompt_injection_detected` | `True` si une injection de prompt est détectée |
@@ -153,7 +164,7 @@ SecurityGateResult(
 | `storage/manifests/` | Chemin validable pour validation de chemin |
 | `SecurityGateResult` | Écriture dans le `ClaimState` |
 | `SecurityAuditEntry` | Écriture minimale dans le résultat |
-| LLM Ollama | **Aucun** |
+| LLM Ollama | Appel structuré uniquement, sans outil système |
 | Base de données | **Aucun** |
 | Réseau externe | **Aucun** |
 | Secrets `.env`, tokens, clés API | **Aucun** |
@@ -165,7 +176,7 @@ SecurityGateResult(
 - Aucune analyse médicale ou clinique.
 - Aucune décision de remboursement.
 - Aucune modification du dossier métier.
-- Aucun appel LLM.
+- Aucun déclassement LLM d'une décision déterministe bloquante.
 - Aucun accès direct à un secret.
 - Aucun accès shell, terminal, `subprocess`, `exec`, `eval` ou `os.system`.
 - Aucun appel réseau externe.

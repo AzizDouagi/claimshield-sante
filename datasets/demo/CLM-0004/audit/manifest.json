@@ -62,8 +62,8 @@
     },
     {
       "filename": "ground_truth.json",
-      "size_bytes": 3624,
-      "sha256": "4c1bce761fa60fba90eaf5ab93b0986fda2b13e7a3f28abc9e53a314507dd9d0",
+      "size_bytes": 3664,
+      "sha256": "dc5f8faf12e795f94d8f6d61017546db9d2c9d8784b96bcc55c39685094f2c67",
       "required": false
     },
     {

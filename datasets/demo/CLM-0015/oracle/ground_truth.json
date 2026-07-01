@@ -110,6 +110,7 @@
     ]
   },
   "scenario_id": "SC-02",
+  "agent_under_test": "identity_coverage_agent",
   "scenario_description": "Pré-autorisation requise non fournie : l'acte chirurgical référencé exige une pré-autorisation (authorization_required=true), mais le statut est 'pending' au moment du dépôt → rejet.",
   "scenario_tags": [
     "REJECT",

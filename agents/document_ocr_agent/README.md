@@ -10,8 +10,10 @@ Il est le seul agent autorisé à lire le contenu des fichiers stockés dans `in
 Il ne décide jamais du remboursement, ne modifie jamais un fichier source et n'accède
 jamais à des secrets ou à des données personnelles en clair.
 
-Pipeline entièrement **déterministe** : aucun appel LLM, aucune évaluation de chaîne de
-caractères comme instruction.
+Les décisions de sécurité, de méthode d'extraction, de confiance et de statut restent
+**déterministes**. Un LLM texte ou multimodal peut seulement proposer une classification
+ou un complément d'extraction ; une valeur proposée est conservée uniquement si elle est
+retrouvée dans le texte extrait et accompagnée d'une provenance vérifiable.
 
 ---
 
@@ -111,7 +113,7 @@ L'agent ne fait **jamais** :
 - **N'expose pas** de donnée personnelle dans l'`audit_entry` (pas de nom, patient\_id brut, montant).
 - **Ne copie pas** le texte OCR complet dans le `ClaimState` — seul le résultat minimisé y est écrit.
 - **N'invente pas** une valeur absente : un champ non détecté reste `None`, jamais une valeur fictive.
-- **N'appelle pas** de LLM, d'API externe ou de service réseau.
+- **Ne laisse pas** le LLM introduire une valeur absente du texte extrait ou issue d'un document suspect/faible confiance.
 - **Ne décide pas** du remboursement — c'est la responsabilité du `case_reviewer_agent`.
 - **N'accède pas** aux secrets, clés d'API, tokens ou variables d'environnement.
 - **Ne stocke pas** le texte OCR brut dans le `ClaimState` (`validate_state_update` le rejette).

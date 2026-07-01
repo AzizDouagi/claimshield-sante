@@ -107,6 +107,7 @@
     ]
   },
   "scenario_id": "SC-04",
+  "agent_under_test": "claim_intake_agent",
   "scenario_description": "Document obligatoire absent : la facture médicale est manquante au moment du dépôt. Le Claim Intake Agent rejette le dossier sans poursuivre le traitement.",
   "scenario_tags": [
     "REJECT",

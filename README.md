@@ -49,8 +49,8 @@ brew install libmagic
 # Fedora/RHEL :
 # sudo dnf install file-libs
 
-# 4. Installer les dépendances Python
-pip install -r requirements.txt
+# 4. Installer le projet et les dépendances de développement
+pip install -e ".[dev]"
 
 # 5. Configurer l'environnement
 cp .env.example .env

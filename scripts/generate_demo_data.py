@@ -29,6 +29,7 @@ SCENARIOS: dict[str, dict] = {
             "couverture active (Anthem 80 %), montant dans les seuils, aucune anomalie."
         ),
         "scenario_tags": ["APPROVE", "happy-path"],
+        "agent_under_test": "full_pipeline",
         "expected_recommendation": "APPROVE",
         "human_review_required": False,
         "human_review_reasons": [],
@@ -64,6 +65,7 @@ SCENARIOS: dict[str, dict] = {
             "mais le statut est 'pending' au moment du dépôt → rejet."
         ),
         "scenario_tags": ["REJECT", "preauthorization"],
+        "agent_under_test": "identity_coverage_agent",
         "expected_recommendation": "REJECT",
         "human_review_required": True,
         "human_review_reasons": [
@@ -112,6 +114,7 @@ SCENARIOS: dict[str, dict] = {
             "Le Security Gate bloque le dossier avant tout traitement LLM."
         ),
         "scenario_tags": ["REJECT", "security", "prompt-injection"],
+        "agent_under_test": "security_gate_agent",
         "expected_recommendation": "REJECT",
         "human_review_required": True,
         "human_review_reasons": [
@@ -173,6 +176,7 @@ SCENARIOS: dict[str, dict] = {
             "sans poursuivre le traitement."
         ),
         "scenario_tags": ["REJECT", "missing-document", "intake"],
+        "agent_under_test": "claim_intake_agent",
         "expected_recommendation": "REJECT",
         "human_review_required": False,
         "human_review_reasons": [],
@@ -228,6 +232,7 @@ SCENARIOS: dict[str, dict] = {
             "Le Fraud Detection Agent signale le doublon → REJECT."
         ),
         "scenario_tags": ["REJECT", "fraud", "duplicate-invoice"],
+        "agent_under_test": "fraud_detection_agent",
         "expected_recommendation": "REJECT",
         "human_review_required": True,
         "human_review_reasons": [
@@ -281,6 +286,7 @@ SCENARIOS: dict[str, dict] = {
             "Agent signale une divergence → PENDING + revue humaine obligatoire."
         ),
         "scenario_tags": ["PENDING", "clinical-inconsistency", "human-review"],
+        "agent_under_test": "clinical_consistency_agent",
         "expected_recommendation": "PENDING",
         "human_review_required": True,
         "human_review_reasons": [
@@ -376,6 +382,7 @@ def patch_ground_truth(gt: dict, case_id: str, sc: dict) -> dict:
     gt["scenario_id"] = sc["scenario_id"]
     gt["scenario_description"] = sc["scenario_description"]
     gt["scenario_tags"] = sc["scenario_tags"]
+    gt["agent_under_test"] = sc["agent_under_test"]
     gt["expected_recommendation"] = sc["expected_recommendation"]
     gt["human_review_required"] = sc["human_review_required"]
     gt["human_review_reasons"] = sc["human_review_reasons"]
@@ -472,14 +479,14 @@ def rebuild_manifest_files(case_dir: Path, manifest: dict, case_id: str, remove_
 
 def generate(force: bool, dry_run: bool) -> int:
     if DEMO_DIR.exists():
-        if not force:
+        if not force and not dry_run:
             print(
                 f"ERREUR : {DEMO_DIR} existe déjà. "
                 "Utilisez --force pour écraser.",
                 file=sys.stderr,
             )
             return 1
-        if not dry_run:
+        if force and not dry_run:
             shutil.rmtree(DEMO_DIR)
             print(f"Supprimé : {DEMO_DIR}")
 

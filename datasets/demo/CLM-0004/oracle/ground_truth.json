@@ -105,6 +105,7 @@
     ]
   },
   "scenario_id": "SC-01",
+  "agent_under_test": "full_pipeline",
   "scenario_description": "Approbation standard : dossier complet, identité vérifiée, couverture active (Anthem 80 %), montant dans les seuils, aucune anomalie.",
   "scenario_tags": [
     "APPROVE",

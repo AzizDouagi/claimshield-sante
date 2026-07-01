@@ -85,17 +85,29 @@ python scripts/import_synthea_claimshield_cases.py --case CLM-0001
 Sous-ensemble de 6 cas sélectionnés et enrichis pour couvrir les situations
 représentatives du pipeline. Les `ground_truth.json` ont été adaptés manuellement.
 
-| Dossier  | Scénario | Résultat | Description courte |
-|----------|----------|----------|--------------------|
-| CLM-0004 | SC-01 | `APPROVE`  | Approbation standard — dossier parfait |
-| CLM-0015 | SC-02 | `REJECT`   | Pré-autorisation requise non fournie |
-| CLM-0005 | SC-03 | `REJECT`   | Injection de prompt détectée (Security Gate) |
-| CLM-0019 | SC-04 | `REJECT`   | Document obligatoire manquant (facture absente) |
-| CLM-0024 | SC-05 | `REJECT`   | Facture en doublon (fraude) |
-| CLM-0032 | SC-06 | `PENDING`  | Incohérence clinique — revue médecin requise |
+| Dossier  | Scénario | Agent concerné | Résultat | Description courte |
+|----------|----------|----------------|----------|--------------------|
+| CLM-0004 | SC-01 | `full_pipeline` | `APPROVE`  | Approbation standard — dossier parfait |
+| CLM-0015 | SC-02 | `identity_coverage_agent` | `REJECT`   | Pré-autorisation requise non fournie |
+| CLM-0005 | SC-03 | `security_gate_agent` | `REJECT`   | Injection de prompt détectée |
+| CLM-0019 | SC-04 | `claim_intake_agent` | `REJECT`   | Document obligatoire manquant |
+| CLM-0024 | SC-05 | `fraud_detection_agent` | `REJECT`   | Facture en doublon |
+| CLM-0032 | SC-06 | `clinical_consistency_agent` | `PENDING`  | Incohérence clinique — revue médecin requise |
 
 Voir [`demo/README.md`](demo/README.md) pour le détail de chaque scénario
 et [`demo/PROVENANCE.md`](demo/PROVENANCE.md) pour la source et la licence.
+
+Chaque `ground_truth.json` de démonstration contient `scenario_id`,
+`agent_under_test`, `expected_recommendation`, `expected_anomalies`,
+les documents requis/manquants et les résultats attendus par agent.
+
+### Reproduire `datasets/demo/`
+
+```bash
+python scripts/generate_demo_data.py --dry-run
+python scripts/generate_demo_data.py --force
+pytest tests/unit/test_demo_dataset.py -q
+```
 
 ---
 

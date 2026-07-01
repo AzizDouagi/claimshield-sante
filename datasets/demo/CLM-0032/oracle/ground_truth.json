@@ -112,6 +112,7 @@
     ]
   },
   "scenario_id": "SC-06",
+  "agent_under_test": "clinical_consistency_agent",
   "scenario_description": "Incohérence clinique : volume anormalement élevé d'actes (29) et de médicaments (42) pour une consultation ambulatoire. Le Clinical Consistency Agent signale une divergence → PENDING + revue humaine obligatoire.",
   "scenario_tags": [
     "PENDING",

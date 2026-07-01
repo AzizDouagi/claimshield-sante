@@ -3,7 +3,9 @@
 ## Rôle
 
 Applique des vues minimisées par rôle de lecteur sur les données d'un dossier ClaimShield Santé.  
-L'agent est **entièrement déterministe** — aucun appel LLM.
+Les décisions d'accès et les vues sont **déterministes**. Le LLM intervient seulement
+pour produire une justification d'audit courte, à partir d'une entrée minimisée et
+validée par Pydantic.
 
 ## Pré-condition
 
@@ -14,11 +16,14 @@ Si `security_result` est absent ou que sa décision n'est pas `ALLOW`, le résul
 
 ```
 1. Vérification du Security Gate (decision == ALLOW)
-2. Validation Pydantic de PrivacyInput
-3. Calcul des champs à masquer  (rôle × classification × données réelles)
-4. Pseudonymisation des valeurs personnelles si fournies
-5. Détermination du statut (PASS / NEEDS_REVIEW / FAIL)
-6. Retour de PrivacyResult
+2. Validation du rôle obligatoire (rôle absent ou inconnu => FAIL)
+3. Validation Pydantic de PrivacyInput
+4. Calcul DENY-by-default des champs refusés
+5. Pseudonymisation stable et masquage partiel des identifiants
+6. Construction de la vue minimisée par rôle
+7. Validation Pydantic et vérification post-vue
+8. Appel LLM avec résumé minimisé pour justification d'audit
+9. Retour de PrivacyResult
 ```
 
 ## Point d'entrée
@@ -32,7 +37,7 @@ from schemas.domain import DataClassification, ReaderRole
 result = run(
     PrivacyInput(
         case_id="CLM-0001",
-        role=ReaderRole.GESTIONNAIRE,
+        role=ReaderRole.ADMINISTRATIVE_MANAGER,
         data_classification=DataClassification.SYNTHETIC_TEST_DATA,
         contains_real_personal_data=False,
     ),
@@ -43,15 +48,14 @@ result = run(
 updates = node(state)
 ```
 
-## Rôles et champs masqués
+## Rôles et vues
 
-| Rôle              | Base masquée                      | Sur CONFIDENTIAL            | Sur données réelles |
-|-------------------|-----------------------------------|-----------------------------|---------------------|
-| `SYSTEME`         | —                                 | —                           | —                   |
-| `GESTIONNAIRE`    | —                                 | Champs personnels           | Champs personnels   |
-| `MEDECIN_CONSEIL` | Champs financiers                 | Perso + financiers          | Champs personnels   |
-| `AUDITEUR`        | Perso + médicaux                  | Perso + médicaux + financiers | Champs personnels |
-| `EXTERNE`         | Tous les champs sensibles         | Tous les champs sensibles   | Tous               |
+| Rôle | Vue produite |
+|------|--------------|
+| `ADMINISTRATIVE_MANAGER` | Documents, statut dossier, montants, facture masquée, pseudonyme patient |
+| `MEDICAL_REVIEWER` | Actes, prescriptions, diagnostics, date de soin, pseudonymes patient/prestataire |
+| `FRAUD_ANALYST` | Hashes documentaires, montants, dates, facture masquée, pseudonymes stables |
+| `AUDITOR` | Trace minimale : acteur, action, horodatage, politique, résultat, codes |
 
 **Champs personnels** : `patient_name`, `patient_id`, `birth_date`, `gender`  
 **Champs financiers** : `total_billed`, `amount_requested`, `patient_share`, `coverage_rate`, `payer_name`, `invoice_number`, `prescription_number`  
@@ -70,7 +74,7 @@ updates = node(state)
 | Champ                       | Type              | Défaut                    | Description                            |
 |-----------------------------|-------------------|---------------------------|----------------------------------------|
 | `case_id`                   | `str`             | requis                    | Format `CLM-XXXX`                      |
-| `role`                      | `ReaderRole`      | `GESTIONNAIRE`            | Rôle du lecteur                        |
+| `role`                      | `ReaderRole`      | requis                    | Rôle du lecteur                        |
 | `data_classification`       | `DataClassification` | `SYNTHETIC_TEST_DATA`  | Classification du dossier              |
 | `contains_real_personal_data` | `bool`          | `False`                   | Présence de données réelles            |
 | `fields_to_evaluate`        | `list[str]`       | `[]`                      | Champs à évaluer (tous si vide)        |
@@ -90,8 +94,10 @@ class PrivacyResult(StrictModel):
     status: VerificationStatus          # PASS | NEEDS_REVIEW | FAIL
     data_classification: DataClassification
     contains_real_personal_data: bool
-    masked_fields: list[str]            # champs masqués pour ce rôle
+    redacted_fields: list[str]          # champs refusés pour ce rôle
     reasons: list[str]                  # motifs lisibles
+    view: dict | None                   # vue minimisée, si claim_data fourni
+    audit_entry: PrivacyAuditEntry | None
 ```
 
 ## Dépendances
@@ -107,4 +113,5 @@ class PrivacyResult(StrictModel):
 - Jamais de décision de remboursement.
 - Jamais de contenu brut (OCR, PDF) dans le résultat.
 - Jamais de secret, token ou chemin absolu dans `PrivacyResult`.
+- Jamais de modification des documents originaux, de la couverture, des résultats métier ou de la décision finale.
 - Le résultat est JSON-sérialisable (StrictModel Pydantic).

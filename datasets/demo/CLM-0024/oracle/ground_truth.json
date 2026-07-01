@@ -113,6 +113,7 @@
     ]
   },
   "scenario_id": "SC-05",
+  "agent_under_test": "fraud_detection_agent",
   "scenario_description": "Doublon de facture détecté : la facture INV-CLM-0024 a déjà été soumise et remboursée (hash SHA-256 identique dans la base). Le Fraud Detection Agent signale le doublon → REJECT.",
   "scenario_tags": [
     "REJECT",

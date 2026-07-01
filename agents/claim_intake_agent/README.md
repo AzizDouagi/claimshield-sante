@@ -2,7 +2,7 @@
 
 Premier agent du pipeline ClaimShield Santé. Reçoit un dossier de remboursement, inspecte chaque fichier, calcule les hashes SHA-256, effectue un stockage sécurisé et retourne un manifeste complet.
 
-**Agent purement déterministe — aucun appel LLM.**
+**Agent hybride : contrôles déterministes obligatoires + synthèse LLM structurée.**
 
 ---
 
@@ -21,7 +21,9 @@ Pipeline d'exécution (dans l'ordre) :
    - e. Déplacement atomique vers `incoming/` ou `quarantine/`
 3. Vérification des documents obligatoires
 4. Construction du `ClaimManifest`
-5. Retour du `ClaimIntakeResult` + persistance du manifest sur disque
+5. Appel LLM avec prompt système versionné pour produire une décision Pydantic
+   (`LlmIntakeDecision`) alignée sur les contrôles déterministes
+6. Retour du `ClaimIntakeResult` + persistance du manifest sur disque
 
 ---
 
@@ -142,7 +144,7 @@ InspectedFile(
 | `storage/incoming/{case_id}/` | Écriture (fichiers acceptés) |
 | `storage/quarantine/{case_id}/` | Écriture (fichiers suspects ou doublons) |
 | `storage/manifests/{case_id}.json` | Écriture (manifest de traçabilité) |
-| LLM Ollama | **Aucun** |
+| LLM Ollama | Lecture du résumé minimisé, sortie Pydantic stricte |
 | Base de données | **Aucun** |
 | Réseau externe | **Aucun** |
 
@@ -253,6 +255,7 @@ Tous les codes sont des valeurs stables de `IntakeReasonCode`. Ils ne changent j
 | `TOO_MANY_FILES` | Nombre de fichiers dépasse la limite configurée |
 | `FOLDER_QUOTA_EXCEEDED` | Taille cumulée dépasse le quota du dossier |
 | `INVALID_FILENAME` | Nom de fichier invalide (caractères ou structure non autorisés) |
+| `LLM_OUTPUT_INVALID` | Sortie LLM invalide ou indisponible |
 
 ---
 
@@ -366,6 +369,7 @@ pytest tests/agents/test_claim_intake.py::test_doublon_detecte_meme_noms_differe
 | Fichier | Rôle |
 |---|---|
 | [agent.py](agent.py) | `run()` (logique pure, testable sans LangGraph) + `node()` (nœud LangGraph) |
+| [prompt.py](prompt.py) | Chargement du prompt système versionné depuis `prompts/claim_intake_agent.yaml` |
 | [schemas.py](schemas.py) | `ClaimIntakeInput` + réexports de `ClaimIntakeResult`, `ClaimManifest`, `InspectedFile`, `StructuredError` |
 | [README.md](README.md) | Ce fichier |
 
