@@ -394,6 +394,21 @@ class PrivacyRequest(StrictModel):
 PrivacyInput = PrivacyRequest
 
 
+# ── Schéma de décision LLM (intermédiaire — jamais dans ClaimState) ───────────
+
+
+class LlmPrivacyDecision(StrictModel):
+    """Enrichissement LLM pour l'audit privacy."""
+
+    audit_justification: str = Field(default="", max_length=500)
+    data_classification_reason: str = Field(default="", max_length=500)
+
+    @field_validator("audit_justification", "data_classification_reason")
+    @classmethod
+    def no_sensitive_value(cls, v: str, info) -> str:
+        return _reject_view_leak(v, info.field_name) or ""
+
+
 __all__ = [
     # Aliases sémantiques
     "PrivacyRole",
@@ -409,6 +424,7 @@ __all__ = [
     # Entrée
     "PrivacyRequest",
     "PrivacyInput",  # backward compat — alias de PrivacyRequest
+    "LlmPrivacyDecision",
     # Résultat (re-export depuis schemas.results)
     "PrivacyResult",
     # Re-exports pratiques

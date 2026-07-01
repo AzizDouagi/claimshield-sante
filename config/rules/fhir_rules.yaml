@@ -104,3 +104,10 @@ rules:
   enabled: true
   severity: blocking
   description: Le statut Coverage doit appartenir aux valeurs autorisées.
+- id: FHIR_RESOURCE_SCHEMA_VALID
+  enabled: true
+  severity: review
+  description: >
+    Chaque ressource du bundle est validée structurellement contre les modèles
+    fhir.resources R4B. Les avertissements reflètent des écarts R4/R4B sans
+    invalider le bundle.

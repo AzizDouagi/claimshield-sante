@@ -1,18 +1,11 @@
 """Claim Intake Agent — réception, validation et stockage documentaire.
 
-Agent purement déterministe — aucun appel LLM.
+Agent LLM (gemma4:latest via ChatOllama) + pipeline d'ingestion déterministe.
 
 Pipeline :
-  1. Validation des métadonnées du dossier (non-vide, quota de fichiers)
-  2. Pour chaque fichier, dans l'ordre :
-       a. Écriture dans la zone temporaire  (StorageService.stage_file)
-       b. Vérification du quota dossier destination
-       c. Inspection complète : nom · extension · taille · MIME · SHA-256
-       d. Détection de doublons par SHA-256
-       e. Déplacement atomique  incoming/ ou quarantine/
-  3. Vérification des documents obligatoires
-  4. Construction du ClaimManifest
-  5. Retour ClaimIntakeResult
+  Phase A — I/O déterministe : staging, inspection, storage, manifest.
+  Phase B — LLM (with_structured_output) : statut final + motifs enrichis.
+  Phase C — construction ClaimIntakeResult final.
 
 Interdictions strictes :
   - Aucune analyse médicale ou clinique.
@@ -22,10 +15,16 @@ Interdictions strictes :
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents.claim_intake_agent.prompt import load_claim_intake_prompt
+from agents.claim_intake_agent.schemas import LlmIntakeDecision
 from config.settings import Settings, get_settings
+from langchain_core.messages import HumanMessage, SystemMessage
+from llm.factory import get_llm
+from llm.metadata import build_llm_metadata
 from schemas.domain import FileStatus, IntakeReasonCode, IntakeStatus
 from schemas.results import (
     ClaimIntakeResult,
@@ -42,9 +41,55 @@ from tools.file_inspection import (
     inspect_file,
 )
 
+_AGENT_NAME = "claim_intake_agent"
+
 # Codes de StorageError qui signalent une défaillance technique (I/O) plutôt
 # qu'une violation de politique.  NO_OVERWRITE est une règle métier → BLOCKED.
 _TECHNICAL_STORAGE_ERRORS = frozenset({"WRITE_ERROR", "MOVE_ERROR", "TEMP_COLLISION"})
+
+
+# ── Phase B : LLM ─────────────────────────────────────────────────────────────
+
+
+def _invoke_llm_intake(
+    *,
+    case_id: str,
+    global_status: str,
+    file_count: int,
+    accepted_count: int,
+    quarantined_count: int,
+    duplicate_count: int,
+    error_count: int,
+    alerts: list[str],
+    file_summaries: list[dict],
+) -> LlmIntakeDecision | None:
+    """Envoie le résumé de l'ingestion au LLM pour statut et motifs."""
+    try:
+        prompt = load_claim_intake_prompt()
+        llm = get_llm()
+        structured = llm.with_structured_output(LlmIntakeDecision, method="json_schema")
+        data = {
+            "case_id": case_id,
+            "prompt_version": prompt.version,
+            "global_status": global_status,
+            "file_count": file_count,
+            "accepted_count": accepted_count,
+            "quarantined_count": quarantined_count,
+            "duplicate_count": duplicate_count,
+            "error_count": error_count,
+            "alerts": alerts,
+            "file_summaries": file_summaries,
+        }
+        system = SystemMessage(content=prompt.system_prompt)
+        human = HumanMessage(content=json.dumps(data, ensure_ascii=False))
+        result = structured.invoke([system, human])
+        if isinstance(result, LlmIntakeDecision):
+            return result
+        if isinstance(result, dict):
+            return LlmIntakeDecision(**result)
+        return None
+    except Exception:
+        return None
 
 
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
@@ -307,10 +352,54 @@ def run(
         alerts=alerts,
     )
 
-    # Persistance du manifest sur disque — généré exclusivement depuis les
-    # fichiers réellement reçus et inspectés (jamais copié depuis les données
-    # de démonstration).  Toujours écrit, même pour les dossiers bloqués ou en
-    # erreur, afin de garantir une traçabilité complète.
+    # ── Phase B : LLM — statut et motifs enrichis ────────────────────────────
+    file_summaries = [
+        {
+            "nom": f.original_name,
+            "statut": f.status.value,
+            "mime": f.detected_mime_type,
+            "taille": f.actual_size,
+        }
+        for f in inspected_files
+    ]
+    llm_decision = _invoke_llm_intake(
+        case_id=case_id,
+        global_status=global_status.value,
+        file_count=len(inspected_files),
+        accepted_count=len(accepted),
+        quarantined_count=len(quarantined),
+        duplicate_count=len(duplicate),
+        error_count=len(errored),
+        alerts=alerts,
+        file_summaries=file_summaries,
+    )
+
+    if llm_decision is None:
+        llm_error = StructuredError(
+            code=IntakeReasonCode.LLM_OUTPUT_INVALID,
+            message=(
+                "Sortie LLM invalide ou indisponible : "
+                "décision d'ingestion impossible"
+            ),
+            field="llm_output",
+        )
+        global_status = IntakeStatus.ERROR
+        reasons = ["LLM indisponible : décision d'ingestion impossible."]
+        errors.append(llm_error)
+    else:
+        llm_status_map = {
+            "ACCEPTED": IntakeStatus.ACCEPTED,
+            "QUARANTINED": IntakeStatus.QUARANTINED,
+            "BLOCKED": IntakeStatus.BLOCKED,
+            "ERROR": IntakeStatus.ERROR,
+        }
+        global_status = llm_status_map.get(llm_decision.status, global_status)
+        if llm_decision.reasons:
+            reasons = llm_decision.reasons
+
+    # ── Phase C : persistance et résultat ────────────────────────────────────
+    if manifest.status != global_status:
+        manifest = manifest.model_copy(update={"status": global_status})
     svc.write_intake_manifest(case_id, manifest.model_dump_json(indent=2))
 
     return ClaimIntakeResult(
@@ -323,6 +412,7 @@ def run(
         error_count=len(errored),
         reasons=reasons,
         errors=errors,
+        llm_metadata=build_llm_metadata(_AGENT_NAME),
     )
 
 

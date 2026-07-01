@@ -6,14 +6,17 @@ from tools.rule_loader import get_rule_version, load_rules
 def test_medical_codes_load_versioned_table():
     table = load_rules("medical_codes.yaml")
 
-    assert get_rule_version("medical_codes.yaml") == "1.0.0"
+    assert get_rule_version("medical_codes.yaml") == "1.1.0"
     assert table["ruleset"]["status"] == "active"
     assert table["rules"][0]["id"] == "MEDICAL_CODE_EXACT_MATCH"
-    assert "Office Visit" in table["procedures"]
-    assert "Acetaminophen 325 MG Oral Tablet" in table["medications"]
+    # Nouveau format : liste plate de codes (plus de dicts procedures/medications)
+    codes = table["codes"]
+    assert any(c["code"] == "11429006" for c in codes)     # Medical consultation
+    assert any(c["code"] == "313782" for c in codes)        # Paracétamol / Acetaminophen
 
 
 def test_lookup_code_exact_match_passes():
+    # "Office Visit" est un synonyme anglais de 11429006
     coding = lookup_code("Office Visit", "procedures")
 
     assert coding.status == VerificationStatus.PASS
@@ -30,6 +33,7 @@ def test_lookup_code_keyword_match_requires_review():
 
 
 def test_code_helpers_preserve_count():
+    # Les deux descriptions correspondent à des synonymes dans le catalogue
     codings = [
         *code_procedures(["Office Visit"]),
         *code_medications(["Acetaminophen 325 MG Oral Tablet"]),

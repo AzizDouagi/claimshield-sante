@@ -73,9 +73,19 @@ class Settings(BaseSettings):
     )
 
     # ── LangGraph checkpoints ─────────────────────────────────────────────────
+    langgraph_checkpoint_backend: str = Field(
+        "memory",
+        alias="LANGGRAPH_CHECKPOINT_BACKEND",
+        description="Backend checkpoints LangGraph : memory, sqlite ou postgres.",
+    )
     langgraph_checkpoint_db: Path = Field(
         _PROJECT_ROOT / "storage" / "checkpoints.db",
         alias="LANGGRAPH_CHECKPOINT_DB",
+    )
+    langgraph_checkpoint_postgres_url: str | None = Field(
+        default=None,
+        alias="LANGGRAPH_CHECKPOINT_POSTGRES_URL",
+        description="DSN PostgreSQL futur pour langgraph-checkpoint-postgres.",
     )
 
     # ── Pseudonymisation ─────────────────────────────────────────────────────

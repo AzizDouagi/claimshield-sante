@@ -93,6 +93,7 @@ _KNOWN_RULE_IDS: dict[str, set[str]] = {
         "FHIR_INTERNAL_REFERENCES_RESOLVE",
         "FHIR_PROFILE_SUPPORTED",
         "FHIR_COVERAGE_STATUS_ALLOWED",
+        "FHIR_RESOURCE_SCHEMA_VALID",
     },
     "identity_rules.yaml": {
         "IDENTITY_PATIENT_ID_MATCH",

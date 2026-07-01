@@ -1,6 +1,6 @@
 """Privacy Agent — vues minimisées par rôle de lecteur (politique DENY-by-default).
 
-Agent purement déterministe — aucun appel LLM.
+Agent LLM avec outils déterministes read-only pour enrichir l'audit.
 
 Pipeline (14 étapes) :
   1.  Vérification que le Security Gate a produit ALLOW
@@ -33,12 +33,17 @@ Règles de la politique DENY-by-default :
 """
 from __future__ import annotations
 
+import json
 import uuid
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from agents.privacy_agent.schemas import PrivacyInput, ReaderRole
+from agents.privacy_agent.schemas import LlmPrivacyDecision, PrivacyInput, ReaderRole
 from agents.privacy_agent.views import build_view
+from llm.factory import get_llm
+from llm.metadata import build_llm_metadata
+from llm.prompts import load_prompt
 from schemas.domain import DataClassification, PrivacyCode, SecurityDecision, VerificationStatus
 from schemas.results import (
     AuditEvent,
@@ -52,6 +57,29 @@ from tools.pseudonymize import (
     pseudonymization_key_is_available,
     pseudonymize_fields,
 )
+
+_AGENT_NAME = "privacy_agent"
+
+
+# ── Phase B : LLM ─────────────────────────────────────────────────────────────
+
+
+def _invoke_llm_privacy(data: dict) -> LlmPrivacyDecision | None:
+    """Envoie le résumé privacy au LLM pour justification d'audit."""
+    try:
+        llm = get_llm()
+        structured = llm.with_structured_output(LlmPrivacyDecision, method="json_schema")
+        result = structured.invoke([
+            SystemMessage(content=load_prompt(_AGENT_NAME)),
+            HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str)),
+        ])
+        if isinstance(result, LlmPrivacyDecision):
+            return result
+        if isinstance(result, dict):
+            return LlmPrivacyDecision(**result)
+        return None
+    except Exception:
+        return None
 
 
 # ── Helpers de construction d'audit ──────────────────────────────────────────
@@ -432,6 +460,26 @@ def run(
     # ── Étape 12 : statut et motifs ───────────────────────────────────────────
     status, reasons = _determine_status(privacy_input, redacted_fields)
 
+    llm_decision = _invoke_llm_privacy({
+        "case_id": privacy_input.case_id,
+        "role": privacy_input.role.value,
+        "status": status.value,
+        "data_classification": privacy_input.data_classification.value,
+        "contains_real_personal_data": privacy_input.contains_real_personal_data,
+        "redacted_fields": redacted_fields,
+        "view_built": view_built,
+        "view_keys": sorted(view.keys()) if view else [],
+    })
+    if llm_decision is None:
+        reasons.append(
+            "Justification LLM indisponible — audit privacy générique appliqué."
+        )
+    else:
+        if llm_decision.audit_justification:
+            reasons.append(llm_decision.audit_justification)
+        if llm_decision.data_classification_reason:
+            reasons.append(llm_decision.data_classification_reason)
+
     # ── Étape 13 : trace d'audit minimisée ────────────────────────────────────
     audit_entry = _make_audit_entry(
         case_id=privacy_input.case_id,
@@ -455,6 +503,7 @@ def run(
         view=view,
         view_role=privacy_input.role.value if view is not None else None,
         audit_entry=audit_entry,
+        llm_metadata=build_llm_metadata(_AGENT_NAME),
     )
 
 

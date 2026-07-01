@@ -5,6 +5,7 @@ Schémas d'entrée définis ici ; schémas de sortie importés depuis schemas/re
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 
@@ -40,3 +41,13 @@ class ClaimIntakeInput(StrictModel):
         default_factory=list,
         description="Métadonnées annoncées par le déposant avant inspection",
     )
+
+
+# ── Schéma de décision LLM (intermédiaire — jamais dans ClaimState) ───────────
+
+
+class LlmIntakeDecision(StrictModel):
+    """Décision LLM pour l'ingestion documentaire."""
+
+    status: Literal["ACCEPTED", "QUARANTINED", "BLOCKED", "ERROR"]
+    reasons: list[str] = Field(default_factory=list)

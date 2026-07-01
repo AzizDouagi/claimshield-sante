@@ -20,7 +20,7 @@ Contraintes communes à chaque décision (portées par SecurityGateResult) :
 from __future__ import annotations
 
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 
@@ -33,6 +33,7 @@ from schemas.domain import (
 )
 
 __all__ = [
+    "LlmSecurityDecision",
     "SecurityDecision",
     "InputType",
     "SeverityLevel",
@@ -118,6 +119,18 @@ class SecurityGateInput(StrictModel):
             "jamais le document brut"
         ),
     )
+    text_source: Literal[
+        "text_excerpt",
+        "pdf_text",
+        "ocr_preview",
+        "agent_output",
+        "tool_arguments",
+        "metadata",
+        "url",
+    ] | None = Field(
+        default=None,
+        description="Origine contrôlée de l'extrait texte minimisé",
+    )
     requesting_agent: str | None = Field(
         default=None,
         description="Nom de l'agent ou de l'outil demandeur",
@@ -160,10 +173,47 @@ class SecurityGateInput(StrictModel):
         "relative_path",
         "url",
         "text_excerpt",
+        "text_source",
         "requesting_agent",
     )
     @classmethod
     def no_secret_hint(cls, v: str | None) -> str | None:
         if v is not None and _SECRET_HINT_RE.search(v):
             raise ValueError("Secret potentiel interdit dans SecurityGateInput")
+        return v
+
+
+# ── Schéma de décision LLM (intermédiaire — jamais dans ClaimState) ───────────
+
+
+class LlmSecurityDecision(StrictModel):
+    """Décision structurée du LLM de sécurité.
+
+    Le schéma est volontairement strict : aucun statut ambigu, preuve
+    minimisée et score de confiance borné.
+    """
+
+    decision: Literal["ALLOW", "BLOCK", "QUARANTINE"] = "BLOCK"
+    reasons: list[str] = Field(default_factory=list)
+    explanation: str = Field(default="", max_length=500)
+    evidence: str = Field(
+        default="",
+        max_length=200,
+        description="Preuve minimisée fournie par le LLM, sans contenu brut",
+    )
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @field_validator("reasons")
+    @classmethod
+    def no_secret_in_reasons(cls, v: list[str]) -> list[str]:
+        for reason in v:
+            if _SECRET_HINT_RE.search(reason):
+                raise ValueError("Secret potentiel interdit dans LlmSecurityDecision")
+        return v
+
+    @field_validator("explanation", "evidence")
+    @classmethod
+    def no_secret_in_text(cls, v: str) -> str:
+        if _SECRET_HINT_RE.search(v):
+            raise ValueError("Secret potentiel interdit dans LlmSecurityDecision")
         return v

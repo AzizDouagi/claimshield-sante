@@ -5,7 +5,6 @@ import re
 from datetime import date
 from decimal import Decimal
 from enum import Enum
-from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
@@ -13,6 +12,18 @@ from schemas.domain import StrictModel
 from schemas.results import CoverageResult, IdentityCoverageResult, IdentityResult
 
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[/\\]|\\\\)")
+_SECRET_HINT_RE = re.compile(
+    r"(?:api[_-]?key|secret\s*[:=]|password\s*[:=]|token\s*[:=]|bearer\s+\S+)",
+    re.IGNORECASE,
+)
+
+
+def _reject_llm_leak(value: str, field_name: str) -> str:
+    if _ABSOLUTE_PATH_RE.match(value):
+        raise ValueError(f"Chemin absolu interdit dans {field_name}")
+    if _SECRET_HINT_RE.search(value):
+        raise ValueError(f"Secret potentiel interdit dans {field_name}")
+    return value
 
 
 class IdentityCheckStatus(str, Enum):
@@ -183,6 +194,33 @@ class IdentityCoverageInput(StrictModel):
         return v
 
 
+class LlmIdentityCoverageDecision(StrictModel):
+    """Synthèse LLM consultative — ne remplace jamais les règles déterministes."""
+
+    recommended_identity_status: str = Field(default="NEEDS_REVIEW", max_length=50)
+    recommended_coverage_status: str = Field(default="NEEDS_REVIEW", max_length=50)
+    rationale: str = Field(default="", max_length=500)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("recommended_identity_status", "recommended_coverage_status")
+    @classmethod
+    def supported_status(cls, v: str, info) -> str:
+        value = _reject_llm_leak(v, info.field_name).upper()
+        if value not in {"PASS", "NEEDS_REVIEW", "FAIL"}:
+            raise ValueError(f"Statut LLM non supporté : {v!r}")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def no_sensitive_rationale(cls, v: str) -> str:
+        return _reject_llm_leak(v, "rationale")
+
+    @field_validator("warnings")
+    @classmethod
+    def no_sensitive_warnings(cls, v: list[str]) -> list[str]:
+        return [_reject_llm_leak(str(item), "warnings") for item in v]
+
+
 __all__ = [
     "AuthorizationCheck",
     "AuthorizationCheckStatus",
@@ -193,6 +231,7 @@ __all__ = [
     "IdentityCheck",
     "IdentityCheckStatus",
     "IdentityResult",
+    "LlmIdentityCoverageDecision",
     "CoverageResult",
     "RuleEvidence",
     "StructuredRuleError",

@@ -32,11 +32,12 @@ import io
 import operator
 import re
 from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, Mapping, TypedDict
 
 from schemas.domain import IntakeStatus, Recommendation
 from schemas.results import (
     AuditEvent,
+    AuditResult,
     CaseReviewerResult,
     ClaimIntakeResult,
     ClinicalConsistencyResult,
@@ -51,6 +52,35 @@ from schemas.results import (
 
 # Détecte les chaînes qui ressemblent à des chemins absolus POSIX, Windows ou UNC.
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[/\\]|\\\\)")
+_SECRET_HINT_RE = re.compile(
+    r"(?:api[_-]?key|secret\s*[:=]|password\s*[:=]|token\s*[:=]|bearer\s+[a-z0-9._~+/=-]+)",
+    re.IGNORECASE,
+)
+_SECRET_KEY_RE = re.compile(r"(?:api[_-]?key|secret|password|token|credential)", re.IGNORECASE)
+_RAW_DOCUMENT_KEYS: frozenset[str] = frozenset({
+    "full_text",
+    "text_ocr",
+    "raw_text",
+    "ocr_text",
+    "raw_ocr_text",
+    "document_bytes",
+    "document_content",
+    "image_content",
+    "pdf_content",
+    "base64_image",
+    "base64_pdf",
+})
+_FORBIDDEN_LLM_PAYLOAD_KEYS: frozenset[str] = frozenset({
+    "prompt",
+    "system_prompt",
+    "developer_prompt",
+    "user_prompt",
+    "messages",
+    "raw_response",
+    "raw_model_response",
+    "model_response",
+    "completion",
+})
 
 
 # ── Décision humaine (Human-in-the-Loop) ─────────────────────────────────────
@@ -71,20 +101,101 @@ class HumanDecision(TypedDict, total=False):
 class ClaimState(TypedDict, total=False):
     """État partagé passé à travers tous les nœuds du StateGraph.
 
-    Les champs marqués `Annotated[list, operator.add]` sont append-only :
-    chaque nœud ajoute ses éléments sans écraser ceux des nœuds précédents.
+    Groupes de champs
+    -----------------
+    **Routage** (case_id, schema_version, intake_status, current_step,
+    completed_steps) :
+        Champs lus par LangGraph pour décider du prochain nœud et reprendre
+        l'exécution depuis un checkpoint.  ``intake_status`` est promu depuis
+        ``intake_result`` par le nœud d'ingestion afin d'alimenter les arêtes
+        conditionnelles sans exiger la lecture d'un objet Pydantic entier.
 
-    Après ingestion, seuls des champs propres (métadonnées, hashes, chemins
-    relatifs) doivent figurer dans le state.  intake_input est consommé et
-    vidé par le nœud d'ingestion afin que le source_path absolu ne persiste
-    pas dans les checkpoints LangGraph.
+    **Entrées consommées** (``*_input``) :
+        Chaque nœud lit son entrée dans un champ dédié, puis le remet à
+        ``None``.  Cela garantit qu'un chemin absolu temporaire (p. ex.
+        ``source_path``) ne persiste pas dans les checkpoints et ne fuie pas
+        vers les nœuds suivants.
+
+    **Résultats d'agents** (``*_result``) :
+        Un champ par agent, écrasable à chaque invocation du nœud.  LangGraph
+        écrase le champ entier — les nœuds ne concaténent jamais un résultat.
+
+    **Historiques append-only** (completed_steps, errors, alerts, audit_trail,
+    final_justification) :
+        Annotés ``Annotated[list, operator.add]``.  LangGraph fusionne les
+        mises à jour par concaténation ; chaque nœud peut ajouter des éléments
+        sans connaître les éléments déjà présents.  Ne jamais retourner la
+        liste complète — retourner uniquement les nouveaux éléments.
+
+    **HITL** (human_decision) :
+        Rempli par le point d'interruption LangGraph (``interrupt_before`` ou
+        ``interrupt_after``).  Aucun agent ne doit écrire ce champ.
+
+    **Décision finale** (final_recommendation, final_justification) :
+        Remplis par ``case_reviewer_agent`` en fin de workflow.
+
+    Reducers utilisés
+    -----------------
+    ``operator.add`` est le seul reducer défini.  Il concatène deux listes :
+
+        completed_steps + ["security_gate"] → ["claim_intake", "security_gate"]
+
+    LangGraph appelle le reducer pour chaque nœud qui retourne le champ.
+    Les champs sans reducer sont écrasés par la dernière valeur reçue.
+    Les reducers sont déclarés via ``Annotated[list[T], operator.add]`` dans
+    les annotations du TypedDict ; ils sont invisibles à l'exécution Python
+    classique mais interprétés par le moteur LangGraph au moment de la fusion.
+
+    Pourquoi les documents bruts sont exclus
+    ----------------------------------------
+    Le state est sérialisé et persisté dans chaque checkpoint LangGraph.
+    Stocker des PDF, des octets d'image ou le texte OCR complet (qui peut
+    peser plusieurs Mo) rendrait les checkpoints trop lourds, exposerait des
+    données médicales en clair dans la base de données et rendrait la
+    désérialisation fragile.  Le texte complet est écrit dans un artefact
+    externe (``artifact_id`` / ``artifact_path``) ; le state ne conserve que
+    les champs structurés minimaux : codes, scores, métadonnées, hashes SHA-256.
+
+    Différence entre errors et alerts
+    ----------------------------------
+    ``errors`` (append-only) — conditions **bloquantes** qui empêchent la
+    progression du dossier.  Exemples : injection détectée, fichier corrompu,
+    rôle inconnu.  Format recommandé : ``"[nom_agent] description concise"``.
+    Un dossier avec au moins une entrée dans ``errors`` ne doit pas recevoir
+    de recommandation ``APPROVE``.
+
+    ``alerts`` (append-only) — observations **non bloquantes** qui demandent
+    une attention humaine ou signalent une anomalie mineure.  Exemples :
+    document optionnel absent, confiance OCR limite, préautorisation
+    recommandée.  Le workflow continue malgré une alerte.
+
+    Comment un agent retourne une mise à jour partielle
+    ----------------------------------------------------
+    Un nœud LangGraph retourne **uniquement les clés qu'il modifie**.
+    LangGraph fusionne le dict retourné avec le state existant ::
+
+        def node(state: ClaimState) -> dict:
+            # Traitement...
+            validate_state_update(updates)   # obligatoire avant return
+            return {
+                "security_result": result,
+                "security_input": None,            # champ consommé → None
+                "current_step": "privacy",
+                "completed_steps": ["security_gate"],  # reducer → append
+                "errors": [],                      # liste vide = rien ajouté
+            }
+
+    Invariants :
+    - Appeler ``validate_state_update(updates)`` avant de retourner.
+    - Remettre à ``None`` le champ ``*_input`` consommé.
+    - N'inclure dans les listes append-only que les **nouveaux éléments**.
+    - Ne jamais inclure bytes, chemins absolus, texte OCR complet ou secrets.
     """
 
-    # ── Identité du dossier ───────────────────────────────────────────────────
+    # ── Informations générales — nécessaires au routage et à la reprise ─────
     case_id: str
     schema_version: str                      # version de ce schéma d'état
-
-    # ── Progression du workflow ───────────────────────────────────────────────
+    intake_status: IntakeStatus | None       # statut promu pour le routage du graphe
     current_step: str                        # nom du nœud actif
     completed_steps: Annotated[list[str], operator.add]
 
@@ -126,7 +237,6 @@ class ClaimState(TypedDict, total=False):
 
     # ── Résultats des agents (un par agent, écrasable) ────────────────────────
     intake_result: ClaimIntakeResult | None
-    intake_status: IntakeStatus | None       # promu pour le routage du graphe
     security_result: SecurityGateResult | None
     privacy_result: PrivacyResult | None
     identity_coverage_result: IdentityCoverageResult | None
@@ -136,9 +246,12 @@ class ClaimState(TypedDict, total=False):
     clinical_result: ClinicalConsistencyResult | None
     fraud_result: FraudDetectionResult | None
     review_result: CaseReviewerResult | None
+    audit_result: AuditResult | None
 
-    # ── Erreurs et alertes (append-only) ─────────────────────────────────────
+    # ── Erreurs bloquantes (append-only, séparées des alertes) ───────────────
     errors: Annotated[list[str], operator.add]
+
+    # ── Alertes non bloquantes / revue humaine (append-only) ────────────────
     alerts: Annotated[list[str], operator.add]
 
     # ── Audit (append-only) ───────────────────────────────────────────────────
@@ -158,7 +271,8 @@ class ClaimState(TypedDict, total=False):
 def _scan_for_forbidden(value: object, breadcrumb: str) -> list[str]:
     """Retourne la liste des violations trouvées dans value (récursif).
 
-    Interdit : octets bruts, objets fichier ouverts, chemins absolus.
+    Interdit : octets bruts, objets fichier ouverts, chemins absolus,
+    secrets et documents bruts.
     """
     violations: list[str] = []
 
@@ -175,9 +289,27 @@ def _scan_for_forbidden(value: object, breadcrumb: str) -> list[str]:
             violations.append(
                 f"{breadcrumb} : chemin absolu interdit — {value!r}"
             )
+        if _SECRET_HINT_RE.search(value):
+            violations.append(
+                f"{breadcrumb} : secret potentiel interdit dans le ClaimState"
+            )
     elif isinstance(value, dict):
         for k, v in value.items():
-            violations.extend(_scan_for_forbidden(v, f"{breadcrumb}.{k}"))
+            key = str(k)
+            child_breadcrumb = f"{breadcrumb}.{key}"
+            if _SECRET_KEY_RE.search(key):
+                violations.append(
+                    f"{child_breadcrumb} : clé secrète interdite dans le ClaimState"
+                )
+            if key in _RAW_DOCUMENT_KEYS and v not in (None, "", [], {}):
+                violations.append(
+                    f"{child_breadcrumb} : document brut ou texte OCR complet interdit"
+                )
+            if key.lower() in _FORBIDDEN_LLM_PAYLOAD_KEYS and v not in (None, "", [], {}):
+                violations.append(
+                    f"{child_breadcrumb} : prompt, messages ou réponse brute LLM interdits"
+                )
+            violations.extend(_scan_for_forbidden(v, child_breadcrumb))
     elif isinstance(value, (list, tuple)):
         for i, item in enumerate(value):
             violations.extend(_scan_for_forbidden(item, f"{breadcrumb}[{i}]"))
@@ -238,6 +370,117 @@ _CONSUMED_INPUT_KEYS: frozenset[str] = frozenset({
     "fhir_input",
     "coding_input",
 })
+
+_REQUIRED_STATE_KEYS: frozenset[str] = frozenset({
+    "case_id",
+    "schema_version",
+    "current_step",
+    "completed_steps",
+})
+
+_RESULT_MODELS = {
+    "intake_result": ClaimIntakeResult,
+    "security_result": SecurityGateResult,
+    "privacy_result": PrivacyResult,
+    "identity_coverage_result": IdentityCoverageResult,
+    "fhir_result": FhirValidatorResult,
+    "ocr_result": DocumentOcrResult,
+    "coding_result": MedicalCodingResult,
+    "clinical_result": ClinicalConsistencyResult,
+    "fraud_result": FraudDetectionResult,
+    "review_result": CaseReviewerResult,
+    "audit_result": AuditResult,
+}
+
+
+def _is_list_of(value: object, item_type: type, *, allow_dict_items: bool = False) -> bool:
+    if not isinstance(value, list):
+        return False
+    return all(
+        isinstance(item, item_type)
+        or (allow_dict_items and isinstance(item, dict))
+        for item in value
+    )
+
+
+def _validate_model_value(key: str, value: object, errors: list[str]) -> None:
+    if value is None:
+        return
+    model = _RESULT_MODELS[key]
+    if isinstance(value, model):
+        return
+    if isinstance(value, dict):
+        try:
+            model.model_validate(value)
+        except Exception as exc:  # noqa: BLE001 - convertit en message de contrat stable.
+            errors.append(f"{key} : résultat d'agent invalide ({exc})")
+        return
+    errors.append(f"{key} : type invalide, attendu {model.__name__} | dict | None")
+
+
+def validate_claim_state(state: Mapping[str, Any]) -> None:
+    """Valide le contrat complet du ClaimState avant checkpoint ou reprise.
+
+    Cette validation complète `validate_state_update` :
+    - clés inconnues refusées ;
+    - champs minimaux de reprise obligatoires ;
+    - types des champs de routage/listes append-only vérifiés ;
+    - résultats d'agents validés via leurs modèles Pydantic.
+    """
+    errors: list[str] = []
+    allowed_keys = set(ClaimState.__annotations__)
+    unknown = sorted(set(state) - allowed_keys)
+    if unknown:
+        errors.append(f"champs inconnus interdits : {', '.join(unknown)}")
+
+    missing = sorted(key for key in _REQUIRED_STATE_KEYS if key not in state)
+    if missing:
+        errors.append(f"champs obligatoires manquants : {', '.join(missing)}")
+
+    if "case_id" in state and not isinstance(state["case_id"], str):
+        errors.append("case_id : type invalide, attendu str")
+    if "schema_version" in state and not isinstance(state["schema_version"], str):
+        errors.append("schema_version : type invalide, attendu str")
+    if "current_step" in state and not isinstance(state["current_step"], str):
+        errors.append("current_step : type invalide, attendu str")
+    if "completed_steps" in state and not _is_list_of(state["completed_steps"], str):
+        errors.append("completed_steps : type invalide, attendu list[str]")
+    if "errors" in state and not _is_list_of(state["errors"], str):
+        errors.append("errors : type invalide, attendu list[str]")
+    if "alerts" in state and not _is_list_of(state["alerts"], str):
+        errors.append("alerts : type invalide, attendu list[str]")
+    if "audit_trail" in state and not _is_list_of(
+        state["audit_trail"], AuditEvent, allow_dict_items=True
+    ):
+        errors.append("audit_trail : type invalide, attendu list[AuditEvent]")
+    if "final_justification" in state and not _is_list_of(state["final_justification"], str):
+        errors.append("final_justification : type invalide, attendu list[str]")
+
+    if "intake_status" in state and state["intake_status"] is not None:
+        try:
+            IntakeStatus(state["intake_status"])
+        except ValueError:
+            errors.append("intake_status : valeur invalide")
+    if "final_recommendation" in state and state["final_recommendation"] is not None:
+        try:
+            Recommendation(state["final_recommendation"])
+        except ValueError:
+            errors.append("final_recommendation : valeur invalide")
+
+    for key in _RESULT_MODELS:
+        if key in state:
+            _validate_model_value(key, state[key], errors)
+
+    try:
+        validate_state_update(dict(state))
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    if errors:
+        raise ValueError(
+            "ClaimState invalide :\n"
+            + "\n".join(f"  • {error}" for error in errors)
+        )
 
 
 def validate_state_update(updates: dict) -> None:

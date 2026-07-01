@@ -57,9 +57,14 @@ __all__ = [
     "OcrError",
     "OcrSource",
     "PageText",
+    "LlmOcrDecision",
 ]
 
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[/\\]|\\\\)")
+_SECRET_HINT_RE = re.compile(
+    r"(?:api[_-]?key|secret\s*[:=]|password\s*[:=]|token\s*[:=]|bearer\s+\S+)",
+    re.IGNORECASE,
+)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SUPPORTED_MIMES = frozenset(
     {
@@ -131,3 +136,43 @@ class DocumentOcrInput(StrictModel):
                 f"Types acceptés : {sorted(_SUPPORTED_MIMES)}"
             )
         return v.lower()
+
+
+# ── Schéma de décision LLM (intermédiaire — jamais dans ClaimState) ───────────
+
+
+def _reject_llm_leak(v: str, field_name: str) -> str:
+    if _ABSOLUTE_PATH_RE.match(v):
+        raise ValueError(f"Chemin absolu interdit dans {field_name}")
+    if _SECRET_HINT_RE.search(v):
+        raise ValueError(f"Secret potentiel interdit dans {field_name}")
+    return v
+
+
+class LlmOcrDecision(StrictModel):
+    """Décision LLM pour classification et extraction OCR."""
+
+    document_type: str = Field(default="UNKNOWN", max_length=50)
+    extracted_fields: dict[str, str] = Field(default_factory=dict)
+    confidence_assessment: str = Field(default="", max_length=500)
+    reasons: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("document_type", "confidence_assessment")
+    @classmethod
+    def _no_sensitive_string(cls, v: str, info) -> str:
+        return _reject_llm_leak(v, info.field_name)
+
+    @field_validator("extracted_fields")
+    @classmethod
+    def _no_sensitive_fields(cls, v: dict[str, str]) -> dict[str, str]:
+        return {
+            _reject_llm_leak(str(key), "extracted_fields.key"): _reject_llm_leak(
+                str(value), f"extracted_fields[{key!r}]"
+            )
+            for key, value in v.items()
+        }
+
+    @field_validator("reasons")
+    @classmethod
+    def _no_sensitive_reasons(cls, v: list[str]) -> list[str]:
+        return [_reject_llm_leak(str(reason), "reasons") for reason in v]

@@ -3,7 +3,8 @@
 Vérifie la concordance des identifiants patient et la validité de la couverture
 assurance à partir des données extraites par l'OCR et du bundle FHIR.
 
-Agent purement déterministe — aucun appel LLM.
+Décisions déterministes ; le LLM produit uniquement une synthèse consultative
+à partir de preuves minimisées.
 
 Pipeline (9 étapes) :
   1. Lecture de identity_coverage_input depuis le state (dict → IdentityCoverageInput)
@@ -27,7 +28,14 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
+
+try:
+    from langgraph.prebuilt import create_react_agent
+except ModuleNotFoundError:  # pragma: no cover - dépendance optionnelle en tests locaux
+    def create_react_agent(*_args, **_kwargs):
+        raise RuntimeError("langgraph indisponible")
 
 from agents.identity_coverage_agent.schemas import (
     AuthorizationCheck,
@@ -37,8 +45,17 @@ from agents.identity_coverage_agent.schemas import (
     IdentityCheck,
     IdentityCheckStatus,
     IdentityCoverageInput,
+    LlmIdentityCoverageDecision,
     StructuredRuleError,
 )
+from agents.identity_coverage_agent.tools import (
+    charger_contrat,
+    verifier_couverture_contrat,
+    verifier_identite_contrat,
+)
+from llm.factory import get_llm
+from llm.metadata import build_llm_metadata
+from llm.prompts import load_prompt
 from schemas.domain import VerificationStatus
 from schemas.results import (
     AuditEvent,
@@ -54,6 +71,7 @@ from tools.rule_loader import get_rule_version, load_rules
 
 # Version des règles utilisées (lue depuis le YAML)
 _RULE_VERSION_FILE = "identity_rules.yaml"
+_AGENT_NAME = "identity_coverage_agent"
 
 # Zone de stockage incoming — chemin résolu depuis la racine du projet
 _INCOMING_DIR = Path("storage") / "incoming"
@@ -493,6 +511,31 @@ def validate_output(result: IdentityCoverageResult) -> IdentityCoverageResult:
     return IdentityCoverageResult.model_validate(result.model_dump())
 
 
+def _invoke_llm_identity_coverage(data: dict) -> LlmIdentityCoverageDecision | None:
+    """Appelle le LLM avec outils explicitement autorisés pour une synthèse d'audit."""
+    try:
+        llm = get_llm()
+        agent = create_react_agent(
+            model=llm,
+            tools=[charger_contrat, verifier_identite_contrat, verifier_couverture_contrat],
+            response_format=LlmIdentityCoverageDecision,
+        )
+        result = agent.invoke({
+            "messages": [
+                SystemMessage(content=load_prompt(_AGENT_NAME)),
+                HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str)),
+            ]
+        })
+        structured = result.get("structured_response")
+        if isinstance(structured, LlmIdentityCoverageDecision):
+            return structured
+        if isinstance(structured, dict):
+            return LlmIdentityCoverageDecision(**structured)
+        return None
+    except Exception:
+        return None
+
+
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
 
 
@@ -620,6 +663,27 @@ def run(
         for err in confidence_errors
     )
 
+    llm_decision = _invoke_llm_identity_coverage({
+        "case_id": case_id,
+        "identity_status": identity.status.value,
+        "coverage_status": coverage.status.value,
+        "rule_version": rule_version,
+        "policy_number_present": bool(icv_input.policy_number),
+        "service_date_present": icv_input.service_date is not None,
+        "contract_loaded": resolved_contract is not None,
+        "evidence": evidence[:20],
+        "structured_errors": structured_errors[:20],
+        "warnings": warnings[:20],
+        "instruction": (
+            "Synthèse uniquement : ne crée ni contrat, ni patient, ni ressource, "
+            "et ne remplace jamais les statuts déterministes."
+        ),
+    })
+    if llm_decision is not None:
+        if llm_decision.rationale:
+            warnings.append(llm_decision.rationale)
+        warnings.extend(llm_decision.warnings)
+
     # ── Étape 7 : construction du résultat ───────────────────────────────────
     return validate_output(IdentityCoverageResult(
         case_id=case_id,
@@ -629,6 +693,7 @@ def run(
         evidence=evidence,
         warnings=warnings,
         structured_errors=structured_errors,
+        llm_metadata=build_llm_metadata(_AGENT_NAME),
     ))
 
 

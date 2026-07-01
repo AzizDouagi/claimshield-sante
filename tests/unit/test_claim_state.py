@@ -7,15 +7,132 @@ Vérifie le contrat de sécurité du state LangGraph :
 from __future__ import annotations
 
 import io
+import operator
+from typing import Annotated, get_args, get_origin, get_type_hints
 from pathlib import Path
 from datetime import datetime
 
 import pytest
 
-from state.claim_state import validate_state_update
+from schemas.domain import IntakeStatus, SecurityDecision
+from schemas.results import AuditEvent, ClaimIntakeResult, ClaimManifest, SecurityGateResult
+from state.claim_state import ClaimState, validate_state_update
+
+
+def _reducer_for(field_name: str):
+    annotation = get_type_hints(ClaimState, include_extras=True)[field_name]
+    if get_origin(annotation) is Annotated:
+        return get_args(annotation)[1]
+    return None
+
+
+def _merge_like_langgraph(*updates: dict) -> dict:
+    """Fusion minimale des updates selon les reducers déclarés dans ClaimState."""
+    merged: dict = {}
+    for update in updates:
+        for key, value in update.items():
+            reducer = _reducer_for(key) if key in ClaimState.__annotations__ else None
+            if reducer is not None and key in merged:
+                merged[key] = reducer(merged[key], value)
+            else:
+                merged[key] = value
+    return merged
 
 
 # ── Contenu autorisé ───────────────────────────────────────────────────────────
+
+
+def test_reducers_append_only_langgraph_declares_for_trace_lists():
+    """Les listes de progression, erreurs, alertes et audit utilisent operator.add."""
+    for field_name in ("completed_steps", "errors", "alerts", "audit_trail"):
+        assert _reducer_for(field_name) is operator.add
+
+
+def test_unique_values_and_agent_results_have_no_append_reducer():
+    """Les champs scalaires et résultats d'agents restent écrasables par clé."""
+    unique_fields = {
+        "current_step",
+        "intake_result",
+        "security_result",
+        "privacy_result",
+        "identity_coverage_result",
+        "fhir_result",
+        "ocr_result",
+        "coding_result",
+        "clinical_result",
+        "fraud_result",
+        "review_result",
+        "audit_result",
+    }
+    for field_name in unique_fields:
+        assert _reducer_for(field_name) is None
+
+
+def test_updates_concurrentes_appendent_sans_supprimer_resultats_distincts():
+    """Deux nœuds concurrents accumulent les traces et conservent leurs résultats."""
+    intake_result = ClaimIntakeResult(
+        claim_id="CLM-0001",
+        status=IntakeStatus.ACCEPTED,
+        manifest=ClaimManifest(
+            claim_id="CLM-0001",
+            file_count=0,
+            total_size_bytes=0,
+            status=IntakeStatus.ACCEPTED,
+        ),
+        accepted_count=0,
+        quarantined_count=0,
+    )
+    security_result = SecurityGateResult(
+        claim_id="CLM-0001",
+        decision=SecurityDecision.ALLOW,
+        reasons=["Aucune menace détectée."],
+    )
+    audit_a = AuditEvent(
+        event_id="evt-intake",
+        case_id="CLM-0001",
+        actor="claim_intake_agent",
+        action="claim_intake",
+        outcome="ACCEPTED",
+    )
+    audit_b = AuditEvent(
+        event_id="evt-security",
+        case_id="CLM-0001",
+        actor="security_gate_agent",
+        action="security_gate",
+        outcome="ALLOW",
+    )
+
+    intake_update = {
+        "current_step": "claim_intake",
+        "completed_steps": ["claim_intake"],
+        "errors": ["[claim_intake] avertissement technique simulé"],
+        "alerts": ["Document optionnel absent"],
+        "audit_trail": [audit_a],
+        "intake_result": intake_result,
+    }
+    security_update = {
+        "current_step": "security_gate",
+        "completed_steps": ["security_gate"],
+        "errors": ["[security_gate] signal non bloquant simulé"],
+        "alerts": ["Sécurité contrôlée"],
+        "audit_trail": [audit_b],
+        "security_result": security_result,
+    }
+
+    validate_state_update(intake_update)
+    validate_state_update(security_update)
+    merged = _merge_like_langgraph(intake_update, security_update)
+
+    assert merged["current_step"] == "security_gate"
+    assert merged["completed_steps"] == ["claim_intake", "security_gate"]
+    assert merged["errors"] == [
+        "[claim_intake] avertissement technique simulé",
+        "[security_gate] signal non bloquant simulé",
+    ]
+    assert merged["alerts"] == ["Document optionnel absent", "Sécurité contrôlée"]
+    assert merged["audit_trail"] == [audit_a, audit_b]
+    assert merged["intake_result"] is intake_result
+    assert merged["security_result"] is security_result
 
 
 def test_metadata_propre_acceptee():

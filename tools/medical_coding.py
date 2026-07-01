@@ -29,6 +29,53 @@ def load_code_table() -> dict:
     return load_rules(_RULES_FILENAME)
 
 
+def _system_for_section(section: str) -> str:
+    if section == "procedures":
+        return "SNOMED-CT"
+    if section == "medications":
+        return "RxNorm"
+    raise ValueError(f"Section invalide : {section!r} — attendu 'procedures' ou 'medications'")
+
+
+def code_exists_in_reference(code: str | None, section: str, table: dict | None = None) -> bool:
+    """Retourne True uniquement si le code actif existe dans le référentiel local."""
+    if not code:
+        return False
+    if table is None:
+        table = load_code_table()
+    target_system = _system_for_section(section)
+    return any(
+        str(entry.get("code")) == str(code)
+        and entry.get("active", True)
+        and entry.get("system") == target_system
+        for entry in table.get("codes", [])
+    )
+
+
+def find_code_alternatives(
+    description: str,
+    section: str,
+    table: dict | None = None,
+    *,
+    limit: int = 3,
+) -> list[str]:
+    """Propose des alternatives du référentiel local sans sélectionner un code final."""
+    if table is None:
+        table = load_code_table()
+    target_system = _system_for_section(section)
+    normalized = description.strip().casefold()
+    alternatives: list[str] = []
+    for entry in table.get("codes", []):
+        if not entry.get("active", True) or entry.get("system") != target_system:
+            continue
+        candidates = [entry.get("label", ""), *entry.get("synonyms", [])]
+        if any(token and token.strip().casefold() in normalized for token in candidates):
+            alternatives.append(str(entry["code"]))
+        if len(alternatives) >= limit:
+            break
+    return alternatives
+
+
 def lookup_code(
     description: str,
     section: str,
@@ -57,17 +104,42 @@ def lookup_code(
         table = load_code_table()
 
     normalized = description.strip().casefold()
-    section_data: dict = table.get(section, {})
 
-    # ── Étape 1 : correspondance exacte ──────────────────────────────────────
-    for entry_key, entry_value in section_data.items():
-        if entry_key.strip().casefold() == normalized:
+    # Nouveau format : liste plate `codes` filtrée par system
+    target_system = _system_for_section(section)
+    all_codes: list = table.get("codes", [])
+
+    # ── Étape 1 : correspondance exacte (label normalisé ou synonyme) ─────────
+    for entry in all_codes:
+        if not entry.get("active", True):
+            continue
+        if entry.get("system") != target_system:
+            continue
+        if entry.get("label", "").strip().casefold() == normalized:
             return ProcedureCoding(
                 original_description=description,
-                proposed_code=str(entry_value["code"]),
+                proposed_code=str(entry["code"]),
                 rule_applied="exact_match",
                 status=VerificationStatus.PASS,
+                evidence=[
+                    f"Référentiel local {_RULES_FILENAME}",
+                    f"{entry.get('system')}:{entry.get('code')}",
+                    f"label={entry.get('label')}",
+                ],
             )
+        for syn in entry.get("synonyms", []):
+            if syn.strip().casefold() == normalized:
+                return ProcedureCoding(
+                    original_description=description,
+                    proposed_code=str(entry["code"]),
+                    rule_applied="exact_match",
+                    status=VerificationStatus.PASS,
+                    evidence=[
+                        f"Référentiel local {_RULES_FILENAME}",
+                        f"{entry.get('system')}:{entry.get('code')}",
+                        f"synonyme={syn}",
+                    ],
+                )
 
     # ── Étape 2 : correspondance partielle par mots-clés ─────────────────────
     keywords_section: dict = table.get("keywords", {})
@@ -79,14 +151,21 @@ def lookup_code(
                     proposed_code=None,
                     rule_applied="keyword_match",
                     status=VerificationStatus.NEEDS_REVIEW,
+                    alternatives=find_code_alternatives(description, section, table),
+                    evidence=[
+                        f"Mot-clé local détecté : {kw}",
+                        "Aucun code final déterminé sans correspondance exacte.",
+                    ],
                 )
 
     # ── Étape 3 : aucune correspondance ──────────────────────────────────────
     return ProcedureCoding(
         original_description=description,
         proposed_code=None,
-        rule_applied="not_found",
+        rule_applied="not_determined",
         status=VerificationStatus.NEEDS_REVIEW,
+        alternatives=[],
+        evidence=["Aucune correspondance dans le référentiel local versionné."],
     )
 
 

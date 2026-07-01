@@ -80,7 +80,7 @@ def validate_filename(name: str) -> tuple[bool, list[StructuredError]]:
         ))
         return False, reasons
 
-    # Chemin absolu POSIX (/etc/passwd, /home/…)
+    # Chemin absolu POSIX.
     if name.startswith("/"):
         reasons.append(StructuredError(
             code=IntakeReasonCode.PATH_TRAVERSAL_ATTEMPT,

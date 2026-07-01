@@ -287,6 +287,7 @@ class IntakeReasonCode(str, Enum):
     TOO_MANY_FILES = "TOO_MANY_FILES"
     FOLDER_QUOTA_EXCEEDED = "FOLDER_QUOTA_EXCEEDED"
     INVALID_FILENAME = "INVALID_FILENAME"
+    LLM_OUTPUT_INVALID = "LLM_OUTPUT_INVALID"
 
 
 REASON_DESCRIPTIONS: dict[str, str] = {
@@ -328,6 +329,9 @@ REASON_DESCRIPTIONS: dict[str, str] = {
     ),
     IntakeReasonCode.INVALID_FILENAME: (
         "Nom de fichier invalide — caractères ou structure non autorisés"
+    ),
+    IntakeReasonCode.LLM_OUTPUT_INVALID: (
+        "Sortie LLM invalide ou indisponible — décision d'ingestion non exploitable"
     ),
 }
 

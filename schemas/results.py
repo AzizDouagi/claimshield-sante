@@ -56,6 +56,23 @@ def _reject_security_leak(value: str | None, field_name: str) -> str | None:
     return value
 
 
+class LlmMetadata(StrictModel):
+    """Métadonnées LLM minimales autorisées dans un résultat d'agent.
+
+    Ne contient jamais le prompt complet, les messages, la réponse brute du
+    modèle, une clé API ou un secret.
+    """
+
+    model_name: str = Field(..., min_length=1, max_length=120)
+    prompt_version: str = Field(..., min_length=1, max_length=50)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @field_validator("model_name", "prompt_version")
+    @classmethod
+    def no_sensitive_value(cls, v: str | None, info) -> str | None:
+        return _reject_security_leak(v, info.field_name)
+
+
 # ── 1. Claim Intake Agent ─────────────────────────────────────────────────────
 
 
@@ -116,6 +133,7 @@ class ClaimIntakeResult(StrictModel):
     error_count: int = Field(default=0, ge=0)
     reasons: list[str] = Field(default_factory=list)
     errors: list[StructuredError] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 2. Security Gate Agent ────────────────────────────────────────────────────
@@ -214,6 +232,7 @@ class SecurityGateResult(StrictModel):
       - `policy_version` identifie la politique ayant produit la décision.
       - `findings` est la liste structurée des anomalies détectées.
       - `evaluated_at` et `audit_entry` sont renseignés par l'agent.
+      - `confidence_score` est borné entre 0.0 et 1.0.
       - Le schéma est JSON-sérialisable (StrictModel Pydantic).
       - Aucun document brut, secret ou chemin absolu.
     """
@@ -234,6 +253,17 @@ class SecurityGateResult(StrictModel):
     )
     policy_version: str = Field(default="1.0.0", description="Version de la SecurityPolicy")
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    confidence_score: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Niveau de confiance de la décision finale, borné entre 0.0 et 1.0",
+    )
+    evidence_summary: str | None = Field(
+        default=None,
+        max_length=300,
+        description="Preuve minimisée résumant le signal principal, sans contenu brut",
+    )
     next_allowed_action: str = Field(
         default="",
         description="Action suivante autorisée après cette décision",
@@ -248,8 +278,15 @@ class SecurityGateResult(StrictModel):
         min_length=1,
         description="Au moins un motif humainement lisible obligatoire",
     )
+    llm_metadata: LlmMetadata | None = None
 
-    @field_validator("claim_id", "applied_policy", "policy_version", "next_allowed_action")
+    @field_validator(
+        "claim_id",
+        "applied_policy",
+        "policy_version",
+        "evidence_summary",
+        "next_allowed_action",
+    )
     @classmethod
     def no_sensitive_scalar(cls, v: str | None, info) -> str | None:
         return _reject_security_leak(v, info.field_name)
@@ -361,6 +398,7 @@ class PrivacyResult(StrictModel):
         default=None,
         description="Trace d'audit minimisée du traitement privacy",
     )
+    llm_metadata: LlmMetadata | None = None
 
     @computed_field
     @property
@@ -416,6 +454,7 @@ class IdentityCoverageResult(StrictModel):
     evidence: list[dict[str, str]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     structured_errors: list[dict[str, str]] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 5. FHIR Validator Agent ───────────────────────────────────────────────────
@@ -436,6 +475,7 @@ class FhirValidatorResult(StrictModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── Champs essentiels — Document/OCR Agent (Étape 7) ─────────────────────────
@@ -833,6 +873,7 @@ class DocumentOcrResult(StrictModel):
         default_factory=list,
         description="Erreurs structurées Étape 18 — code stable, sévérité, document, retryable",
     )
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 7. Medical Coding Agent ───────────────────────────────────────────────────
@@ -843,6 +884,8 @@ class ProcedureCoding(StrictModel):
     proposed_code: str | None = None
     rule_applied: str | None = None
     status: VerificationStatus
+    alternatives: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
 
 
 class MedicalCodingResult(StrictModel):
@@ -853,6 +896,7 @@ class MedicalCodingResult(StrictModel):
     codings: list[ProcedureCoding] = Field(default_factory=list)
     table_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 8. Clinical Consistency Agent ─────────────────────────────────────────────
@@ -876,6 +920,7 @@ class ClinicalConsistencyResult(StrictModel):
     signals: list[ClinicalSignal] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 9. Fraud Detection Agent ──────────────────────────────────────────────────
@@ -897,6 +942,7 @@ class FraudDetectionResult(StrictModel):
     signals: list[FraudSignal] = Field(default_factory=list)
     threshold_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 10. Case Reviewer Agent ───────────────────────────────────────────────────
@@ -918,6 +964,7 @@ class CaseReviewerResult(StrictModel):
     disagreements: list[DisagreementPoint] = Field(default_factory=list)
     human_review_required: bool = True
     human_review_reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None
 
 
 # ── 11. Audit Agent ───────────────────────────────────────────────────────────
@@ -934,3 +981,21 @@ class AuditEvent(StrictModel):
     agent_version: str = "1.0.0"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     details: dict[str, str] = Field(default_factory=dict)
+
+
+class AuditResult(StrictModel):
+    """Synthèse typée produite par l'Audit Agent.
+
+    Le journal détaillé reste dans `audit_trail` côté ClaimState. Ce résultat
+    conserve seulement une synthèse sérialisable et, si nécessaire, les
+    événements minimisés déjà autorisés par AuditEvent.
+    """
+
+    case_id: str
+    status: VerificationStatus
+    events_count: int = Field(default=0, ge=0)
+    events: list[AuditEvent] = Field(default_factory=list)
+    policy_version: str = "1.0.0"
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    reasons: list[str] = Field(default_factory=list)
+    llm_metadata: LlmMetadata | None = None

@@ -3,19 +3,42 @@ name = "claimshield-sante"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "aiosqlite>=0.20.0",
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
+    "cryptography>=43.0",
+    "Faker>=33.0.0",
+    "fastapi>=0.115.0",
     "fhir.resources==8.2.0",
-    "pypdf>=5.0",
+    "langchain-core>=1.4.0",
+    "langchain-ollama>=0.3.0",
+    "langgraph-checkpoint>=4.1.0",
+    "langgraph>=1.0.0",
+    "mcp>=1.0.0",
+    "ollama>=0.4.0",
     "Pillow>=11.0",
+    "pydantic-settings>=2.5.0",
+    "pydantic>=2.7.4",
+    "pypdf>=5.0",
     "pytesseract>=0.3.10",
     "python-magic>=0.4.27",
-    "python-multipart>=0.0.32",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.12",
     "PyYAML==6.0.3",
+    "rapidfuzz>=3.10.0",
     "reportlab>=4.0",
+    "sqlalchemy>=2.0",
+    "structlog>=24.4.0",
+    "tenacity>=9.0.0",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28.0",
     "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0",
     "ruff>=0.8",
 ]
 
@@ -28,6 +51,7 @@ include = [
     "agents*",
     "config*",
     "graph*",
+    "llm*",
     "orchestrator*",
     "schemas*",
     "security*",

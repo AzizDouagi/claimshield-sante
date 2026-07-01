@@ -1,260 +1,642 @@
 ruleset:
   name: medical-codes
-  version: 1.0.0
+  version: 1.1.0
   effective_from: '2026-01-01'
-  description: Table locale versionnée de codification actes/médicaments.
+  description: >
+    Référentiel synthétique versionné des actes médicaux (SNOMED-CT) et
+    médicaments (RxNorm) utilisés dans ClaimShield Santé. Fondé sur les
+    6 dossiers de démonstration Synthea (CLM-0001 à CLM-0006). Chaque
+    entrée déclare un libellé normalisé, des synonymes autorisés, des
+    exclusions éventuelles de co-facturation, le statut actif/inactif et
+    l'obligation éventuelle de préautorisation.
+
+    Contraintes d'intégrité (vérifiées par le medical_coding_agent) :
+      - codes et libellés uniques dans le catalogue ;
+      - code et label obligatoires et non vides ;
+      - les exclusions ne référencent que des codes présents dans le catalogue ;
+      - seuls les codes actifs sont éligibles à la facturation directe.
+
   parameters:
-    system_snomed: http://snomed.info/sct
-    system_rxnorm: http://www.nlm.nih.gov/research/umls/rxnorm
-    procedures:
-      Dental consultation and report (procedure):
-        code: '34043003'
-        system: snomed
-        category: dental
-      Dental care (regime/therapy):
-        code: '225362009'
-        system: snomed
-        category: dental
-      Dental plain X-ray (procedure):
-        code: '241589008'
-        system: snomed
-        category: dental
-      Extraction of wisdom tooth:
-        code: '173421006'
-        system: snomed
-        category: dental
-      Removal of supragingival dental calculus:
-        code: '234723000'
-        system: snomed
-        category: dental
-      Application of composite dental filling:
-        code: '280115004'
-        system: snomed
-        category: dental
-      Office Visit:
-        code: '11429006'
-        system: snomed
+    code_systems:
+      - SNOMED-CT
+      - RxNorm
+
+    # ── Catalogue des codes ───────────────────────────────────────────────────
+    # Champ          | Type              | Obligatoire
+    # ───────────────|───────────────────|───────────
+    # code           | str (non vide)    | oui
+    # label          | str (non vide)    | oui
+    # system         | SNOMED-CT|RxNorm  | oui
+    # category       | str               | oui
+    # synonyms       | list[str]         | oui (peut être vide)
+    # exclusions     | list[code str]    | oui (peut être vide)
+    # active         | bool              | oui
+    # preauth_required | bool            | oui
+
+    codes:
+
+      # ── Actes dentaires (SNOMED-CT) ── CLM-0001, CLM-0002, CLM-0006 ─────────
+
+      - code: "34043003"
+        label: "Consultation dentaire et rapport"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "consultation dentaire"
+          - "bilan dentaire"
+          - "dental consultation and report"
+          - "dental consultation"
+          - "consultation odontologique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "225362009"
+        label: "Soins dentaires (prise en charge globale)"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "soins dentaires"
+          - "soins dentaires courants"
+          - "dental care"
+          - "dental care regime"
+          - "traitement dentaire global"
+        exclusions:
+          - "243085009"
+        active: true
+        preauth_required: false
+
+      - code: "1260009003"
+        label: "Détartrage supragingival complet"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "détartrage sus-gingival"
+          - "détartrage supragingival"
+          - "removal of supragingival plaque and calculus"
+          - "scalage supra-gingival"
+          - "nettoyage dentaire supragingival"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "1260010008"
+        label: "Surfaçage radiculaire (sous-gingival) complet"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "détartrage sous-gingival"
+          - "surfaçage"
+          - "removal of subgingival plaque and calculus"
+          - "curetage sous-gingival"
+          - "scalage infra-gingival"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "241046008"
+        label: "Radiographie dentaire bitewing"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "radio dentaire bitewing"
+          - "cliché rétrocoronaire"
+          - "dental plain X-ray bitewing"
+          - "radiographie inter-proximale"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "274788003"
+        label: "Examen des gencives"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "examen gingival"
+          - "examination of gingivae"
+          - "bilan parodontal"
+          - "contrôle des gencives"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "68071007"
+        label: "Application de fluorure dentaire"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "traitement fluorure"
+          - "fluoration dentaire"
+          - "dental fluoride treatment"
+          - "application de fluor"
+          - "traitement préventif fluorure"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "243085009"
+        label: "Éducation à la santé bucco-dentaire"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "éducation santé orale"
+          - "oral health education"
+          - "hygiène bucco-dentaire"
+          - "conseils hygiène dentaire"
+          - "prévention caries"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "1259293006"
+        label: "Pose d'un composite dentaire après fracture"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "obturation composite"
+          - "filling composite dentaire"
+          - "application of composite dental filling"
+          - "reconstitution composite"
+          - "restauration composite fracture"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Évaluation santé mentale (SNOMED-CT) ── CLM-0003 ─────────────────────
+
+      - code: "710824005"
+        label: "Évaluation des besoins médico-sociaux"
+        system: SNOMED-CT
+        category: psychiatrie
+        synonyms:
+          - "bilan médico-social"
+          - "assessment of health and social care needs"
+          - "évaluation sociale et médicale"
+          - "évaluation pluridisciplinaire"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "710841007"
+        label: "Évaluation de l'anxiété"
+        system: SNOMED-CT
+        category: psychiatrie
+        synonyms:
+          - "bilan anxiété"
+          - "assessment of anxiety"
+          - "dépistage anxiété"
+          - "échelle d'anxiété"
+          - "questionnaire anxiété"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "171207006"
+        label: "Dépistage de la dépression"
+        system: SNOMED-CT
+        category: psychiatrie
+        synonyms:
+          - "bilan dépression"
+          - "depression screening"
+          - "questionnaire dépression"
+          - "PHQ-9 dépression"
+          - "évaluation dépressive"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Chirurgie ambulatoire (SNOMED-CT) ── CLM-0004 ─────────────────────────
+
+      - code: "288086009"
+        label: "Suture de plaie ouverte"
+        system: SNOMED-CT
+        category: chirurgie
+        synonyms:
+          - "suture plaie"
+          - "suture wound"
+          - "suture open wound"
+          - "points de suture"
+          - "fermeture plaie"
+          - "sutures cutanées"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Réanimation / soins intensifs (SNOMED-CT) ── CLM-0005 ─────────────────
+
+      - code: "430701006"
+        label: "Réanimation par perfusion intraveineuse"
+        system: SNOMED-CT
+        category: réanimation
+        synonyms:
+          - "réhydratation IV"
+          - "resuscitation using intravenous fluid"
+          - "perfusion de réanimation"
+          - "remplissage vasculaire IV"
+        exclusions: []
+        active: true
+        preauth_required: true
+
+      - code: "449214001"
+        label: "Transfert en unité de soins continus"
+        system: SNOMED-CT
+        category: réanimation
+        synonyms:
+          - "transfert step-down"
+          - "transfer to stepdown unit"
+          - "transfert USC"
+          - "passage soins intermédiaires"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "305351004"
+        label: "Admission en unité de soins intensifs"
+        system: SNOMED-CT
+        category: réanimation
+        synonyms:
+          - "hospitalisation USI"
+          - "admission en réanimation"
+          - "admission to intensive care unit"
+          - "admission ICU"
+          - "entrée soins intensifs"
+        exclusions:
+          - "11429006"
+        active: true
+        preauth_required: true
+
+      # ── Consultation médicale générale (SNOMED-CT) — cas ambigus ─────────────
+
+      - code: "11429006"
+        label: "Consultation médicale"
+        system: SNOMED-CT
         category: consultation
-      General examination of patient (procedure):
-        code: '162673000'
-        system: snomed
+        synonyms:
+          - "office visit"
+          - "visite médicale"
+          - "medical consultation"
+          - "consultation généraliste"
+          - "medical encounter"
+          - "consultation cabinet"
+        exclusions:
+          - "308335008"
+        active: true
+        preauth_required: false
+
+      - code: "308335008"
+        label: "Acte de prise en charge patient"
+        system: SNOMED-CT
         category: consultation
-      Patient encounter procedure:
-        code: '308335008'
-        system: snomed
+        synonyms:
+          - "patient encounter procedure"
+          - "prise en charge patient"
+          - "encounter for treatment"
+          - "consultation procédure"
+        exclusions:
+          - "11429006"
+        active: true
+        preauth_required: false
+
+      # ── Chirurgie majeure planifiée (SNOMED-CT) ───────────────────────────────
+
+      - code: "80146002"
+        label: "Appendicectomie"
+        system: SNOMED-CT
+        category: chirurgie
+        synonyms:
+          - "ablation appendice"
+          - "appendectomy"
+          - "appendicectomie laparoscopique"
+          - "résection appendice"
+        exclusions:
+          - "288086009"
+        active: true
+        preauth_required: true
+
+      - code: "43789009"
+        label: "Numération formule sanguine"
+        system: SNOMED-CT
+        category: biologie
+        synonyms:
+          - "NFS"
+          - "hémogramme"
+          - "complete blood count"
+          - "CBC"
+          - "formule sanguine complète"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── CODES INACTIFS — pour les tests ──────────────────────────────────────
+      # Ces codes ont été retirés du référentiel local ClaimShield (superseded).
+      # Leur présence dans une demande doit déclencher UNKNOWN_REVIEW.
+
+      - code: "241589008"
+        label: "Radiographie dentaire standard (code retiré)"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "dental plain X-ray"
+          - "radio dentaire générique"
+          - "orthopantomogramme"
+        exclusions: []
+        active: false
+        preauth_required: false
+
+      - code: "234723000"
+        label: "Détartrage supragingival (version 2009, retirée)"
+        system: SNOMED-CT
+        category: dentaire
+        synonyms:
+          - "removal of dental calculus v1"
+          - "détartrage v1"
+        exclusions: []
+        active: false
+        preauth_required: false
+
+      - code: "162673000"
+        label: "Examen général du patient (code retiré)"
+        system: SNOMED-CT
         category: consultation
-      Encounter for problem:
-        code: '308335008'
-        system: snomed
-        category: consultation
-      Medical consultation (procedure):
-        code: '11429006'
-        system: snomed
-        category: consultation
-      Well child visit (procedure):
-        code: '170427008'
-        system: snomed
-        category: consultation
-      Complete blood count (procedure):
-        code: '43789009'
-        system: snomed
-        category: lab
-      Urinalysis (procedure):
-        code: '27171005'
-        system: snomed
-        category: lab
-      Blood glucose measurement:
-        code: '302788009'
-        system: snomed
-        category: lab
-      Lipid panel:
-        code: '252150009'
-        system: snomed
-        category: lab
-      Hemoglobin A1c measurement:
-        code: '43396009'
-        system: snomed
-        category: lab
-      Plain chest X-ray (procedure):
-        code: '399208008'
-        system: snomed
-        category: radiology
-      MRI of brain (procedure):
-        code: '416940007'
-        system: snomed
-        category: radiology
-      Computed tomography of abdomen:
-        code: '169070004'
-        system: snomed
-        category: radiology
-      Echocardiography (procedure):
-        code: '40701008'
-        system: snomed
-        category: radiology
-      Administration of influenza vaccine:
-        code: '86198006'
-        system: snomed
-        category: vaccination
-      Influenza vaccination:
-        code: '86198006'
-        system: snomed
-        category: vaccination
-      COVID-19 vaccination:
-        code: '1119349007'
-        system: snomed
-        category: vaccination
-      Appendectomy:
-        code: '80146002'
-        system: snomed
-        category: surgery
-      Cholecystectomy:
-        code: '38102005'
-        system: snomed
-        category: surgery
-      Cesarean section:
-        code: '11466000'
-        system: snomed
-        category: surgery
-    medications:
-      sodium fluoride 0.0272 MG/MG Oral Gel:
-        code: '1535362'
-        system: rxnorm
-        category: dental
-      Penicillin V 500 MG Oral Tablet:
-        code: '834060'
-        system: rxnorm
-        category: antibiotic
-      Acetaminophen 325 MG Oral Tablet:
-        code: '313782'
-        system: rxnorm
-        category: analgesic
-      Ibuprofen 200 MG Oral Tablet:
-        code: '197803'
-        system: rxnorm
-        category: analgesic
-      Aspirin 81 MG Oral Tablet:
-        code: '243670'
-        system: rxnorm
-        category: analgesic
-      Hydrocodone 5 MG / Acetaminophen 325 MG Oral Tablet:
-        code: '857005'
-        system: rxnorm
-        category: analgesic
-      lisinopril 10 MG Oral Tablet:
-        code: '314076'
-        system: rxnorm
-        category: cardiovascular
-      atorvastatin 20 MG Oral Tablet:
-        code: '617314'
-        system: rxnorm
-        category: cardiovascular
-      metoprolol succinate 25 MG Extended Release Oral Tablet:
-        code: '736866'
-        system: rxnorm
-        category: cardiovascular
-      metformin hydrochloride 500 MG Oral Tablet:
-        code: '861007'
-        system: rxnorm
-        category: metabolic
-      insulin isophane, human 70 UNT/ML / Regular Insulin, Human 30 UNT/ML Injectable Suspension:
-        code: '311048'
-        system: rxnorm
-        category: metabolic
-      albuterol 0.83 MG/ML Inhalation Solution:
-        code: '745679'
-        system: rxnorm
-        category: respiratory
-      fluticasone propionate 0.044 MG/ACTUAT Metered Dose Inhaler:
-        code: '746763'
-        system: rxnorm
-        category: respiratory
-      amoxicillin 500 MG Oral Tablet:
-        code: '723463'
-        system: rxnorm
-        category: antibiotic
-      azithromycin 250 MG Oral Tablet:
-        code: '308460'
-        system: rxnorm
-        category: antibiotic
+        synonyms:
+          - "general examination of patient"
+          - "bilan général"
+          - "examen complet"
+        exclusions: []
+        active: false
+        preauth_required: false
+
+      # ── Médicaments RxNorm ── demos CLM-0001/0003/0004/0005 ──────────────────
+
+      - code: "1535362"
+        label: "Gel fluoré au sodium 0,0272 mg/mg voie orale"
+        system: RxNorm
+        category: dentaire
+        synonyms:
+          - "gel fluorure de sodium"
+          - "sodium fluoride 0.0272 MG/MG oral gel"
+          - "gel de fluor"
+          - "fluorure topique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "310798"
+        label: "Hydrochlorothiazide 25 mg comprimé oral"
+        system: RxNorm
+        category: cardiovasculaire
+        synonyms:
+          - "HCTZ 25 mg"
+          - "hydrochlorothiazide 25 MG oral tablet"
+          - "hydrochlorothiazide comprimé"
+          - "diurétique thiazidique 25 mg"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "314076"
+        label: "Lisinopril 10 mg comprimé oral"
+        system: RxNorm
+        category: cardiovasculaire
+        synonyms:
+          - "lisinopril 10 MG oral tablet"
+          - "inhibiteur ECA 10 mg"
+          - "lisinopril comprimé"
+          - "IEC lisinopril"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "308136"
+        label: "Amlodipine 2,5 mg comprimé oral"
+        system: RxNorm
+        category: cardiovasculaire
+        synonyms:
+          - "amLODIPine 2.5 MG oral tablet"
+          - "amlodipine comprimé"
+          - "antagoniste calcique 2,5 mg"
+          - "bloqueur canaux calcium amlodipine"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "310965"
+        label: "Ibuprofène 200 mg comprimé oral"
+        system: RxNorm
+        category: antalgique
+        synonyms:
+          - "ibuprofen 200 MG oral tablet"
+          - "ibuprofène comprimé"
+          - "AINS 200 mg"
+          - "anti-inflammatoire ibuprofène"
+        exclusions:
+          - "313782"
+        active: true
+        preauth_required: false
+
+      - code: "1659131"
+        label: "Pipéracilline 2000 mg / Tazobactam 250 mg solution injectable"
+        system: RxNorm
+        category: antibiotique
+        synonyms:
+          - "piperacillin 2000 MG / tazobactam 250 MG injection"
+          - "Tazocin injection"
+          - "pip-tazo injection"
+          - "pipéra-tazo 2g/250mg IV"
+        exclusions: []
+        active: true
+        preauth_required: true
+
+      - code: "1807510"
+        label: "Vancomycine 5 mg/mL solution pour perfusion 150 mL"
+        system: RxNorm
+        category: antibiotique
+        synonyms:
+          - "150 ML vancomycin 5 MG/ML injection"
+          - "vancomycine IV 150 mL"
+          - "glycopeptide vancomycine"
+          - "vancomycine perfusion"
+        exclusions: []
+        active: true
+        preauth_required: true
+
+      - code: "242969"
+        label: "Norépinéphrine 1 mg/mL solution injectable 4 mL"
+        system: RxNorm
+        category: réanimation
+        synonyms:
+          - "4 ML norepinephrine 1 MG/ML injection"
+          - "noradrénaline 1 mg/mL"
+          - "norepinephrine drip"
+          - "vasopresseur noradrénaline"
+        exclusions: []
+        active: true
+        preauth_required: true
+
+      # ── Médicaments RxNorm supplémentaires ────────────────────────────────────
+
+      - code: "313782"
+        label: "Paracétamol 325 mg comprimé oral"
+        system: RxNorm
+        category: antalgique
+        synonyms:
+          - "acetaminophen 325 MG oral tablet"
+          - "paracétamol comprimé"
+          - "APAP 325 mg"
+          - "doliprane 325 mg générique"
+        exclusions:
+          - "310965"
+        active: true
+        preauth_required: false
+
+      - code: "308460"
+        label: "Azithromycine 250 mg comprimé oral"
+        system: RxNorm
+        category: antibiotique
+        synonyms:
+          - "azithromycin 250 MG oral tablet"
+          - "azithromycine comprimé"
+          - "macrolide 250 mg"
+          - "Zithromax 250 mg générique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+    # ── Mots-clés de correspondance par catégorie ─────────────────────────────
     keywords:
-      dental:
-      - dental
-      - tooth
-      - oral
-      - fluoride
-      - gingivitis
-      - caries
-      - calculus
-      - gingival
+      dentaire:
+        - dental
+        - tooth
+        - oral
+        - fluoride
+        - gingivae
+        - gingival
+        - caries
+        - calculus
+        - plaque
+        - bitewing
+        - fluorure
+        - dentaire
+        - gencive
+        - composite
+        - brossage
       consultation:
-      - consultation
-      - encounter
-      - visit
-      - examination
-      - checkup
-      lab:
-      - blood
-      - urine
-      - glucose
-      - count
-      - panel
-      - test
-      - hemoglobin
-      - lipid
-      radiology:
-      - x-ray
-      - xray
-      - mri
-      - ct
-      - scan
-      - imaging
-      - echo
-      - ultrasound
-      vaccination:
-      - vaccine
-      - vaccination
-      - immunization
-      - influenza
-      - covid
-      surgery:
-      - surgery
-      - surgical
-      - operation
-      - appendectomy
-      - cholecystectomy
-      analgesic:
-      - acetaminophen
-      - ibuprofen
-      - aspirin
-      - pain
-      - analgesic
-      cardiovascular:
-      - lisinopril
-      - atorvastatin
-      - metoprolol
-      - cardiac
-      - heart
-      antibiotic:
-      - penicillin
-      - amoxicillin
-      - azithromycin
-      - antibiotic
-  thresholds: {}
+        - consultation
+        - encounter
+        - visit
+        - examination
+        - checkup
+        - visite
+        - bilan
+        - médecin
+      psychiatrie:
+        - anxiety
+        - depression
+        - mental
+        - anxiété
+        - dépression
+        - psychiatrie
+        - psychologique
+        - screening
+        - questionnaire
+        - PHQ
+      chirurgie:
+        - surgery
+        - surgical
+        - operation
+        - appendectomy
+        - suture
+        - wound
+        - plaie
+        - fermeture
+        - points
+      réanimation:
+        - intensive care
+        - ICU
+        - réanimation
+        - stepdown
+        - soins intensifs
+        - resuscitation
+        - perfusion
+        - IV fluid
+      biologie:
+        - blood
+        - count
+        - CBC
+        - NFS
+        - hémogramme
+        - analyse
+      cardiovasculaire:
+        - lisinopril
+        - hydrochlorothiazide
+        - amlodipine
+        - HCTZ
+        - IEC
+        - antihypertenseur
+        - diurétique
+        - calcium
+      antibiotique:
+        - penicillin
+        - amoxicillin
+        - azithromycin
+        - piperacillin
+        - vancomycin
+        - antibiotic
+        - antibiotique
+        - tazobactam
+        - macrolide
+        - glycopeptide
+      antalgique:
+        - ibuprofen
+        - acetaminophen
+        - paracétamol
+        - ibuprofène
+        - AINS
+        - douleur
+        - antalgique
+        - anti-inflammatoire
+      réanimation_med:
+        - norepinephrine
+        - noradrénaline
+        - vasopresseur
+
+  thresholds:
+    min_similarity_score: 0.80
+    keyword_match_min_words: 2
+    max_synonyms_per_code: 15
+    preauth_amount_threshold_usd: 3000
+
   result_codes:
-  - PASS
-  - NEEDS_REVIEW
-  - FAIL
+    - PASS
+    - NEEDS_REVIEW
+    - FAIL
+
   status: active
+
 rules:
-- id: MEDICAL_CODE_EXACT_MATCH
-  enabled: true
-  severity: blocking
-  description: Une description identique à la table locale reçoit le code configuré.
-- id: MEDICAL_CODE_KEYWORD_MATCH_REVIEW
-  enabled: true
-  severity: review
-  description: Une correspondance par mot-clé nécessite une revue humaine.
-- id: MEDICAL_CODE_UNKNOWN_REVIEW
-  enabled: true
-  severity: review
-  description: Une description inconnue nécessite une revue humaine.
+  - id: MEDICAL_CODE_EXACT_MATCH
+    enabled: true
+    severity: blocking
+    description: >
+      Le code ou le libellé soumis correspond exactement à une entrée active
+      du référentiel local (SNOMED-CT ou RxNorm). La correspondance est
+      déterministe : code exact OU libellé normalisé exact OU synonyme autorisé.
+      Retourne le code canonique et le libellé normalisé sans revue humaine.
+
+  - id: MEDICAL_CODE_KEYWORD_MATCH_REVIEW
+    enabled: true
+    severity: review
+    description: >
+      Le libellé soumis partage des mots-clés avec une ou plusieurs catégories
+      du référentiel mais ne correspond à aucun code ou synonyme exact.
+      Résultat approximatif — revue humaine recommandée avant facturation.
+      Score minimum requis : min_similarity_score (paramètre thresholds).
+
+  - id: MEDICAL_CODE_UNKNOWN_REVIEW
+    enabled: true
+    severity: review
+    description: >
+      Le code ou libellé soumis ne correspond à aucune entrée du référentiel,
+      ni par correspondance exacte ni par mots-clés. Inclut les codes inactifs
+      (active=false). Revue humaine obligatoire — facturation bloquée jusqu'à
+      validation manuelle.

@@ -20,7 +20,7 @@ def test_medical_coding_same_input_and_version_is_deterministic():
     first = run(case_id="CLM-0001", procedures=["Office Visit"])
     second = run(case_id="CLM-0001", procedures=["Office Visit"])
 
-    assert first.table_version == second.table_version == "1.0.0"
+    assert first.table_version == second.table_version == "1.1.0"
     assert first.model_dump(mode="json") == second.model_dump(mode="json")
 
 

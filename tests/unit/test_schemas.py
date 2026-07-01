@@ -1,8 +1,11 @@
 """Tests unitaires des schémas Pydantic — Étape 2."""
 
 import json
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import UnionType
+from typing import Union, get_args, get_origin, get_type_hints
 
 from pydantic import ValidationError
 
@@ -14,23 +17,48 @@ from schemas.domain import (
     DeterministicRules,
     DocumentInfo,
     ExtractedData,
+    MedicalProcedure,
     PatientInfo,
+    Prescription,
+    ProviderInfo,
+    EncounterInfo,
 )
 from schemas.results import (
+    AuditResult,
     FraudDetectionResult,
     IdentityCoverageResult,
     IdentityResult,
     CoverageResult,
+    LlmMetadata,
     SecurityGateResult,
 )
 from schemas.domain import Recommendation, VerificationStatus, SecurityDecision
+from state.claim_state import ClaimState, validate_state_update
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "datasets" / "fixtures" / "valid"
+
+
+BUSINESS_SCHEMAS = (
+    PatientInfo,
+    CoverageInfo,
+    DocumentInfo,
+    ExtractedData,
+    ProviderInfo,
+    EncounterInfo,
+    MedicalProcedure,
+    Prescription,
+    DeterministicRules,
+    ClaimSubmission,
+)
 
 
 def load_ground_truth(case_id: str) -> dict:
     path = FIXTURES_DIR / case_id / "oracle" / "ground_truth.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _is_optional(annotation: object) -> bool:
+    return get_origin(annotation) in {Union, UnionType} and type(None) in get_args(annotation)
 
 
 # ── Dossier valide accepté ────────────────────────────────────────────────────
@@ -83,6 +111,197 @@ def test_valid_claim_accepted():
     assert claim.rules is not None
     assert claim.rules.duplicate_invoice is False
     assert claim.rules.prompt_injection_detected is False
+
+
+def test_ten_business_schemas_are_strict_and_typed():
+    """Les dix schémas métier prévus existent et interdisent les champs inconnus."""
+
+    assert [schema.__name__ for schema in BUSINESS_SCHEMAS] == [
+        "PatientInfo",
+        "CoverageInfo",
+        "DocumentInfo",
+        "ExtractedData",
+        "ProviderInfo",
+        "EncounterInfo",
+        "MedicalProcedure",
+        "Prescription",
+        "DeterministicRules",
+        "ClaimSubmission",
+    ]
+    for schema in BUSINESS_SCHEMAS:
+        assert schema.model_config["extra"] == "forbid"
+
+    assert PatientInfo.model_fields["patient_id"].is_required()
+    assert PatientInfo.model_fields["patient_name"].is_required()
+    assert not _is_optional(PatientInfo.model_fields["patient_id"].annotation)
+    assert CoverageInfo.model_fields["coverage_rate"].annotation is Decimal
+    assert ExtractedData.model_fields["service_date"].annotation == date | None
+    assert MedicalProcedure.model_fields["unit_cost"].is_required()
+    assert Prescription.model_fields["unit_cost"].is_required()
+    assert ClaimSubmission.model_fields["case_id"].is_required()
+
+
+def test_mutable_collections_use_default_factory():
+    """Les listes et dictionnaires des modèles ne partagent pas de valeur mutable."""
+
+    collection_fields = [
+        ClaimSubmission.model_fields["documents"],
+        ClaimSubmission.model_fields["procedures"],
+        ClaimSubmission.model_fields["prescriptions"],
+        ExtractedData.model_fields["provenance"],
+        EncounterInfo.model_fields["diagnosis_codes"],
+        SecurityGateResult.model_fields["findings"],
+        IdentityCoverageResult.model_fields["evidence"],
+        FraudDetectionResult.model_fields["signals"],
+    ]
+    for field in collection_fields:
+        assert field.default_factory is not None
+
+    first = ClaimSubmission(case_id="CLM-0001")
+    second = ClaimSubmission(case_id="CLM-0002")
+    first.documents.append(
+        DocumentInfo(
+            filename="facture.pdf",
+            sha256="a" * 64,
+            size_bytes=1,
+            mime_type="application/pdf",
+        )
+    )
+    assert second.documents == []
+
+
+@pytest.mark.parametrize(
+    ("factory", "expected_loc"),
+    [
+        (lambda: ClaimSubmission(case_id="DOSSIER-001"), ("case_id",)),
+        (lambda: PatientInfo(patient_id="pat-1", patient_name=""), ("patient_name",)),
+        (lambda: CoverageInfo(payer_name="Assureur", coverage_rate=Decimal("1.50")), ("coverage_rate",)),
+        (
+            lambda: DocumentInfo(
+                filename="facture.pdf",
+                sha256="abc",
+                size_bytes=1024,
+                mime_type="application/pdf",
+            ),
+            ("sha256",),
+        ),
+        (lambda: MedicalProcedure(code="ABC", description="Acte", unit_cost=Decimal("-1")), ("unit_cost",)),
+        (lambda: ExtractedData.model_validate({"total_billed": "-1.00"}), ("total_billed",)),
+    ],
+)
+def test_invalid_business_objects_are_rejected_with_localized_errors(factory, expected_loc):
+    """Au moins cinq objets invalides sont rejetés avec une localisation de champ."""
+
+    with pytest.raises(ValidationError) as exc_info:
+        factory()
+
+    locations = [tuple(error["loc"]) for error in exc_info.value.errors()]
+    assert expected_loc in locations
+
+
+def test_claim_state_rejects_raw_documents_ocr_and_secrets():
+    """ClaimState reste minimal : pas de brut documentaire, OCR complet ou secret."""
+
+    forbidden_updates = [
+        {"payload": b"%PDF-1.7"},
+        {"ocr_result": {"full_text": "texte OCR complet"}},
+        {"ocr_result": {"raw_ocr_text": "texte OCR complet"}},
+        {"document": {"base64_image": "iVBORw0KGgoAAAANSUhEUgAA"}},
+        {"document": {"image_content": "image encodee"}},
+        {"llm": {"prompt": "Tu es un agent ClaimShield complet..."}},
+        {"llm": {"raw_response": "{\"status\":\"PASS\"}"}},
+        {"llm": {"messages": [{"role": "system", "content": "prompt complet"}]}},
+        {"metadata": {"api_key": "abc123"}},
+        {"metadata": {"note": "Bearer abc.def.ghi"}},
+        {"source_path": "/tmp/facture.pdf"},
+    ]
+
+    for update in forbidden_updates:
+        with pytest.raises(ValueError):
+            validate_state_update(update)
+
+    validate_state_update(
+        {
+            "case_id": "CLM-0001",
+            "alerts": ["hash verifie"],
+            "metadata": {"artifact_path": "artifacts/ocr/CLM-0001.json"},
+        }
+    )
+
+
+def test_claim_state_expose_un_resultat_type_par_agent():
+    """Les 11 agents ont chacun un champ résultat dédié, nullable tant qu'indisponible."""
+
+    expected_result_fields = {
+        "intake_result",
+        "security_result",
+        "privacy_result",
+        "identity_coverage_result",
+        "fhir_result",
+        "ocr_result",
+        "coding_result",
+        "clinical_result",
+        "fraud_result",
+        "review_result",
+        "audit_result",
+    }
+
+    annotations = get_type_hints(ClaimState, include_extras=True)
+    assert expected_result_fields <= set(annotations)
+    for field in expected_result_fields:
+        assert _is_optional(annotations[field]), f"{field} doit accepter None"
+
+    assert annotations["audit_result"] == AuditResult | None
+
+
+def test_claim_state_regroupe_les_champs_generaux_en_tete():
+    """Les champs généraux nécessaires au routage restent regroupés en tête."""
+
+    assert list(ClaimState.__annotations__)[:5] == [
+        "case_id",
+        "schema_version",
+        "intake_status",
+        "current_step",
+        "completed_steps",
+    ]
+
+
+def test_resultats_agents_acceptent_uniquement_metadata_llm_minimales():
+    """Chaque résultat d'agent peut porter modèle, version de prompt et confiance."""
+
+    import schemas.results as res
+
+    metadata = LlmMetadata(
+        model_name="gemma4:latest",
+        prompt_version="1.0.0",
+        confidence=0.82,
+    )
+    result_classes = [
+        res.ClaimIntakeResult,
+        res.SecurityGateResult,
+        res.PrivacyResult,
+        res.IdentityCoverageResult,
+        res.FhirValidatorResult,
+        res.DocumentOcrResult,
+        res.MedicalCodingResult,
+        res.ClinicalConsistencyResult,
+        res.FraudDetectionResult,
+        res.CaseReviewerResult,
+        res.AuditResult,
+    ]
+    for result_class in result_classes:
+        assert result_class.model_fields["llm_metadata"].annotation == LlmMetadata | None
+
+    gate = res.SecurityGateResult(
+        claim_id="CLM-0001",
+        decision=SecurityDecision.ALLOW,
+        reasons=["Autorise"],
+        llm_metadata=metadata,
+    )
+    assert gate.llm_metadata == metadata
+
+    with pytest.raises(ValidationError):
+        LlmMetadata(model_name="api_key=sk-secret", prompt_version="1.0.0")
 
 
 # ── Champ inconnu rejeté ──────────────────────────────────────────────────────
@@ -225,7 +444,6 @@ def test_all_models_json_serializable():
     """Chaque modèle Pydantic est sérialisable en JSON via model_dump_json()."""
     import schemas.domain as dom
     import schemas.results as res
-    from datetime import datetime
 
     # Instances minimales valides pour chaque modèle
     instances = [
@@ -306,6 +524,7 @@ def test_all_models_json_serializable():
         res.FraudDetectionResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
         res.CaseReviewerResult(case_id="CLM-0001", recommendation=dom.Recommendation.APPROVE),
         res.AuditEvent(case_id="CLM-0001", event_id="evt-1", actor="intake", action="ingest", outcome="ok"),
+        res.AuditResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
     ]
 
     for obj in instances:

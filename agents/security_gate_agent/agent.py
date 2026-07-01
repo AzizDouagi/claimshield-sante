@@ -1,31 +1,31 @@
-"""Security Gate Agent — validation déterministe des entrées sensibles.
+"""Security Gate Agent — validation de sécurité avec décision LLM finale.
 
-Agent purement déterministe — aucun appel LLM.
+Agent LLM (gemma4:latest via ChatOllama) + analyses de sécurité déterministes.
 
 Pipeline :
-  1. Réception d'un SecurityGateInput déjà validé par Pydantic
-  2. Contrôle fichier et métadonnées
-  3. Contrôle du chemin relatif de stockage
-  4. Contrôle des URL
-  5. Scan du texte, des métadonnées et sorties d'agents
-  6. Contrôle des outils demandés
-  7. Calcul de la sévérité
-  8. Retour SecurityGateResult (ALLOW | BLOCK | QUARANTINE)
+  Phase A — analyses déterministes : fichier, chemin, URL, texte, outils, oracle.
+  Phase B — LLM (with_structured_output) : décision ALLOW/BLOCK/QUARANTINE finale.
+  Phase C — construction SecurityGateResult + audit.
+
+Fallback : si le LLM est indisponible → BLOCK (principe de précaution).
 
 Interdictions strictes :
   - Aucune analyse médicale ou clinique.
   - Aucune décision de remboursement.
-  - Aucune modification du dossier métier.
-  - Aucun accès direct à un secret.
   - Aucun contenu brut, secret ou chemin absolu dans le ClaimState.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from agents.security_gate_agent.schemas import InputType, SecurityGateInput
+from agents.security_gate_agent.prompt import load_security_gate_prompt
+from agents.security_gate_agent.schemas import InputType, LlmSecurityDecision, SecurityGateInput
+from llm.factory import get_llm
+from llm.metadata import build_llm_metadata
 from schemas.domain import FindingCode, SecurityDecision, SeverityLevel
 from schemas.results import SecurityAuditEntry, SecurityFinding, SecurityGateResult
 from security.policies import (
@@ -69,6 +69,8 @@ from security.scanners import (
     scan_text_security,
 )
 from state.claim_state import ClaimState, validate_state_update
+
+_AGENT_NAME = "security_gate_agent"
 
 # Sévérité par défaut pour chaque code d'anomalie
 _POLICY_CODE_TO_FINDING: dict[str, tuple[FindingCode, SeverityLevel]] = {
@@ -127,6 +129,12 @@ _NEXT_ACTIONS: dict[SecurityDecision, str] = {
     SecurityDecision.QUARANTINE: "await_human_review",
 }
 
+_DECISION_RANK: dict[SecurityDecision, int] = {
+    SecurityDecision.ALLOW: 0,
+    SecurityDecision.QUARANTINE: 1,
+    SecurityDecision.BLOCK: 2,
+}
+
 
 def _add_reason_code(reason_codes: list[FindingCode], code: FindingCode) -> None:
     if code not in reason_codes:
@@ -138,6 +146,38 @@ def _safe_evidence(value: str | None) -> str | None:
     if not value:
         return None
     return value[:120]
+
+
+def _deterministic_confidence(
+    findings: list[SecurityFinding],
+    decision: SecurityDecision,
+) -> float:
+    """Score stable associé à la Phase A, avant arbitrage LLM."""
+    if decision == SecurityDecision.BLOCK and findings:
+        return 1.0
+    if decision == SecurityDecision.QUARANTINE and findings:
+        return 0.9
+    if decision == SecurityDecision.ALLOW:
+        return 0.95
+    return 0.75
+
+
+def _evidence_summary(
+    findings: list[SecurityFinding],
+    decision: SecurityDecision,
+    llm_evidence: str | None = None,
+) -> str:
+    """Produit une preuve courte sans propager le contenu brut analysé."""
+    for finding in findings:
+        if finding.evidence:
+            return finding.evidence
+        if finding.code:
+            return finding.code.value
+    if llm_evidence:
+        return llm_evidence[:200]
+    if decision == SecurityDecision.ALLOW:
+        return "Aucun signal bloquant détecté par les politiques et scanners."
+    return "Décision conservatrice sans preuve brute persistée."
 
 
 def _append_policy_findings(
@@ -268,12 +308,62 @@ def _validation_error_result(
         applied_policy=policy.name,
         policy_version=policy.version,
         evaluated_at=now,
+        confidence_score=1.0,
+        evidence_summary=_evidence_summary(findings, SecurityDecision.BLOCK),
         next_allowed_action=_NEXT_ACTIONS[SecurityDecision.BLOCK],
         audit_entry=audit_entry,
         prompt_injection_detected=False,
         blocked_fields=blocked_fields,
         reasons=[finding.description for finding in findings],
     )
+
+
+# ── Phase B : décision LLM ────────────────────────────────────────────────────
+
+
+def _invoke_llm_security(
+    *,
+    case_id: str,
+    input_type: str,
+    findings: list[dict],
+    deterministic_decision: str,
+    max_severity: str,
+    file_ok: bool,
+    path_ok: bool,
+    url_ok: bool | None,
+    text_injection: bool,
+    text_level: str,
+    deterministic_flag: bool | None,
+) -> LlmSecurityDecision | None:
+    """Envoie les résultats déterministes au LLM pour la décision ALLOW/BLOCK/QUARANTINE."""
+    try:
+        prompt = load_security_gate_prompt()
+        llm = get_llm()
+        structured = llm.with_structured_output(LlmSecurityDecision, method="json_schema")
+        data = {
+            "case_id": case_id,
+            "prompt_version": prompt.version,
+            "input_type": input_type,
+            "findings": findings[:20],
+            "deterministic_decision": deterministic_decision,
+            "max_severity": max_severity,
+            "file_ok": file_ok,
+            "path_ok": path_ok,
+            "url_ok": url_ok,
+            "text_injection": text_injection,
+            "text_level": text_level,
+            "deterministic_flag": deterministic_flag,
+        }
+        system = SystemMessage(content=prompt.system_prompt)
+        human = HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str))
+        result = structured.invoke([system, human])
+        if isinstance(result, LlmSecurityDecision):
+            return result
+        if isinstance(result, dict):
+            return LlmSecurityDecision(**result)
+        return None
+    except Exception:
+        return None
 
 
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
@@ -347,7 +437,9 @@ def run(
         )
 
     # ── Étape 4 : texte, métadonnées et sorties d'agents ─────────────────────
-    text_source = "agent_output" if gate_input.input_type == InputType.AGENT_OUTPUT else None
+    text_source = gate_input.text_source
+    if text_source is None and gate_input.input_type == InputType.AGENT_OUTPUT:
+        text_source = "agent_output"
     _scan_text_field(
         findings,
         reason_codes,
@@ -423,14 +515,79 @@ def run(
 
     injection_detected = any(f.code == FindingCode.PROMPT_INJECTION for f in findings)
 
-    # ── Étape 7 : sévérité et décision ───────────────────────────────────────
-    decision = _decide(findings, pol)
-
-    reasons = (
+    # ── Étape 7 : sévérité déterministe puis décision LLM finale ─────────────
+    deterministic_decision = _decide(findings, pol)
+    deterministic_reasons = (
         [f.description for f in findings]
         if findings
         else ["Aucune menace détectée — dossier autorisé"]
     )
+    deterministic_confidence = _deterministic_confidence(findings, deterministic_decision)
+
+    findings_payload = [finding.model_dump(mode="json") for finding in findings]
+    max_severity = _max_finding_severity(findings)
+    url_ok = None
+    if gate_input.url:
+        url_ok = not any(f.affected_element == "url" for f in findings)
+    injection_findings = [f for f in findings if f.code == FindingCode.PROMPT_INJECTION]
+    text_level = (
+        max((f.severity for f in injection_findings), key=severity_rank).value
+        if injection_findings
+        else "NONE"
+    )
+
+    llm_decision = _invoke_llm_security(
+        case_id=gate_input.claim_id,
+        input_type=gate_input.input_type.value,
+        findings=findings_payload,
+        deterministic_decision=deterministic_decision.value,
+        max_severity=max_severity.value,
+        file_ok=not any(f.affected_element == "file_metadata" for f in findings),
+        path_ok=not any(f.affected_element == "relative_path" for f in findings),
+        url_ok=url_ok,
+        text_injection=injection_detected,
+        text_level=text_level,
+        deterministic_flag=gate_input.deterministic_injection_flag,
+    )
+
+    if llm_decision is None:
+        decision = SecurityDecision.BLOCK
+        confidence_score = max(0.6, deterministic_confidence)
+        llm_evidence = None
+        reasons = ["LLM indisponible — décision conservatrice BLOCK."]
+        if deterministic_reasons:
+            reasons.extend(deterministic_reasons[:5])
+    else:
+        llm_evidence = getattr(llm_decision, "evidence", None)
+        try:
+            requested_decision = SecurityDecision(getattr(llm_decision, "decision"))
+        except (AttributeError, TypeError, ValueError):
+            decision = SecurityDecision.BLOCK
+            confidence_score = max(0.6, deterministic_confidence)
+            reasons = ["Décision LLM invalide — décision conservatrice BLOCK."]
+            reasons.extend(deterministic_reasons[:5])
+        else:
+            llm_confidence = max(
+                0.0,
+                min(
+                    1.0,
+                    float(getattr(llm_decision, "confidence_score", deterministic_confidence)),
+                ),
+            )
+            if _DECISION_RANK[requested_decision] < _DECISION_RANK[deterministic_decision]:
+                decision = deterministic_decision
+                confidence_score = max(llm_confidence, deterministic_confidence)
+                reasons = [
+                    "Décision LLM abaissée refusée par la politique de sécurité.",
+                    *deterministic_reasons[:5],
+                ]
+            else:
+                decision = requested_decision
+                confidence_score = llm_confidence
+                reasons = list(getattr(llm_decision, "reasons", None) or deterministic_reasons)
+                explanation = getattr(llm_decision, "explanation", "")
+                if explanation and explanation not in reasons:
+                    reasons = [*reasons, explanation]
 
     # ── Étape 8 : audit et résultat ──────────────────────────────────────────
     now = datetime.now(UTC)
@@ -455,11 +612,14 @@ def run(
         applied_policy=pol.name,
         policy_version=pol.version,
         evaluated_at=now,
+        confidence_score=confidence_score,
+        evidence_summary=_evidence_summary(findings, decision, llm_evidence),
         next_allowed_action=_NEXT_ACTIONS[decision],
         audit_entry=audit_entry,
         prompt_injection_detected=injection_detected,
         blocked_fields=blocked_fields,
         reasons=reasons,
+        llm_metadata=build_llm_metadata(_AGENT_NAME, confidence_score),
     )
 
 
@@ -491,6 +651,7 @@ def node(state: ClaimState) -> dict:
             relative_path=raw.get("relative_path", raw.get("write_path")),
             url=raw.get("url"),
             text_excerpt=raw.get("text_excerpt", raw.get("tool_arguments_excerpt")),
+            text_source=raw.get("text_source"),
             requesting_agent=raw.get("requesting_agent"),
             deterministic_injection_flag=raw.get("deterministic_injection_flag"),
         )
