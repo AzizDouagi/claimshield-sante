@@ -93,6 +93,7 @@ class HumanDecision(TypedDict, total=False):
     decision: str          # "APPROVE" | "REJECT" | "NEEDS_MORE_INFO"
     comment: str
     decided_at: datetime
+    target_node: str       # obligatoire si decision == "NEEDS_MORE_INFO" — nœud à relancer
 
 
 # ── État principal ────────────────────────────────────────────────────────────
@@ -128,8 +129,9 @@ class ClaimState(TypedDict, total=False):
         liste complète — retourner uniquement les nouveaux éléments.
 
     **HITL** (human_decision) :
-        Rempli par le point d'interruption LangGraph (``interrupt_before`` ou
-        ``interrupt_after``).  Aucun agent ne doit écrire ce champ.
+        Rempli exclusivement par ``graph.technical_nodes.node_await_human_review``
+        via ``langgraph.types.interrupt()`` et une reprise ``Command(resume=...)``.
+        Aucun agent ne doit écrire ce champ.
 
     **Décision finale** (final_recommendation, final_justification) :
         Remplis par ``case_reviewer_agent`` en fin de workflow.
@@ -259,6 +261,13 @@ class ClaimState(TypedDict, total=False):
 
     # ── Décision humaine (HITL) ───────────────────────────────────────────────
     human_decision: HumanDecision | None
+
+    # ── Compteur de corrections (HITL — route de relance) ────────────────────
+    # Incrémenté par node_await_human_review à chaque décision NEEDS_MORE_INFO.
+    # Écrasé (pas de reducer) : reflète le nombre total de relances demandées
+    # pour ce dossier. Comparé à une limite configurable par route_human_review
+    # pour empêcher toute boucle infinie de corrections.
+    correction_attempts: int
 
     # ── Recommandation finale ─────────────────────────────────────────────────
     final_recommendation: Recommendation | None
@@ -443,6 +452,8 @@ def validate_claim_state(state: Mapping[str, Any]) -> None:
         errors.append("schema_version : type invalide, attendu str")
     if "current_step" in state and not isinstance(state["current_step"], str):
         errors.append("current_step : type invalide, attendu str")
+    if "correction_attempts" in state and not isinstance(state["correction_attempts"], int):
+        errors.append("correction_attempts : type invalide, attendu int")
     if "completed_steps" in state and not _is_list_of(state["completed_steps"], str):
         errors.append("completed_steps : type invalide, attendu list[str]")
     if "errors" in state and not _is_list_of(state["errors"], str):

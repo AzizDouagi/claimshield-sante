@@ -18,18 +18,24 @@ from __future__ import annotations
 
 import pytest
 
-from graph.nodes import NODE_REGISTRY
+from graph.nodes import build_node_registry, build_orchestrator
 from graph.technical_nodes import (
+    ALLOWED_HUMAN_ACTIONS,
     TECHNICAL_NODE_REGISTRY,
+    _build_human_review_payload,
+    _collect_minimized_evidence,
+    _collect_motifs,
     _TechnicalNodeConfig,
     _make_technical_node,
+    _validate_human_decision,
+    node_await_human_review,
     node_failure,
     node_finalize,
     node_needs_review,
     node_quarantine,
 )
 from schemas.domain import Recommendation
-from state.claim_state import validate_state_update
+from state.claim_state import ClaimState, validate_state_update
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -135,6 +141,246 @@ class TestNodeNeedsReview:
         assert node_needs_review.__name__ == "node_needs_review"
 
 
+# ── TestNodeAwaitHumanReview ──────────────────────────────────────────────────
+
+
+class TestHumanReviewHelpers:
+    def test_build_payload_contains_required_keys(self):
+        payload = _build_human_review_payload(_state("CLM-0055"))
+        assert payload["case_id"] == "CLM-0055"
+        assert isinstance(payload["motifs"], list) and payload["motifs"]
+        assert isinstance(payload["preuves_minimisees"], dict)
+        assert payload["actions_autorisees"] == list(ALLOWED_HUMAN_ACTIONS)
+
+    def test_build_payload_fallback_case_id(self):
+        payload = _build_human_review_payload(_empty_state())
+        assert payload["case_id"] == "INCONNU"
+
+    def test_collect_motifs_uses_alerts_then_errors(self):
+        state = {"alerts": ["confiance OCR limite"], "errors": ["rôle inconnu"]}
+        motifs = _collect_motifs(state)
+        assert motifs == ["confiance OCR limite", "rôle inconnu"]
+
+    def test_collect_motifs_deduplicates(self):
+        state = {"alerts": ["x", "x"], "errors": []}
+        assert _collect_motifs(state) == ["x"]
+
+    def test_collect_motifs_default_when_empty(self):
+        assert _collect_motifs(_empty_state()) == [
+            "Revue humaine requise — aucun motif spécifique enregistré."
+        ]
+
+    def test_collect_minimized_evidence_extracts_status(self):
+        from schemas.domain import VerificationStatus
+        from types import SimpleNamespace
+
+        state = {"ocr_result": SimpleNamespace(status=VerificationStatus.NEEDS_REVIEW)}
+        evidence = _collect_minimized_evidence(state)
+        assert evidence == {"ocr_result": "NEEDS_REVIEW"}
+
+    def test_collect_minimized_evidence_ignores_missing_results(self):
+        assert _collect_minimized_evidence(_empty_state()) == {}
+
+    def test_validate_human_decision_accepts_valid_payload(self):
+        decision = _validate_human_decision(
+            {"actor": "reviewer@example.com", "decision": "APPROVE"}
+        )
+        assert decision["actor"] == "reviewer@example.com"
+        assert decision["decision"] == "APPROVE"
+        assert "decided_at" in decision
+
+    def test_validate_human_decision_keeps_comment(self):
+        decision = _validate_human_decision(
+            {"actor": "a", "decision": "REJECT", "comment": "motif détaillé"}
+        )
+        assert decision["comment"] == "motif détaillé"
+
+    def test_validate_human_decision_rejects_non_mapping(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision("APPROVE")
+
+    def test_validate_human_decision_rejects_missing_actor(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision({"decision": "APPROVE"})
+
+    def test_validate_human_decision_rejects_blank_actor(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision({"actor": "   ", "decision": "APPROVE"})
+
+    def test_validate_human_decision_rejects_unknown_action(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision({"actor": "a", "decision": "MAYBE"})
+
+    def test_validate_human_decision_needs_more_info_requires_target_node(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision({"actor": "a", "decision": "NEEDS_MORE_INFO"})
+
+    def test_validate_human_decision_needs_more_info_rejects_blank_target_node(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision(
+                {"actor": "a", "decision": "NEEDS_MORE_INFO", "target_node": "   "}
+            )
+
+    def test_validate_human_decision_needs_more_info_keeps_target_node(self):
+        decision = _validate_human_decision(
+            {"actor": "a", "decision": "NEEDS_MORE_INFO", "target_node": "document_ocr"}
+        )
+        assert decision["target_node"] == "document_ocr"
+
+    def test_validate_human_decision_rejects_target_node_with_other_actions(self):
+        with pytest.raises(ValueError):
+            _validate_human_decision(
+                {"actor": "a", "decision": "APPROVE", "target_node": "document_ocr"}
+            )
+
+
+class TestNodeAwaitHumanReview:
+    """Le nœud appelle interrupt() — testé via un graphe LangGraph minimal.
+
+    Appeler node_await_human_review() directement, hors contexte d'exécution
+    LangGraph, lève RuntimeError (interrupt() a besoin du runtime du graphe) :
+    ce comportement est vérifié explicitement plutôt que contourné.
+    """
+
+    def test_direct_call_outside_graph_raises(self):
+        with pytest.raises(RuntimeError):
+            node_await_human_review(_state("CLM-DIRECT"))
+
+    def test_node_name(self):
+        assert node_await_human_review.__name__ == "node_await_human_review"
+
+    def _build_app(self):
+        from langgraph.checkpoint.memory import InMemorySaver
+        from langgraph.graph import END, START, StateGraph
+
+        graph = StateGraph(ClaimState)
+        graph.add_node("await_human_review", node_await_human_review)
+        graph.add_edge(START, "await_human_review")
+        graph.add_edge("await_human_review", END)
+        return graph.compile(checkpointer=InMemorySaver())
+
+    def test_interrupts_with_expected_payload(self):
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-1", "checkpoint_ns": ""}}
+        result = app.invoke(
+            {"case_id": "CLM-INT-1", "alerts": ["confiance limite"], "errors": []},
+            config=config,
+        )
+        assert "__interrupt__" in result
+        payload = result["__interrupt__"][0].value
+        assert payload["case_id"] == "CLM-INT-1"
+        assert payload["motifs"] == ["confiance limite"]
+        assert payload["actions_autorisees"] == list(ALLOWED_HUMAN_ACTIONS)
+
+    def test_resume_with_same_thread_id_completes(self):
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-2", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-2", "alerts": [], "errors": []}, config=config)
+
+        result = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            config=config,
+        )
+        assert "__interrupt__" not in result
+        assert result["human_decision"]["decision"] == "APPROVE"
+        assert result["completed_steps"] == ["await_human_review"]
+
+    def test_resume_needs_more_info_increments_correction_attempts(self):
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-CORR-1", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-CORR-1", "alerts": [], "errors": []}, config=config)
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "decision": "NEEDS_MORE_INFO",
+                    "target_node": "document_ocr",
+                }
+            ),
+            config=config,
+        )
+        assert result["correction_attempts"] == 1
+        assert result["human_decision"]["target_node"] == "document_ocr"
+
+    def test_resume_approve_does_not_touch_correction_attempts(self):
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-CORR-2", "checkpoint_ns": ""}}
+        app.invoke(
+            {"case_id": "CLM-INT-CORR-2", "alerts": [], "errors": [], "correction_attempts": 2},
+            config=config,
+        )
+
+        result = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            config=config,
+        )
+        assert result["correction_attempts"] == 2  # inchangé — APPROVE ne consomme pas d'essai
+
+    def test_correction_attempts_accumulates_across_relaunches(self):
+        """Compteur minimal : chaque NEEDS_MORE_INFO incrémente à partir de
+        la valeur déjà présente dans le state (pas de remise à zéro)."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-CORR-3", "checkpoint_ns": ""}}
+        app.invoke(
+            {"case_id": "CLM-INT-CORR-3", "alerts": [], "errors": [], "correction_attempts": 2},
+            config=config,
+        )
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "decision": "NEEDS_MORE_INFO",
+                    "target_node": "document_ocr",
+                }
+            ),
+            config=config,
+        )
+        assert result["correction_attempts"] == 3
+
+    def test_resume_with_different_thread_id_does_not_resume(self):
+        """Reprendre avec un thread_id différent ne retrouve pas l'interruption
+        en attente : LangGraph ne trouve aucun checkpoint pour ce thread et
+        redémarre une exécution indépendante depuis START, qui réinterrompt
+        aussitôt sur un state vide — la décision fournie n'est jamais
+        appliquée au dossier interrompu. Ceci matérialise l'exigence de
+        stabilité du thread_id entre l'interruption et la reprise.
+        """
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-3", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-3", "alerts": [], "errors": []}, config=config)
+
+        other_config = {"configurable": {"thread_id": "CLM-INT-OTHER", "checkpoint_ns": ""}}
+        result = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            config=other_config,
+        )
+        assert "__interrupt__" in result
+        assert result["__interrupt__"][0].value["case_id"] == "INCONNU"
+        assert "human_decision" not in result
+
+    def test_resume_with_invalid_decision_raises(self):
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-4", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-4", "alerts": [], "errors": []}, config=config)
+
+        with pytest.raises(Exception):
+            app.invoke(Command(resume={"actor": "a", "decision": "MAYBE"}), config=config)
+
+
 # ── TestNodeFailure ───────────────────────────────────────────────────────────
 
 
@@ -224,7 +470,9 @@ class TestNodeFinalize:
 
 
 class TestTechnicalNodeRegistry:
-    EXPECTED_KEYS = {"quarantine", "needs_review", "failure", "finalize"}
+    EXPECTED_KEYS = {
+        "quarantine", "needs_review", "await_human_review", "failure", "finalize",
+    }
 
     def test_registry_contains_all_expected_keys(self):
         assert set(TECHNICAL_NODE_REGISTRY.keys()) == self.EXPECTED_KEYS
@@ -234,9 +482,9 @@ class TestTechnicalNodeRegistry:
             assert callable(fn), f"TECHNICAL_NODE_REGISTRY[{name!r}] n'est pas callable"
 
     def test_technical_nodes_absent_from_agent_registry(self):
-        agent_keys = set(NODE_REGISTRY.keys())
+        agent_keys = set(build_node_registry(build_orchestrator()).keys())
         overlap = self.EXPECTED_KEYS & agent_keys
-        assert not overlap, f"Nœuds techniques trouvés dans NODE_REGISTRY : {overlap}"
+        assert not overlap, f"Nœuds techniques trouvés dans le registre d'agents : {overlap}"
 
     def test_registry_nodes_match_module_attributes(self):
         import graph.technical_nodes as mod

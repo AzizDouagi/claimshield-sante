@@ -120,7 +120,13 @@ class Settings(BaseSettings):
     ocr_min_chars_per_page: int = Field(20, alias="OCR_MIN_CHARS_PER_PAGE")
     ocr_thresholds_version: str = Field("ocr-thresholds-v1", alias="OCR_THRESHOLDS_VERSION")
 
-    @field_validator("claimshield_max_file_size_mb", "claimshield_max_folder_size_mb", "claimshield_max_files_per_folder")
+    @field_validator(
+        "claimshield_max_file_size_mb",
+        "claimshield_max_folder_size_mb",
+        "claimshield_max_files_per_folder",
+        "claimshield_max_correction_attempts",
+        "claimshield_max_node_retry_attempts",
+    )
     @classmethod
     def _doit_etre_positif(cls, v: int, info) -> int:
         if v <= 0:
@@ -144,6 +150,31 @@ class Settings(BaseSettings):
     # ── Audit ─────────────────────────────────────────────────────────────────
     claimshield_audit_dir: Path = Field(
         _PROJECT_ROOT / "logs" / "audit", alias="CLAIMSHIELD_AUDIT_DIR"
+    )
+
+    # ── HITL — route de relance (correction humaine) ─────────────────────────
+    claimshield_max_correction_attempts: int = Field(
+        3,
+        alias="CLAIMSHIELD_MAX_CORRECTION_ATTEMPTS",
+        description=(
+            "Nombre maximal de relances (NEEDS_MORE_INFO) autorisées après "
+            "await_human_review avant de router vers failure — empêche toute "
+            "boucle infinie de corrections."
+        ),
+    )
+
+    # ── Nœuds — retry technique automatique (erreurs transitoires) ──────────
+    claimshield_max_node_retry_attempts: int = Field(
+        3,
+        alias="CLAIMSHIELD_MAX_NODE_RETRY_ATTEMPTS",
+        description=(
+            "Nombre maximal de tentatives (première incluse) pour un nœud "
+            "agent en cas d'erreur technique transitoire (connexion/timeout "
+            "réseau) avant de basculer sur le repli structuré. N'affecte pas "
+            "les erreurs non transitoires (bug, valeur invalide, panne non "
+            "catégorisée), qui échouent immédiatement sans retry — voir "
+            "graph/nodes.py::_TRANSIENT_NODE_EXCEPTIONS."
+        ),
     )
 
     # ── Raccourcis calculés (compat. avec l'ancienne API) ────────────────────

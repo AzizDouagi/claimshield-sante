@@ -11,6 +11,9 @@ Routes disponibles
 ``retry``        — erreur transitoire sur un nœud ; peut être relancé.
 ``failure``      — erreur irrécupérable ; fin du pipeline sans approbation.
 ``end``          — pipeline terminé ; recommandation finale disponible.
+``relancer``     — décision humaine NEEDS_MORE_INFO : reprise au nœud
+                    explicitement demandé (``human_decision.target_node``).
+                    Route dynamique — voir ``route_human_review``.
 
 Utilisation dans workflow.py
 ----------------------------
@@ -35,6 +38,7 @@ from schemas.domain import (
     VerificationStatus,
 )
 from state.claim_state import ClaimState
+from tools.consistency import detect_result_disagreements, has_critical_disagreement
 
 # ── Noms de routes stables ─────────────────────────────────────────────────────
 
@@ -50,6 +54,42 @@ END: Route = "end"
 ALL_ROUTES: frozenset[Route] = frozenset({
     CONTINUE, QUARANTINE, NEEDS_REVIEW, RETRY, FAILURE, END,
 })
+
+# ── Route de relance HITL (après await_human_review) ─────────────────────────
+
+RELANCER = "relancer"
+"""Nom conceptuel de la route de relance. La destination réelle est
+dynamique (nom du nœud demandé par l'humain) — voir ``route_human_review``."""
+
+RELAUNCH_TARGETS: frozenset[str] = frozenset({
+    "claim_intake",
+    "security_gate",
+    "privacy",
+    "document_ocr",
+    "fhir_validator",
+    "identity_coverage",
+    "medical_coding",
+})
+"""Nœuds vers lesquels une correction humaine (NEEDS_MORE_INFO) peut relancer
+le pipeline. N'inclut ni les nœuds techniques (quarantine, needs_review,
+await_human_review, failure, finalize) ni les stubs non évalués en aval
+(clinical_consistency, fraud_detection, case_reviewer, audit)."""
+
+RELAUNCH_RESULT_FIELDS: dict[str, str] = {
+    "claim_intake": "intake_result",
+    "security_gate": "security_result",
+    "privacy": "privacy_result",
+    "document_ocr": "ocr_result",
+    "fhir_validator": "fhir_result",
+    "identity_coverage": "identity_coverage_result",
+    "medical_coding": "coding_result",
+}
+"""Champ ``*_result`` prouvant qu'un nœud relançable a déjà tourné pour ce
+dossier. Utilisé comme précondition par ``route_human_review`` plutôt que
+``completed_steps`` : certains nœuds y écrivent sous un ``step_name``
+différent du nom du nœud dans le graphe (ex. document_ocr → « document_ocr_agent »,
+fhir_validator → « fhir_validation »), alors que le champ ``*_result`` est
+toujours écrit sous le nom stable de son propre agent."""
 
 
 # ── Helper interne ────────────────────────────────────────────────────────────
@@ -265,6 +305,29 @@ def route_verification_fan_in(state: ClaimState) -> Route:
     return CONTINUE
 
 
+def route_result_consistency(state: ClaimState) -> Route:
+    """Route générique de cohérence entre résultats déjà validés.
+
+    Détecte les désaccords génériques (``tools.consistency`` — champ
+    ``status`` commun à plusieurs schémas de résultat, aucune logique
+    clinique ou anti-fraude propre à l'étape 12) :
+
+    Désaccord critique (ex. un résultat PASS, un autre FAIL sur le même
+    dossier) → needs_review, avec les références du désaccord disponibles
+    via ``tools.consistency.detect_result_disagreements(state)`` pour la
+    revue humaine.
+    Désaccord mineur (écart d'un cran, ex. PASS vs NEEDS_REVIEW) ou absence
+    de désaccord → continue : ne bloque pas le pipeline.
+
+    Ne choisit jamais quel résultat est correct — cette fonction ne fait que
+    signaler, jamais arbitrer ni corriger un résultat existant.
+    """
+    disagreements = detect_result_disagreements(state)
+    if has_critical_disagreement(disagreements):
+        return NEEDS_REVIEW
+    return CONTINUE
+
+
 def route_review(state: ClaimState) -> Route:
     """Route après case_reviewer_agent.
 
@@ -288,4 +351,51 @@ def route_review(state: ClaimState) -> Route:
         return END
     if rec is Recommendation.PENDING:
         return NEEDS_REVIEW
+    return FAILURE
+
+
+def route_human_review(state: ClaimState, *, max_attempts: int) -> str:
+    """Route après await_human_review — décision humaine validée.
+
+    APPROVE          → end     (décision humaine favorable, pipeline clos)
+    REJECT           → failure (décision humaine défavorable, REJECT final)
+    NEEDS_MORE_INFO  → route de relance (« relancer ») : reprise au nœud
+                       explicitement demandé par l'humain
+                       (``human_decision.target_node``), à condition que :
+                         - ce nœud fasse partie de ``RELAUNCH_TARGETS`` ;
+                         - ce nœud ait déjà produit un résultat pour ce
+                           dossier (``state[RELAUNCH_RESULT_FIELDS[target_node]]
+                           is not None``) — précondition minimale : on ne
+                           relance jamais un agent qui n'a jamais tourné pour
+                           ce dossier, ses propres préconditions (résultats
+                           amont) ne sont alors pas garanties disponibles ;
+                         - le compteur ``correction_attempts`` (incrémenté
+                           par ``node_await_human_review`` à chaque
+                           NEEDS_MORE_INFO) ne dépasse pas ``max_attempts``.
+                       Si l'une de ces conditions échoue (nœud hors périmètre,
+                       jamais exécuté, ou limite dépassée) → failure : l'agent
+                       cible n'est jamais exécuté sans ses préconditions.
+
+    Contrairement aux autres fonctions de routage, la valeur retournée pour
+    une relance n'est pas une route fixe du type ``Route`` : c'est le nom du
+    nœud cible lui-même (utilisé tel quel dans le ``path_map`` de
+    ``add_conditional_edges``).
+    """
+    decision = state.get("human_decision")
+    if not decision:
+        return FAILURE
+
+    outcome = decision.get("decision")
+    if outcome == "APPROVE":
+        return END
+    if outcome == "REJECT":
+        return FAILURE
+    if outcome == "NEEDS_MORE_INFO":
+        target_node = decision.get("target_node")
+        attempts = state.get("correction_attempts", 0)
+        result_field = RELAUNCH_RESULT_FIELDS.get(target_node)
+        precondition_met = result_field is not None and state.get(result_field) is not None
+        if target_node in RELAUNCH_TARGETS and precondition_met and attempts <= max_attempts:
+            return target_node
+        return FAILURE
     return FAILURE

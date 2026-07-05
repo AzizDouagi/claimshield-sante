@@ -10,7 +10,6 @@ Couvre :
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,17 +33,7 @@ from agents.fraud_detection_agent.agent import (
     _NotImplementedStub as FraudStub,
     make_node as make_fraud_node,
 )
-from graph.nodes import (
-    NODE_REGISTRY,
-    make_node_audit,
-    make_node_case_reviewer,
-    make_node_clinical_consistency,
-    make_node_fraud_detection,
-    node_audit,
-    node_case_reviewer,
-    node_clinical_consistency,
-    node_fraud_detection,
-)
+from graph.nodes import build_node_registry, build_orchestrator
 from schemas.domain import Recommendation, VerificationStatus
 from schemas.results import (
     AuditResult,
@@ -229,7 +218,6 @@ class TestStubDefaults:
 
     def test_audit_stub_counts_existing_trail(self):
         from schemas.results import AuditEvent
-        from datetime import datetime, UTC
         events = [
             AuditEvent(event_id="1", case_id="CLM-0001", actor="a", action="x", outcome="ok"),
             AuditEvent(event_id="2", case_id="CLM-0001", actor="b", action="y", outcome="ok"),
@@ -368,86 +356,98 @@ class TestMakeNodeInjection:
             assert step in updates["completed_steps"], f"{step} absent de completed_steps"
 
 
-# ── 5. graph/nodes.py — nœuds stubs par défaut ────────────────────────────────
+# ── 5. graph/nodes.py — nœuds stubs par défaut (via l'orchestrateur) ────────
 
 
 class TestGraphNodeStubDefaults:
     def test_node_clinical_consistency_not_evaluated(self):
-        updates = node_clinical_consistency(_state())
+        node_fn = build_node_registry(build_orchestrator())["clinical_consistency"]
+        updates = node_fn(_state())
         assert updates["clinical_result"].status is VerificationStatus.NOT_EVALUATED
 
     def test_node_fraud_detection_not_evaluated(self):
-        updates = node_fraud_detection(_state())
+        node_fn = build_node_registry(build_orchestrator())["fraud_detection"]
+        updates = node_fn(_state())
         assert updates["fraud_result"].status is VerificationStatus.NOT_EVALUATED
 
     def test_node_case_reviewer_pending(self):
-        updates = node_case_reviewer(_state())
+        node_fn = build_node_registry(build_orchestrator())["case_reviewer"]
+        updates = node_fn(_state())
         assert updates["review_result"].recommendation is Recommendation.PENDING
 
     def test_node_audit_not_evaluated(self):
-        updates = node_audit(_state())
+        node_fn = build_node_registry(build_orchestrator())["audit"]
+        updates = node_fn(_state())
         assert updates["audit_result"].status is VerificationStatus.NOT_EVALUATED
 
 
-# ── 6. graph/nodes.py — make_node_<name> factories ───────────────────────────
+# ── 6. graph/nodes.py — injection d'implémentation via build_orchestrator ───
 
 
 class TestGraphNodeFactories:
-    def test_make_node_clinical_with_impl_returns_pass(self):
-        node_fn = make_node_clinical_consistency(_ClinicalPass())
+    def test_clinical_with_impl_returns_pass(self):
+        orchestrator = build_orchestrator(clinical_consistency_impl=_ClinicalPass())
+        node_fn = build_node_registry(orchestrator)["clinical_consistency"]
         updates = node_fn(_state())
         assert updates["clinical_result"].status is VerificationStatus.PASS
 
-    def test_make_node_fraud_with_impl_returns_pass(self):
-        node_fn = make_node_fraud_detection(_FraudPass())
+    def test_fraud_with_impl_returns_pass(self):
+        orchestrator = build_orchestrator(fraud_detection_impl=_FraudPass())
+        node_fn = build_node_registry(orchestrator)["fraud_detection"]
         updates = node_fn(_state())
         assert updates["fraud_result"].status is VerificationStatus.PASS
 
-    def test_make_node_case_reviewer_with_impl_returns_approve(self):
-        node_fn = make_node_case_reviewer(_ReviewApprove())
+    def test_case_reviewer_with_impl_returns_approve(self):
+        orchestrator = build_orchestrator(case_reviewer_impl=_ReviewApprove())
+        node_fn = build_node_registry(orchestrator)["case_reviewer"]
         updates = node_fn(_state())
         assert updates["review_result"].recommendation is Recommendation.APPROVE
 
-    def test_make_node_audit_with_impl_returns_pass(self):
-        node_fn = make_node_audit(_AuditPass())
+    def test_audit_with_impl_returns_pass(self):
+        orchestrator = build_orchestrator(audit_impl=_AuditPass())
+        node_fn = build_node_registry(orchestrator)["audit"]
         updates = node_fn(_state())
         assert updates["audit_result"].status is VerificationStatus.PASS
 
-    def test_make_node_none_impl_uses_stub(self):
-        node_fn = make_node_clinical_consistency(None)
+    def test_none_impl_uses_stub(self):
+        orchestrator = build_orchestrator(clinical_consistency_impl=None)
+        node_fn = build_node_registry(orchestrator)["clinical_consistency"]
         updates = node_fn(_state())
         assert updates["clinical_result"].status is VerificationStatus.NOT_EVALUATED
 
-    def test_make_node_exception_isolated(self):
+    def test_exception_isolated(self):
         class Crasher:
             def run(self, state):
                 raise RuntimeError("boom")
 
-        node_fn = make_node_clinical_consistency(Crasher())
+        orchestrator = build_orchestrator(clinical_consistency_impl=Crasher())
+        node_fn = build_node_registry(orchestrator)["clinical_consistency"]
         updates = node_fn(_state())
         assert updates.get("errors")
         assert "clinical_consistency" in updates["errors"][0]
 
-    def test_make_node_fraud_exception_isolated(self):
+    def test_fraud_exception_isolated(self):
         class Crasher:
             def run(self, state):
                 raise ValueError("bad input")
 
-        node_fn = make_node_fraud_detection(Crasher())
+        orchestrator = build_orchestrator(fraud_detection_impl=Crasher())
+        node_fn = build_node_registry(orchestrator)["fraud_detection"]
         updates = node_fn(_state())
         assert updates.get("errors")
 
-    def test_make_node_case_reviewer_exception_isolated(self):
+    def test_case_reviewer_exception_isolated(self):
         class Crasher:
             def run(self, state):
                 raise OSError("network down")
 
-        node_fn = make_node_case_reviewer(Crasher())
+        orchestrator = build_orchestrator(case_reviewer_impl=Crasher())
+        node_fn = build_node_registry(orchestrator)["case_reviewer"]
         updates = node_fn(_state())
         assert updates.get("errors")
 
 
-# ── 7. NODE_REGISTRY — complétude et stabilité des noms ──────────────────────
+# ── 7. build_node_registry — complétude et stabilité des noms ───────────────
 
 
 class TestNodeRegistryCompleteness:
@@ -459,22 +459,27 @@ class TestNodeRegistryCompleteness:
     }
 
     def test_registry_has_eleven_entries(self):
-        assert len(NODE_REGISTRY) == 11
+        registry = build_node_registry(build_orchestrator())
+        assert len(registry) == 11
 
     def test_registry_contains_all_expected_keys(self):
-        assert set(NODE_REGISTRY.keys()) == self.ALL_EXPECTED
+        registry = build_node_registry(build_orchestrator())
+        assert set(registry.keys()) == self.ALL_EXPECTED
 
     @pytest.mark.parametrize("key", list(ALL_EXPECTED))
     def test_all_entries_are_callable(self, key):
-        assert callable(NODE_REGISTRY[key])
+        registry = build_node_registry(build_orchestrator())
+        assert callable(registry[key])
 
     def test_stub_nodes_names_stable(self):
-        assert NODE_REGISTRY["clinical_consistency"].__name__ == "node_clinical_consistency"
-        assert NODE_REGISTRY["fraud_detection"].__name__ == "node_fraud_detection"
-        assert NODE_REGISTRY["case_reviewer"].__name__ == "node_case_reviewer"
-        assert NODE_REGISTRY["audit"].__name__ == "node_audit"
+        registry = build_node_registry(build_orchestrator())
+        assert registry["clinical_consistency"].__name__ == "node_clinical_consistency"
+        assert registry["fraud_detection"].__name__ == "node_fraud_detection"
+        assert registry["case_reviewer"].__name__ == "node_case_reviewer"
+        assert registry["audit"].__name__ == "node_audit"
 
     @pytest.mark.parametrize("key", list(ALL_EXPECTED))
     def test_each_node_returns_dict_on_empty_state(self, key):
-        result = NODE_REGISTRY[key]({})
+        registry = build_node_registry(build_orchestrator())
+        result = registry[key]({})
         assert isinstance(result, dict)

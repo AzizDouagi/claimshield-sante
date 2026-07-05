@@ -18,13 +18,17 @@ from graph.edges import (
     FAILURE,
     NEEDS_REVIEW,
     QUARANTINE,
+    RELAUNCH_RESULT_FIELDS,
+    RELAUNCH_TARGETS,
     RETRY,
     route_coding,
     route_fhir,
+    route_human_review,
     route_identity_coverage,
     route_intake,
     route_ocr,
     route_privacy,
+    route_result_consistency,
     route_review,
     route_security,
     route_verification_fan_in,
@@ -388,6 +392,51 @@ class TestRouteVerificationFanIn:
         assert route_verification_fan_in(state) == FAILURE
 
 
+# ── 9bis. route_result_consistency ────────────────────────────────────────────
+
+
+class TestRouteResultConsistency:
+    def test_agreement_returns_continue(self):
+        state = {
+            "fhir_result": SimpleNamespace(status="PASS"),
+            "coding_result": SimpleNamespace(status="PASS"),
+        }
+        assert route_result_consistency(state) == CONTINUE
+
+    def test_no_results_returns_continue(self):
+        """Rien à comparer n'est pas une raison de bloquer le pipeline."""
+        assert route_result_consistency({}) == CONTINUE
+
+    def test_minor_disagreement_returns_continue(self):
+        """Un écart d'un cran (PASS vs NEEDS_REVIEW) est signalé mais ne
+        bloque pas — seul un désaccord critique route vers needs_review."""
+        state = {
+            "fhir_result": SimpleNamespace(status="PASS"),
+            "coding_result": SimpleNamespace(status="NEEDS_REVIEW"),
+        }
+        assert route_result_consistency(state) == CONTINUE
+
+    def test_critical_disagreement_returns_needs_review(self):
+        state = {
+            "fhir_result": SimpleNamespace(status="PASS"),
+            "coding_result": SimpleNamespace(status="FAIL"),
+        }
+        assert route_result_consistency(state) == NEEDS_REVIEW
+
+    def test_critical_disagreement_route_never_alters_source_results(self):
+        """Le routage se contente de signaler — il ne modifie jamais les
+        résultats source ni ne choisit lequel est correct."""
+        fhir_result = SimpleNamespace(status="PASS")
+        coding_result = SimpleNamespace(status="FAIL")
+        state = {"fhir_result": fhir_result, "coding_result": coding_result}
+
+        route = route_result_consistency(state)
+
+        assert route == NEEDS_REVIEW
+        assert fhir_result.status == "PASS"
+        assert coding_result.status == "FAIL"
+
+
 # ── 10. route_review ──────────────────────────────────────────────────────────
 
 
@@ -415,6 +464,100 @@ class TestRouteReview:
         assert route_review(state) == FAILURE
 
 
+# ── 11bis. route_human_review — route de relance (« relancer ») ──────────────
+
+
+def _human_review_state(
+    decision: str | None,
+    *,
+    target_node: str | None = None,
+    correction_attempts: int = 0,
+    target_has_run: bool = True,
+) -> dict:
+    """``target_has_run`` place un ``*_result`` non None pour ``target_node``,
+    simulant qu'il a déjà été exécuté pour ce dossier — précondition exigée
+    par ``route_human_review`` avant toute relance."""
+    if decision is None:
+        return {"correction_attempts": correction_attempts}
+    human_decision = {"actor": "reviewer@example.com", "decision": decision}
+    if target_node is not None:
+        human_decision["target_node"] = target_node
+    state = {"human_decision": human_decision, "correction_attempts": correction_attempts}
+    if target_node is not None and target_has_run:
+        result_field = RELAUNCH_RESULT_FIELDS.get(target_node)
+        if result_field is not None:
+            state[result_field] = SimpleNamespace(status="NEEDS_REVIEW")
+    return state
+
+
+class TestRouteHumanReview:
+    def test_approve_returns_end(self):
+        state = _human_review_state("APPROVE")
+        assert route_human_review(state, max_attempts=3) == END
+
+    def test_reject_returns_failure(self):
+        state = _human_review_state("REJECT")
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_needs_more_info_under_limit_returns_target_node(self):
+        state = _human_review_state(
+            "NEEDS_MORE_INFO", target_node="document_ocr", correction_attempts=1
+        )
+        assert route_human_review(state, max_attempts=3) == "document_ocr"
+
+    def test_needs_more_info_at_limit_returns_target_node(self):
+        """attempts == max_attempts est encore autorisé (limite inclusive)."""
+        state = _human_review_state(
+            "NEEDS_MORE_INFO", target_node="fhir_validator", correction_attempts=3
+        )
+        assert route_human_review(state, max_attempts=3) == "fhir_validator"
+
+    def test_needs_more_info_beyond_limit_returns_failure(self):
+        state = _human_review_state(
+            "NEEDS_MORE_INFO", target_node="document_ocr", correction_attempts=4
+        )
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_needs_more_info_unknown_target_node_returns_failure(self):
+        state = _human_review_state(
+            "NEEDS_MORE_INFO", target_node="finalize", correction_attempts=1
+        )
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_needs_more_info_missing_target_node_returns_failure(self):
+        state = _human_review_state("NEEDS_MORE_INFO", correction_attempts=1)
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_needs_more_info_never_ran_returns_failure(self):
+        """Précondition : on ne relance jamais un nœud sans résultat existant
+        pour ce dossier — même s'il appartient à RELAUNCH_TARGETS et que le
+        compteur est sous la limite."""
+        state = _human_review_state(
+            "NEEDS_MORE_INFO",
+            target_node="medical_coding",
+            correction_attempts=1,
+            target_has_run=False,
+        )
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_missing_human_decision_returns_failure(self):
+        assert route_human_review({}, max_attempts=3) == FAILURE
+
+    def test_unknown_decision_returns_failure(self):
+        state = _human_review_state("MAYBE")
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_relaunch_result_fields_cover_all_targets(self):
+        assert set(RELAUNCH_RESULT_FIELDS.keys()) == RELAUNCH_TARGETS
+
+    def test_all_relaunch_targets_are_agent_nodes(self):
+        expected = {
+            "claim_intake", "security_gate", "privacy", "document_ocr",
+            "fhir_validator", "identity_coverage", "medical_coding",
+        }
+        assert RELAUNCH_TARGETS == expected
+
+
 # ── 11. Invariants transversaux ───────────────────────────────────────────────
 
 
@@ -431,6 +574,7 @@ class TestRouteInvariants:
         route_review,
         route_verification_fan_in,
         route_identity_coverage,
+        route_result_consistency,
     ]
 
     @pytest.mark.parametrize("fn", FUNCTIONS)
