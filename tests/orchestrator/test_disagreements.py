@@ -16,17 +16,26 @@ médicale ou financière finale (recommandation, montant de couverture, statut
 de fraude...) n'est jamais générée par ce mécanisme — il ne fait que
 signaler, jamais arbitrer.
 
-Aucun appel LLM : les exécuteurs d'agents enregistrés sont de simples
-fonctions Python retournant des résultats Pydantic construits à la main.
+Aucun appel LLM réel : les exécuteurs d'agents enregistrés sont de simples
+fonctions Python retournant des résultats Pydantic construits à la main avec
+une trace LLM synthétique minimale.
 """
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 from orchestrator.executor import Orchestrator
 from orchestrator.model_registry import ModelRegistry
 from orchestrator.orchestrator import AgentCallRequest, AgentName
 from orchestrator.policies import PolicyDecision, PolicyEffect
 from schemas.domain import VerificationStatus
-from schemas.results import DisagreementPoint, FhirValidatorResult, FraudDetectionResult, StructuredError
+from schemas.results import (
+    DisagreementPoint,
+    FhirValidatorResult,
+    FraudDetectionResult,
+    LlmMetadata,
+    StructuredError,
+)
 from tools.consistency import detect_result_disagreements, has_critical_disagreement
 from graph.edges import CONTINUE, NEEDS_REVIEW, route_result_consistency
 
@@ -51,13 +60,19 @@ def _request(agent_name: AgentName, current_step: str, requested_model: str) -> 
 def _permissive_orchestrator(agent_registry: dict) -> Orchestrator:
     """Orchestrateur dont préconditions/modèle/outils autorisent toujours —
     isole le comportement à tester (production de résultats synthétiques,
-    jamais un appel LLM) des contrôles de permission déjà testés ailleurs."""
+    jamais un appel LLM) des contrôles de permission déjà testés ailleurs.
+
+    ``tools_check`` retourne un outil factice non vide : certains agents
+    génériques utilisés ici (ex. ``fraud_detection``) exigent désormais la
+    capacité ``TOOL_CALLING`` — un tuple vide serait refusé
+    (``NO_AUTHORIZED_TOOLS``) avant même d'atteindre l'agent synthétique.
+    """
     return Orchestrator(
         model_registry=ModelRegistry(),
         agent_registry=agent_registry,
         preconditions_check=lambda state, request: _allow(),
         model_check=lambda registry, agent_name, model_id: _allow(),
-        tools_check=lambda agent_name: (),
+        tools_check=lambda agent_name: (SimpleNamespace(name="synthetic-tool"),),
     )
 
 
@@ -73,7 +88,10 @@ def _fhir_runner(status: VerificationStatus):
     def _runner(state: dict) -> dict:
         return {
             "fhir_result": FhirValidatorResult(
-                case_id=state["case_id"], status=status, bundle_expected=True
+                case_id=state["case_id"],
+                status=status,
+                bundle_expected=True,
+                llm_metadata=LlmMetadata(model_name="synthetic-llm", prompt_version="test"),
             )
         }
 
@@ -82,7 +100,13 @@ def _fhir_runner(status: VerificationStatus):
 
 def _fraud_runner(status: VerificationStatus):
     def _runner(state: dict) -> dict:
-        return {"fraud_result": FraudDetectionResult(case_id=state["case_id"], status=status)}
+        return {
+            "fraud_result": FraudDetectionResult(
+                case_id=state["case_id"],
+                status=status,
+                llm_trace=LlmMetadata(model_name="synthetic-llm", prompt_version="test"),
+            )
+        }
 
     return _runner
 

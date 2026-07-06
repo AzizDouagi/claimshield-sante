@@ -138,9 +138,17 @@ def run(
             message="Le dossier de demande ne contient aucun fichier",
             field="source_path",
         )
-        result = _blocked_result(case_id, received_at, depositor_id, [err], ["Dossier vide refusé"])
-        svc.write_intake_manifest(case_id, result.manifest.model_dump_json(indent=2))
-        return result
+        return _finalize_with_llm(
+            case_id=case_id,
+            manifest=_blocked_manifest(case_id, received_at, depositor_id, [err]),
+            service=svc,
+            accepted_count=0,
+            quarantined_count=0,
+            duplicate_count=0,
+            error_count=0,
+            reasons=["Dossier vide refusé"],
+            errors=[err],
+        )
 
     if len(candidate_files) > s.max_files_per_folder:
         err = StructuredError(
@@ -151,9 +159,17 @@ def run(
             ),
             field="source_path",
         )
-        result = _blocked_result(case_id, received_at, depositor_id, [err], [err.message])
-        svc.write_intake_manifest(case_id, result.manifest.model_dump_json(indent=2))
-        return result
+        return _finalize_with_llm(
+            case_id=case_id,
+            manifest=_blocked_manifest(case_id, received_at, depositor_id, [err]),
+            service=svc,
+            accepted_count=0,
+            quarantined_count=0,
+            duplicate_count=0,
+            error_count=0,
+            reasons=[err.message],
+            errors=[err],
+        )
 
     # ── Étape 2 : traitement fichier par fichier ─────────────────────────────
 
@@ -352,67 +368,16 @@ def run(
         alerts=alerts,
     )
 
-    # ── Phase B : LLM — statut et motifs enrichis ────────────────────────────
-    file_summaries = [
-        {
-            "nom": f.original_name,
-            "statut": f.status.value,
-            "mime": f.detected_mime_type,
-            "taille": f.actual_size,
-        }
-        for f in inspected_files
-    ]
-    llm_decision = _invoke_llm_intake(
-        case_id=case_id,
-        global_status=global_status.value,
-        file_count=len(inspected_files),
-        accepted_count=len(accepted),
-        quarantined_count=len(quarantined),
-        duplicate_count=len(duplicate),
-        error_count=len(errored),
-        alerts=alerts,
-        file_summaries=file_summaries,
-    )
-
-    if llm_decision is None:
-        llm_error = StructuredError(
-            code=IntakeReasonCode.LLM_OUTPUT_INVALID,
-            message=(
-                "Sortie LLM invalide ou indisponible : "
-                "décision d'ingestion impossible"
-            ),
-            field="llm_output",
-        )
-        global_status = IntakeStatus.ERROR
-        reasons = ["LLM indisponible : décision d'ingestion impossible."]
-        errors.append(llm_error)
-    else:
-        llm_status_map = {
-            "ACCEPTED": IntakeStatus.ACCEPTED,
-            "QUARANTINED": IntakeStatus.QUARANTINED,
-            "BLOCKED": IntakeStatus.BLOCKED,
-            "ERROR": IntakeStatus.ERROR,
-        }
-        global_status = llm_status_map.get(llm_decision.status, global_status)
-        if llm_decision.reasons:
-            reasons = llm_decision.reasons
-
-    # ── Phase C : persistance et résultat ────────────────────────────────────
-    if manifest.status != global_status:
-        manifest = manifest.model_copy(update={"status": global_status})
-    svc.write_intake_manifest(case_id, manifest.model_dump_json(indent=2))
-
-    return ClaimIntakeResult(
+    return _finalize_with_llm(
         claim_id=case_id,
-        status=global_status,
         manifest=manifest,
+        service=svc,
         accepted_count=len(accepted),
         quarantined_count=len(quarantined),
         duplicate_count=len(duplicate),
         error_count=len(errored),
         reasons=reasons,
         errors=errors,
-        llm_metadata=build_llm_metadata(_AGENT_NAME),
     )
 
 
@@ -465,15 +430,14 @@ def node(state: ClaimState) -> dict:
 # ── Helpers internes ──────────────────────────────────────────────────────────
 
 
-def _blocked_result(
+def _blocked_manifest(
     case_id: str,
     received_at: datetime,
     depositor_id: str | None,
     errors: list[StructuredError],
-    reasons: list[str],
-) -> ClaimIntakeResult:
-    """Construit un ClaimIntakeResult BLOCKED lors d'un échec de validation précoce."""
-    manifest = ClaimManifest(
+) -> ClaimManifest:
+    """Construit un manifest BLOCKED lors d'un échec de validation précoce."""
+    return ClaimManifest(
         claim_id=case_id,
         received_at=received_at,
         depositor_id=depositor_id,
@@ -483,12 +447,92 @@ def _blocked_result(
         status=IntakeStatus.BLOCKED,
         alerts=[e.message for e in errors],
     )
+
+
+def _finalize_with_llm(
+    *,
+    case_id: str | None = None,
+    claim_id: str | None = None,
+    manifest: ClaimManifest,
+    service: StorageService,
+    accepted_count: int,
+    quarantined_count: int,
+    duplicate_count: int,
+    error_count: int,
+    reasons: list[str],
+    errors: list[StructuredError],
+) -> ClaimIntakeResult:
+    """Appelle le LLM puis construit le résultat final.
+
+    Tous les chemins de ``run()`` passent ici afin qu'aucun résultat d'ingestion
+    valide ne soit purement déterministe. Si le LLM ne produit pas une réponse
+    structurée exploitable, la sortie est forcée en ERROR avec une erreur
+    structurée fail-closed.
+    """
+    final_case_id = claim_id or case_id or manifest.claim_id
+    llm_metadata = build_llm_metadata(_AGENT_NAME)
+    file_summaries = [
+        {
+            "nom": f.original_name,
+            "statut": f.status.value,
+            "mime": f.detected_mime_type,
+            "taille": f.actual_size,
+        }
+        for f in manifest.files
+    ]
+    llm_decision = _invoke_llm_intake(
+        case_id=final_case_id,
+        global_status=manifest.status.value,
+        file_count=manifest.file_count,
+        accepted_count=accepted_count,
+        quarantined_count=quarantined_count,
+        duplicate_count=duplicate_count,
+        error_count=error_count,
+        alerts=manifest.alerts,
+        file_summaries=file_summaries,
+    )
+
+    final_status = manifest.status
+    final_reasons = list(reasons)
+    final_errors = list(errors)
+
+    if llm_decision is None:
+        final_status = IntakeStatus.ERROR
+        final_reasons = ["LLM indisponible ou réponse invalide : décision d'ingestion impossible."]
+        final_errors.append(
+            StructuredError(
+                code=IntakeReasonCode.LLM_OUTPUT_INVALID,
+                message=(
+                    "LLM indisponible ou réponse invalide : "
+                    "décision d'ingestion impossible"
+                ),
+                field="llm_output",
+            )
+        )
+    else:
+        llm_status_map = {
+            "ACCEPTED": IntakeStatus.ACCEPTED,
+            "QUARANTINED": IntakeStatus.QUARANTINED,
+            "BLOCKED": IntakeStatus.BLOCKED,
+            "ERROR": IntakeStatus.ERROR,
+        }
+        final_status = llm_status_map.get(llm_decision.status, manifest.status)
+        if llm_decision.reasons:
+            final_reasons = llm_decision.reasons
+
+    if manifest.status != final_status:
+        manifest = manifest.model_copy(update={"status": final_status})
+    service.write_intake_manifest(final_case_id, manifest.model_dump_json(indent=2))
+
     return ClaimIntakeResult(
-        claim_id=case_id,
-        status=IntakeStatus.BLOCKED,
+        claim_id=final_case_id,
+        status=final_status,
         manifest=manifest,
-        accepted_count=0,
-        quarantined_count=0,
-        reasons=reasons,
-        errors=errors,
+        accepted_count=accepted_count,
+        quarantined_count=quarantined_count,
+        duplicate_count=duplicate_count,
+        error_count=error_count,
+        reasons=final_reasons,
+        errors=final_errors,
+        llm_metadata=llm_metadata,
     )

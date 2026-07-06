@@ -4,7 +4,7 @@ Agent LLM (gemma4:latest via ChatOllama) avec tools SNOMED-CT/RxNorm.
 
 Pipeline :
   Phase A — correspondance déterministe (lookup exact + synonymes)
-  Phase B — agent ReAct LLM pour les descriptions NEEDS_REVIEW
+  Phase B — agent ReAct LLM à chaque exécution pour valider/justifier
   Phase C — fusion et construction de MedicalCodingResult
 """
 from __future__ import annotations
@@ -48,8 +48,17 @@ def _get_table_version() -> str:
         return "1.1.0"
 
 
-def _invoke_llm_react(needs_review: list[ProcedureCoding], already_coded: list[ProcedureCoding]) -> LlmCodingDecision | None:
-    """Lance l'agent ReAct LLM pour résoudre les descriptions NEEDS_REVIEW."""
+def _invoke_llm_react(
+    needs_review: list[ProcedureCoding],
+    already_coded: list[ProcedureCoding],
+) -> LlmCodingDecision | None:
+    """Lance l'agent ReAct LLM pour valider/justifier toute codification.
+
+    Les descriptions déjà codées sont transmises au LLM pour justification,
+    mais leurs codes restent ceux du référentiel local. Les descriptions en
+    NEEDS_REVIEW peuvent recevoir une proposition LLM, acceptée uniquement si
+    elle existe dans le référentiel local actif.
+    """
     try:
         llm = get_llm()
         agent = create_react_agent(
@@ -132,7 +141,7 @@ def run(
     """Code les procédures et médicaments du dossier via LLM + table locale.
 
     Phase A : correspondance déterministe (exact + synonymes).
-    Phase B : agent ReAct LLM pour les cas NEEDS_REVIEW restants.
+    Phase B : agent ReAct LLM obligatoire pour validation/justification.
     Phase C : fusion et construction du résultat.
     """
     procedures = procedures or []
@@ -151,10 +160,20 @@ def run(
     needs_review = [c for c in initial_codings if c.status == VerificationStatus.NEEDS_REVIEW]
     already_coded = [c for c in initial_codings if c.status == VerificationStatus.PASS]
 
-    # ── Phase B : agent ReAct LLM (seulement si des cas NEEDS_REVIEW existent) ─
-    llm_decision: LlmCodingDecision | None = None
-    if needs_review:
-        llm_decision = _invoke_llm_react(needs_review, already_coded)
+    # ── Phase B : agent ReAct LLM obligatoire ────────────────────────────────
+    llm_metadata = build_llm_metadata(_AGENT_NAME)
+    llm_decision = _invoke_llm_react(needs_review, already_coded)
+    if llm_decision is None:
+        return MedicalCodingResult(
+            case_id=case_id,
+            status=VerificationStatus.FAIL,
+            codings=initial_codings,
+            table_version=_get_table_version(),
+            reasons=[
+                "LLM indisponible ou réponse invalide : codification interrompue en fail-closed."
+            ],
+            llm_metadata=llm_metadata,
+        )
 
     # ── Phase C : fusion + résultat ───────────────────────────────────────────
     final_codings = _merge_with_llm(initial_codings, llm_decision, section_by_description)
@@ -165,8 +184,8 @@ def run(
     else:
         status = compute_global_status(final_codings)
         if status == VerificationStatus.PASS:
-            rationale = llm_decision.overall_rationale if llm_decision else ""
-            reasons = ["Toutes les descriptions ont une correspondance exacte."]
+            rationale = llm_decision.overall_rationale
+            reasons = ["Toutes les descriptions ont une correspondance référentielle validée par LLM."]
             if rationale:
                 reasons.append(rationale)
         elif status == VerificationStatus.NEEDS_REVIEW:
@@ -175,8 +194,12 @@ def run(
                 "Codification incomplète — code non déterminé, revue humaine requise pour : "
                 + ", ".join(unresolved[:10])
             ]
+            if llm_decision.overall_rationale:
+                reasons.append(llm_decision.overall_rationale)
         else:
             reasons = ["Codification échouée."]
+            if llm_decision.overall_rationale:
+                reasons.append(llm_decision.overall_rationale)
 
     return MedicalCodingResult(
         case_id=case_id,
@@ -184,7 +207,7 @@ def run(
         codings=final_codings,
         table_version=_get_table_version(),
         reasons=reasons,
-        llm_metadata=build_llm_metadata(_AGENT_NAME) if needs_review else None,
+        llm_metadata=llm_metadata,
     )
 
 
@@ -200,6 +223,7 @@ def node(state: ClaimState) -> dict:
             codings=[],
             table_version=_get_table_version(),
             reasons=["coding_input absent du state."],
+            llm_metadata=build_llm_metadata(_AGENT_NAME),
         )
         updates = _build_updates(case_id, result, fail=True)
         validate_state_update(updates)
@@ -215,6 +239,7 @@ def node(state: ClaimState) -> dict:
             codings=[],
             table_version=_get_table_version(),
             reasons=[f"coding_input invalide : {exc}"],
+            llm_metadata=build_llm_metadata(_AGENT_NAME),
         )
         updates = _build_updates(case_id, result, fail=True)
         validate_state_update(updates)

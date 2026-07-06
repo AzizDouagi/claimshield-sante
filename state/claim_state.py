@@ -133,8 +133,11 @@ class ClaimState(TypedDict, total=False):
         via ``langgraph.types.interrupt()`` et une reprise ``Command(resume=...)``.
         Aucun agent ne doit écrire ce champ.
 
-    **Décision finale** (final_recommendation, final_justification) :
-        Remplis par ``case_reviewer_agent`` en fin de workflow.
+    **Pré-recommandation / décision finale** (final_recommendation,
+    final_justification) :
+        ``case_reviewer_agent`` écrit une pré-recommandation non finale.
+        Les nœuds terminaux et la revue humaine déterminent ensuite l'issue
+        finale du workflow.
 
     Reducers utilisés
     -----------------
@@ -269,7 +272,7 @@ class ClaimState(TypedDict, total=False):
     # pour empêcher toute boucle infinie de corrections.
     correction_attempts: int
 
-    # ── Recommandation finale ─────────────────────────────────────────────────
+    # ── Pré-recommandation / recommandation finale ────────────────────────────
     final_recommendation: Recommendation | None
     final_justification: Annotated[list[str], operator.add]
 

@@ -37,6 +37,7 @@ from schemas.results import (
     FraudDetectionResult,
     IdentityCoverageResult,
     IdentityResult,
+    LlmMetadata,
     MedicalCodingResult,
     PrivacyResult,
     SecurityGateResult,
@@ -86,6 +87,7 @@ def _agent_results() -> dict:
             ),
             accepted_count=1,
             quarantined_count=0,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         ),
         "security_result": SecurityGateResult(
             claim_id=case_id,
@@ -107,6 +109,7 @@ def _agent_results() -> dict:
             case_id=case_id,
             status=VerificationStatus.PASS,
             bundle_expected=True,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         ),
         "ocr_result": DocumentOcrResult(
             claim_id=case_id,
@@ -120,12 +123,25 @@ def _agent_results() -> dict:
             artifact_id="ocr-artifact-1",
             artifact_path="artifacts/document_ocr/CLM-0001/facture.json",
         ),
-        "coding_result": MedicalCodingResult(case_id=case_id, status=VerificationStatus.PASS),
-        "clinical_result": ClinicalConsistencyResult(case_id=case_id, status=VerificationStatus.PASS),
-        "fraud_result": FraudDetectionResult(case_id=case_id, status=VerificationStatus.PASS),
+        "coding_result": MedicalCodingResult(
+            case_id=case_id,
+            status=VerificationStatus.PASS,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
+        "clinical_result": ClinicalConsistencyResult(
+            case_id=case_id,
+            status=VerificationStatus.PASS,
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
+        "fraud_result": FraudDetectionResult(
+            case_id=case_id,
+            status=VerificationStatus.PASS,
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
         "review_result": CaseReviewerResult(
             case_id=case_id,
             recommendation=Recommendation.APPROVE,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         ),
         "audit_result": AuditResult(case_id=case_id, status=VerificationStatus.PASS),
     }

@@ -102,15 +102,15 @@ class TestToolAllowlistCompleteness:
         AgentName.MEDICAL_CODING,
         AgentName.DOCUMENT_OCR,
         AgentName.IDENTITY_COVERAGE,
+        AgentName.CLINICAL_CONSISTENCY,
+        AgentName.FRAUD_DETECTION,
     }
 
-    def test_seven_agents_have_a_tool_allowlist_entry(self):
+    def test_nine_agents_have_a_tool_allowlist_entry(self):
         assert set(ALLOWED_TOOLS_PER_AGENT.keys()) == self.LLM_BACKED_AGENTS
 
     def test_stub_agents_have_no_allowlist_entry(self):
         for agent in (
-            AgentName.CLINICAL_CONSISTENCY,
-            AgentName.FRAUD_DETECTION,
             AgentName.CASE_REVIEWER,
             AgentName.AUDIT,
         ):
@@ -128,11 +128,22 @@ class TestToolAllowlistCompleteness:
     def test_medical_coding_only_has_rechercher_code(self):
         assert ALLOWED_TOOLS_PER_AGENT[AgentName.MEDICAL_CODING] == frozenset({"rechercher_code"})
 
+    def test_clinical_consistency_only_has_verifier_chronologie(self):
+        assert ALLOWED_TOOLS_PER_AGENT[AgentName.CLINICAL_CONSISTENCY] == frozenset(
+            {"verifier_chronologie"}
+        )
+
+    def test_fraud_detection_only_has_verifier_doublon(self):
+        assert ALLOWED_TOOLS_PER_AGENT[AgentName.FRAUD_DETECTION] == frozenset(
+            {"verifier_doublon"}
+        )
+
     def test_tool_allowlists_are_disjoint_between_unrelated_agents(self):
         """Un outil d'un agent n'apparaît pas comme autorisé pour un autre
         agent qui ne l'expose pas — pas de fuite de permission."""
         assert "rechercher_code" not in ALLOWED_TOOLS_PER_AGENT[AgentName.SECURITY_GATE]
         assert "scanner_texte" not in ALLOWED_TOOLS_PER_AGENT[AgentName.MEDICAL_CODING]
+        assert "verifier_chronologie" not in ALLOWED_TOOLS_PER_AGENT[AgentName.MEDICAL_CODING]
 
 
 # ── 4. Autorisation d'outil ────────────────────────────────────────────────────
@@ -277,8 +288,6 @@ class TestBuildAuthorizedTools:
 
     def test_stub_agent_gets_empty_tuple(self):
         for agent in (
-            AgentName.CLINICAL_CONSISTENCY,
-            AgentName.FRAUD_DETECTION,
             AgentName.CASE_REVIEWER,
             AgentName.AUDIT,
         ):

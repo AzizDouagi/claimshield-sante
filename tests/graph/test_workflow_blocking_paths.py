@@ -1,6 +1,6 @@
 """Chemins de blocage — graph/workflow.py — ClaimShield Santé.
 
-Huit scénarios paramétrés, un par branche de blocage prévue (QUARANTINE ou
+Neuf scénarios paramétrés, un par branche de blocage prévue (QUARANTINE ou
 NEEDS_REVIEW) du pipeline nominal :
 
   1. claim_intake   → QUARANTINED        → quarantine
@@ -11,6 +11,9 @@ NEEDS_REVIEW) du pipeline nominal :
   6. medical_coding → NEEDS_REVIEW       → needs_review
   7. case_reviewer  → PENDING            → needs_review
   8. case_reviewer  → APPROVE + human_review_required=True → needs_review
+  9. case_reviewer  → REJECT + human_review_required=True  → needs_review
+     (aucun END direct sans revue humaine : un rejet reste une décision de
+     dossier, jamais finalisé — voir graph/edges.py::route_review)
 
 Pour chaque scénario, tous les nœuds amont du nœud bloquant restent nominaux
 (ACCEPTED/ALLOW/PASS) ; aucun appel LLM réel (les 7 agents réels et
@@ -42,7 +45,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult
+from schemas.results import CaseReviewerResult, LlmMetadata
 
 # ── Ordre métier nominal (feuille de route) ──────────────────────────────────
 
@@ -114,6 +117,7 @@ class _CaseReviewerStub:
             justification=list(self._reasons),
             human_review_required=self._human_review_required,
             human_review_reasons=list(self._reasons),
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
 
 
@@ -365,9 +369,13 @@ SCENARIOS: list[_BlockingScenario] = [
         "case_reviewer_human_review_required", "case_reviewer", "needs_review",
         Recommendation.APPROVE, "review_result",
     ),
+    _BlockingScenario(
+        "case_reviewer_reject_requires_review", "case_reviewer", "needs_review",
+        Recommendation.REJECT, "review_result",
+    ),
 ]
 
-assert len(SCENARIOS) == 8, "Huit branches de blocage attendues"
+assert len(SCENARIOS) == 9, "Neuf branches de blocage attendues"
 
 
 def _build_app_for_scenario(monkeypatch, scenario: _BlockingScenario):
@@ -425,8 +433,8 @@ _SCENARIO_IDS = [s.scenario_id for s in SCENARIOS]
 
 
 class TestBlockingPaths:
-    def test_exactly_eight_scenarios_defined(self):
-        assert len(SCENARIOS) == 8
+    def test_exactly_nine_scenarios_defined(self):
+        assert len(SCENARIOS) == 9
 
     @pytest.mark.parametrize("scenario", SCENARIOS, ids=_SCENARIO_IDS)
     def test_reaches_expected_destination(self, monkeypatch, scenario: _BlockingScenario):
@@ -486,5 +494,11 @@ class TestBlockingPaths:
 
         result = app.invoke(_initial_state())  # ne doit jamais lever
 
-        assert result.get("errors", []) == []
+        if scenario.scenario_id == "case_reviewer_reject_requires_review":
+            # Une pré-recommandation de rejet écrit aussi une entrée "errors"
+            # (agents/case_reviewer_agent/agent.py, comportement attendu et
+            # préexistant) — pas une exception avalée silencieusement.
+            assert len(result.get("errors", [])) >= 1
+        else:
+            assert result.get("errors", []) == []
         assert len(result.get("alerts", [])) >= 1

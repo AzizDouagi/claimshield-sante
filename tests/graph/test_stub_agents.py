@@ -1,12 +1,18 @@
-"""Tests des interfaces injectables — agents stubs ClaimShield Santé.
+"""Tests des interfaces injectables — agents ClaimShield Santé.
 
 Couvre :
-  - Conformité Protocol (runtime_checkable)
-  - Stub : valeurs NOT_EVALUATED / PENDING, jamais de résultat métier inventé
-  - ``make_node`` : délégation, mise à jour state, erreurs/alertes
-  - Injection déterministe : implémentations de test pilotables
-  - ``make_node_<name>`` dans graph/nodes.py : isolation d'exceptions
-  - NODE_REGISTRY : 11 entrées, noms stables
+  - Conformité Protocol (runtime_checkable) — agents injectables et audit stub.
+  - Stub audit : valeur NOT_EVALUATED, jamais de résultat métier inventé.
+  - ``make_node`` : délégation, mise à jour state, erreurs/alertes.
+  - Injection déterministe : implémentations de test pilotables pour les 4 agents.
+  - ``make_node_<name>`` dans graph/nodes.py : isolation d'exceptions.
+  - NODE_REGISTRY : 11 entrées, noms stables.
+
+Les tests exerçant le comportement RÉEL par défaut de clinical_consistency_agent
+et fraud_detection_agent (Phase A déterministe + Phase B LLM) vivent dans
+``tests/agents/test_clinical_consistency_agent.py`` et
+``tests/agents/test_fraud_detection_agent.py`` — ce module ne couvre plus que
+le mécanisme d'injection générique, identique pour les 4 agents.
 """
 from __future__ import annotations
 
@@ -20,17 +26,15 @@ from agents.audit_agent.agent import (
 )
 from agents.case_reviewer_agent.agent import (
     CaseReviewerRunnable,
-    _NotImplementedStub as CaseReviewerStub,
+    _DEFAULT_IMPL as DefaultCaseReviewerImpl,
     make_node as make_case_reviewer_node,
 )
 from agents.clinical_consistency_agent.agent import (
     ClinicalConsistencyRunnable,
-    _NotImplementedStub as ClinicalStub,
     make_node as make_clinical_node,
 )
 from agents.fraud_detection_agent.agent import (
     FraudDetectionRunnable,
-    _NotImplementedStub as FraudStub,
     make_node as make_fraud_node,
 )
 from graph.nodes import build_node_registry, build_orchestrator
@@ -39,8 +43,13 @@ from schemas.results import (
     AuditResult,
     CaseReviewerResult,
     ClinicalConsistencyResult,
+    ClinicalResultPayload,
     FraudDetectionResult,
+    FraudResultPayload,
+    LlmMetadata,
 )
+
+_LLM_TRACE = LlmMetadata(model_name="test-llm", prompt_version="test")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -58,8 +67,9 @@ class _ClinicalPass:
         return ClinicalConsistencyResult(
             case_id=str(state.get("case_id", "CLM-0000")),
             status=VerificationStatus.PASS,
+            llm_trace=_LLM_TRACE,
             confidence=0.95,
-            reasons=["test: pass déterministe"],
+            result_payload=ClinicalResultPayload(reasons=["test: pass déterministe"]),
         )
 
 
@@ -68,7 +78,8 @@ class _ClinicalFail:
         return ClinicalConsistencyResult(
             case_id=str(state.get("case_id", "CLM-0000")),
             status=VerificationStatus.FAIL,
-            reasons=["test: incohérence de date"],
+            llm_trace=_LLM_TRACE,
+            result_payload=ClinicalResultPayload(reasons=["test: incohérence de date"]),
         )
 
 
@@ -77,7 +88,8 @@ class _ClinicalNeedsReview:
         return ClinicalConsistencyResult(
             case_id=str(state.get("case_id", "CLM-0000")),
             status=VerificationStatus.NEEDS_REVIEW,
-            reasons=["test: ordonnance ambiguë"],
+            llm_trace=_LLM_TRACE,
+            result_payload=ClinicalResultPayload(reasons=["test: ordonnance ambiguë"]),
         )
 
 
@@ -86,8 +98,8 @@ class _FraudPass:
         return FraudDetectionResult(
             case_id=str(state.get("case_id", "CLM-0000")),
             status=VerificationStatus.PASS,
-            risk_score=0.05,
-            reasons=["test: aucun signal"],
+            llm_trace=_LLM_TRACE,
+            result_payload=FraudResultPayload(risk_score=0.05, reasons=["test: aucun signal"]),
         )
 
 
@@ -96,9 +108,12 @@ class _FraudFail:
         return FraudDetectionResult(
             case_id=str(state.get("case_id", "CLM-0000")),
             status=VerificationStatus.FAIL,
-            risk_score=0.92,
-            duplicate_invoice=True,
-            reasons=["test: doublon détecté"],
+            llm_trace=_LLM_TRACE,
+            result_payload=FraudResultPayload(
+                risk_score=0.92,
+                duplicate_invoice=True,
+                reasons=["test: doublon détecté"],
+            ),
         )
 
 
@@ -109,6 +124,7 @@ class _ReviewApprove:
             recommendation=Recommendation.APPROVE,
             justification=["test: tous les contrôles passés"],
             human_review_required=False,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
 
 
@@ -119,6 +135,7 @@ class _ReviewReject:
             recommendation=Recommendation.REJECT,
             justification=["test: doublon confirmé"],
             human_review_required=False,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
 
 
@@ -137,14 +154,8 @@ class _AuditPass:
 class TestProtocolConformance:
     """runtime_checkable : isinstance() fonctionne sans héritage."""
 
-    def test_clinical_stub_is_runnable(self):
-        assert isinstance(ClinicalStub(), ClinicalConsistencyRunnable)
-
-    def test_fraud_stub_is_runnable(self):
-        assert isinstance(FraudStub(), FraudDetectionRunnable)
-
-    def test_case_reviewer_stub_is_runnable(self):
-        assert isinstance(CaseReviewerStub(), CaseReviewerRunnable)
+    def test_case_reviewer_default_impl_is_runnable(self):
+        assert isinstance(DefaultCaseReviewerImpl, CaseReviewerRunnable)
 
     def test_audit_stub_is_runnable(self):
         assert isinstance(AuditStub(), AuditAgentRunnable)
@@ -162,51 +173,11 @@ class TestProtocolConformance:
         assert isinstance(_AuditPass(), AuditAgentRunnable)
 
 
-# ── 2. Stubs par défaut — valeurs NON métier ──────────────────────────────────
+# ── 2. Stub audit par défaut — valeur NON métier ──────────────────────────────
 
 
 class TestStubDefaults:
-    """Le stub ne retourne jamais PASS, APPROVE ou REJECT."""
-
-    def test_clinical_stub_returns_not_evaluated(self):
-        result = ClinicalStub().run(_state())
-        assert result.status is VerificationStatus.NOT_EVALUATED
-
-    def test_clinical_stub_never_returns_pass(self):
-        result = ClinicalStub().run(_state())
-        assert result.status is not VerificationStatus.PASS
-
-    def test_clinical_stub_never_returns_fail(self):
-        result = ClinicalStub().run(_state())
-        assert result.status is not VerificationStatus.FAIL
-
-    def test_fraud_stub_returns_not_evaluated(self):
-        result = FraudStub().run(_state())
-        assert result.status is VerificationStatus.NOT_EVALUATED
-
-    def test_fraud_stub_risk_score_is_zero(self):
-        result = FraudStub().run(_state())
-        assert result.risk_score == 0.0
-
-    def test_fraud_stub_no_duplicate_signal(self):
-        result = FraudStub().run(_state())
-        assert result.duplicate_invoice is None
-
-    def test_case_reviewer_stub_returns_pending(self):
-        result = CaseReviewerStub().run(_state())
-        assert result.recommendation is Recommendation.PENDING
-
-    def test_case_reviewer_stub_never_approve(self):
-        result = CaseReviewerStub().run(_state())
-        assert result.recommendation is not Recommendation.APPROVE
-
-    def test_case_reviewer_stub_never_reject(self):
-        result = CaseReviewerStub().run(_state())
-        assert result.recommendation is not Recommendation.REJECT
-
-    def test_case_reviewer_stub_human_review_required(self):
-        result = CaseReviewerStub().run(_state())
-        assert result.human_review_required is True
+    """Le stub audit ne retourne jamais PASS."""
 
     def test_audit_stub_returns_not_evaluated(self):
         result = AuditStub().run(_state())
@@ -228,23 +199,20 @@ class TestStubDefaults:
 
     def test_stub_reason_contains_stub_marker(self):
         # AuditResult n'a pas de champ reasons/justification par conception.
-        for stub_cls in (ClinicalStub, FraudStub, CaseReviewerStub):
-            instance = stub_cls()
-            result = instance.run(_state())
-            reasons = getattr(result, "reasons", None) or getattr(result, "justification", [])
-            assert any("[stub]" in r for r in reasons), f"{stub_cls.__name__} sans marqueur [stub]"
+        result = AuditStub().run(_state())
+        assert result.status is VerificationStatus.NOT_EVALUATED
 
     def test_audit_stub_not_evaluated_is_marker(self):
         result = AuditStub().run(_state())
         assert result.status is VerificationStatus.NOT_EVALUATED
 
     def test_stub_case_id_comes_from_state(self):
-        for stub_cls in (ClinicalStub, FraudStub, CaseReviewerStub, AuditStub):
+        for stub_cls in (AuditStub,):
             result = stub_cls().run({"case_id": "CLM-9999"})
             assert result.case_id == "CLM-9999"
 
 
-# ── 3. make_node — nœud avec stub par défaut ──────────────────────────────────
+# ── 3. make_node — nœuds avec implémentation par défaut ───────────────────────
 
 
 class TestMakeNodeDefault:
@@ -253,20 +221,25 @@ class TestMakeNodeDefault:
         updates = node_fn(_state())
         assert "clinical_result" in updates
 
-    def test_clinical_node_status_not_evaluated(self):
+    def test_clinical_node_default_needs_review_without_upstream_data(self):
+        """Étape 12 : l'implémentation par défaut est réelle, plus un stub.
+        Sans ocr_result ni coding_result, elle signale NEEDS_REVIEW plutôt
+        que d'inventer un PASS ou de continuer à retourner NOT_EVALUATED."""
         node_fn = make_clinical_node()
         updates = node_fn(_state())
-        assert updates["clinical_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["clinical_result"].status is VerificationStatus.NEEDS_REVIEW
 
     def test_fraud_node_sets_fraud_result(self):
         node_fn = make_fraud_node()
         updates = node_fn(_state())
         assert "fraud_result" in updates
 
-    def test_fraud_node_status_not_evaluated(self):
+    def test_fraud_node_default_needs_review_without_upstream_data(self):
+        """Étape 12 : idem pour fraud_detection — preuves insuffisantes,
+        jamais un PASS ou un NOT_EVALUATED silencieux."""
         node_fn = make_fraud_node()
         updates = node_fn(_state())
-        assert updates["fraud_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["fraud_result"].status is VerificationStatus.NEEDS_REVIEW
 
     def test_case_reviewer_node_sets_review_result(self):
         node_fn = make_case_reviewer_node()
@@ -282,6 +255,11 @@ class TestMakeNodeDefault:
         node_fn = make_case_reviewer_node()
         updates = node_fn(_state())
         assert updates["final_recommendation"] is Recommendation.PENDING
+
+    def test_case_reviewer_node_requires_human_review(self):
+        node_fn = make_case_reviewer_node()
+        updates = node_fn(_state())
+        assert updates["review_result"].human_review_required is True
 
     def test_audit_node_sets_audit_result(self):
         node_fn = make_audit_node()
@@ -329,6 +307,7 @@ class TestMakeNodeInjection:
         updates = node_fn(_state())
         assert updates["review_result"].recommendation is Recommendation.APPROVE
         assert updates["final_recommendation"] is Recommendation.APPROVE
+        assert updates["review_result"].human_review_required is True
 
     def test_case_reviewer_injected_reject_adds_errors(self):
         node_fn = make_case_reviewer_node(_ReviewReject())
@@ -340,10 +319,11 @@ class TestMakeNodeInjection:
         updates = node_fn(_state())
         assert updates["audit_result"].status is VerificationStatus.PASS
 
-    def test_case_reviewer_approve_no_human_no_alert(self):
+    def test_case_reviewer_approve_forces_human_alert(self):
         node_fn = make_case_reviewer_node(_ReviewApprove())
         updates = node_fn(_state())
-        assert not updates.get("alerts")
+        assert updates["review_result"].human_review_required is True
+        assert updates.get("alerts")
 
     def test_completed_steps_set_by_injected_node(self):
         for node_fn, step in [
@@ -356,24 +336,27 @@ class TestMakeNodeInjection:
             assert step in updates["completed_steps"], f"{step} absent de completed_steps"
 
 
-# ── 5. graph/nodes.py — nœuds stubs par défaut (via l'orchestrateur) ────────
+# ── 5. graph/nodes.py — nœuds par défaut (via l'orchestrateur) ──────────────
 
 
 class TestGraphNodeStubDefaults:
-    def test_node_clinical_consistency_not_evaluated(self):
+    def test_node_clinical_consistency_default_needs_review(self):
+        """Étape 12 : évaluation réelle par défaut — sans ocr_result ni
+        coding_result, NEEDS_REVIEW (preuves insuffisantes), plus NOT_EVALUATED."""
         node_fn = build_node_registry(build_orchestrator())["clinical_consistency"]
         updates = node_fn(_state())
-        assert updates["clinical_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["clinical_result"].status is VerificationStatus.NEEDS_REVIEW
 
-    def test_node_fraud_detection_not_evaluated(self):
+    def test_node_fraud_detection_default_needs_review(self):
         node_fn = build_node_registry(build_orchestrator())["fraud_detection"]
         updates = node_fn(_state())
-        assert updates["fraud_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["fraud_result"].status is VerificationStatus.NEEDS_REVIEW
 
-    def test_node_case_reviewer_pending(self):
+    def test_node_case_reviewer_default_requires_human_review(self):
         node_fn = build_node_registry(build_orchestrator())["case_reviewer"]
         updates = node_fn(_state())
-        assert updates["review_result"].recommendation is Recommendation.PENDING
+        assert updates["review_result"].human_review_required is True
+        assert updates["review_result"].llm_metadata is not None
 
     def test_node_audit_not_evaluated(self):
         node_fn = build_node_registry(build_orchestrator())["audit"]
@@ -409,11 +392,13 @@ class TestGraphNodeFactories:
         updates = node_fn(_state())
         assert updates["audit_result"].status is VerificationStatus.PASS
 
-    def test_none_impl_uses_stub(self):
+    def test_none_impl_uses_real_default_implementation(self):
+        """``None`` (étape 12) retombe sur l'évaluation réelle par défaut,
+        sans repasser par un stub NOT_EVALUATED."""
         orchestrator = build_orchestrator(clinical_consistency_impl=None)
         node_fn = build_node_registry(orchestrator)["clinical_consistency"]
         updates = node_fn(_state())
-        assert updates["clinical_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["clinical_result"].status is VerificationStatus.NEEDS_REVIEW
 
     def test_exception_isolated(self):
         class Crasher:

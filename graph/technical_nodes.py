@@ -263,7 +263,7 @@ node_failure = _make_technical_node(_TechnicalNodeConfig(
 node_finalize = _make_technical_node(_TechnicalNodeConfig(
     step_name="finalize",
 ))
-"""Clôt le pipeline sans modifier la recommandation (déjà fixée par case_reviewer)."""
+"""Clôt le pipeline sans modifier la recommandation validée avant cette étape."""
 
 
 # ── Registre ──────────────────────────────────────────────────────────────────

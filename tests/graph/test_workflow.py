@@ -16,8 +16,9 @@ des fonctions stub légères patchées dans l'espace de noms ``graph.workflow``
 capture les fonctions au moment du ``add_node()`` — le patch doit donc
 précéder la construction.
 
-Les stubs de stubs (clinical_consistency, fraud_detection, audit) sont
-utilisés tels quels ; ils ne dépendent d'aucune ressource externe.
+Les agents aval injectables restent déterministes en test ; audit ne dépend
+pas d'une ressource externe tant que son implémentation réelle n'est pas
+câblée.
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult
+from schemas.results import CaseReviewerResult, LlmMetadata
 
 
 @dataclass
@@ -372,8 +373,8 @@ class TestWorkflowInvoke:
     # Seul test_invoke_checkpoints_state utilise InMemorySaver (chemin court
     # sans objets non-sérialisables).
 
-    def test_invoke_reaches_needs_review_via_stub_case_reviewer(self, monkeypatch):
-        """Pipeline nominal jusqu'à case_reviewer (stub PENDING → needs_review)."""
+    def test_invoke_reaches_needs_review_via_real_case_reviewer(self, monkeypatch):
+        """Pipeline nominal jusqu'au reviewer réel, puis HITL obligatoire."""
         _make_mock_agents(monkeypatch)
         app = compile_workflow(None, interrupt_before=[])
         result = app.invoke(_initial_state())
@@ -394,8 +395,8 @@ class TestWorkflowInvoke:
         }
         assert expected <= steps
 
-    def test_invoke_finalize_path_with_approve(self, monkeypatch):
-        """Pipeline complet jusqu'à finalize avec case_reviewer APPROVE.
+    def test_invoke_approve_path_interrupts_for_human_review(self, monkeypatch):
+        """Pipeline nominal : case_reviewer APPROVE reste non final.
 
         ``case_reviewer`` traverse désormais l'orchestrateur (voir
         ``graph/nodes.py``) : l'injection se fait via ``case_reviewer_impl=``
@@ -406,8 +407,10 @@ class TestWorkflowInvoke:
         app = compile_workflow(None, interrupt_before=[], case_reviewer_impl=_FakeCaseReviewer())
         result = app.invoke(_initial_state())
         steps = result.get("completed_steps", [])
-        assert "audit" in steps
-        assert "finalize" in steps
+        assert "__interrupt__" in result
+        assert "needs_review" in steps
+        assert "audit" not in steps
+        assert "finalize" not in steps
 
     def test_invoke_failure_path_on_security_block(self, monkeypatch):
         """security_gate BLOCK → failure → final_recommendation = REJECT."""
@@ -786,6 +789,7 @@ class _FakeCaseReviewer:
             justification=["Approuvé par implémentation injectée."],
             human_review_required=False,
             human_review_reasons=[],
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
 
 
@@ -797,11 +801,11 @@ class TestWorkflowFutureAgentInjection:
     monkeypatch de test) via case_reviewer_impl.
     """
 
-    def test_default_impl_none_uses_pending_stub(self, monkeypatch):
+    def test_default_impl_none_uses_real_reviewer_and_requires_human_review(self, monkeypatch):
         _make_mock_agents(monkeypatch)
         app = compile_workflow(None, interrupt_before=[])
         result = app.invoke(_initial_state())
-        # Stub PENDING par défaut → route_review → needs_review → await_human_review.
+        # Reviewer réel par défaut : pré-recommandation non finale → HITL.
         assert "needs_review" in result.get("completed_steps", [])
 
     def test_injected_case_reviewer_impl_is_used(self, monkeypatch):
@@ -811,7 +815,8 @@ class TestWorkflowFutureAgentInjection:
         )
         result = app.invoke(_initial_state())
         assert result.get("final_recommendation") == Recommendation.APPROVE
-        assert "finalize" in result.get("completed_steps", [])
+        assert "needs_review" in result.get("completed_steps", [])
+        assert "finalize" not in result.get("completed_steps", [])
 
     def test_workflow_module_has_no_default_future_agent_nodes(self):
         """Les 4 nœuds futurs ne sont jamais des instances de nœud
@@ -852,8 +857,7 @@ class TestWorkflowBusinessOrder:
         "clinical_consistency",
         "fraud_detection",
         "case_reviewer",
-        "audit",
-        "finalize",
+        "needs_review",
     ]
 
     def test_nominal_path_follows_business_order(self, monkeypatch):
@@ -863,10 +867,12 @@ class TestWorkflowBusinessOrder:
         result = app.invoke(_initial_state())
         steps = result.get("completed_steps", [])
 
-        # Chaque étape attendue doit apparaître, dans l'ordre métier défini
-        # par la feuille de route (aucune étape en double, aucune inversion).
+        # Chaque étape attendue avant validation humaine doit apparaître, dans
+        # l'ordre métier défini par la feuille de route.
         observed_order = [step for step in steps if step in self.EXPECTED_NOMINAL_ORDER]
         assert observed_order == self.EXPECTED_NOMINAL_ORDER
+        assert "audit" not in steps
+        assert "finalize" not in steps
 
 
 # ── TestWorkflowTopologyChecks ────────────────────────────────────────────────

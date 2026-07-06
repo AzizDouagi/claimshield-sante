@@ -28,11 +28,14 @@ from schemas.domain import (
 from schemas.results import (
     CaseReviewerResult,
     ClinicalConsistencyResult,
+    ClinicalResultPayload,
     CoverageResult,
     FhirValidatorResult,
     FraudDetectionResult,
+    FraudResultPayload,
     IdentityCoverageResult,
     IdentityResult,
+    LlmMetadata,
     PrivacyResult,
     SecurityGateResult,
 )
@@ -345,6 +348,7 @@ def test_fhir_validator_result_valide(case_id: str):
         status=VerificationStatus(ef["status"]),
         bundle_expected=ef["bundle_expected"],
         reasons=ef.get("reasons", []),
+        llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
     )
 
 
@@ -355,8 +359,11 @@ def test_fraud_detection_result_valide(case_id: str):
     FraudDetectionResult(
         case_id=case_id,
         status=VerificationStatus(ef["status"]),
-        duplicate_invoice=ef.get("duplicate_invoice"),
-        reasons=ef.get("reasons", []),
+        llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        result_payload=FraudResultPayload(
+            duplicate_invoice=ef.get("duplicate_invoice"),
+            reasons=ef.get("reasons", []),
+        ),
     )
 
 
@@ -367,10 +374,13 @@ def test_clinical_consistency_result_valide(case_id: str):
     ClinicalConsistencyResult(
         case_id=case_id,
         status=VerificationStatus(ecc["status"]),
-        procedure_count=ecc.get("procedure_count"),
-        medication_count=ecc.get("medication_count"),
-        prescription_required=ecc.get("prescription_required"),
-        reasons=ecc.get("reasons", []),
+        llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        result_payload=ClinicalResultPayload(
+            procedure_count=ecc.get("procedure_count"),
+            medication_count=ecc.get("medication_count"),
+            prescription_required=ecc.get("prescription_required"),
+            reasons=ecc.get("reasons", []),
+        ),
     )
 
 
@@ -383,4 +393,5 @@ def test_case_reviewer_result_valide(case_id: str):
         justification=gt.get("recommendation_reasons", []),
         human_review_required=gt.get("human_review_required", False),
         human_review_reasons=gt.get("human_review_reasons", []),
+        llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
     )

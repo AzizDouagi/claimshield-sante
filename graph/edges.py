@@ -331,10 +331,23 @@ def route_result_consistency(state: ClaimState) -> Route:
 def route_review(state: ClaimState) -> Route:
     """Route après case_reviewer_agent.
 
-    APPROVE + human_review_required=False → end          (approbation définitive)
+    APPROVE + human_review_required=False → end          (chemin défensif/legacy —
+                                                            l'implémentation réelle
+                                                            ne produit jamais False)
     APPROVE + human_review_required=True  → needs_review (validation HITL requise)
+    REJECT  + human_review_required=False → end          (chemin défensif/legacy)
+    REJECT  + human_review_required=True  → needs_review (validation HITL requise —
+                                                            un rejet reste une décision
+                                                            de dossier, jamais finalisé
+                                                            sans humain)
     PENDING                               → needs_review (en attente d'information)
-    REJECT                                → end          (rejet définitif)
+
+    L'implémentation réelle de ``case_reviewer_agent`` force toujours
+    ``human_review_required=True`` : la pré-recommandation n'est jamais finale,
+    APPROVE comme REJECT — aucune des deux ne peut donc jamais atteindre
+    ``end`` (donc ``audit``/``finalize``/``END``) sans passer par
+    ``needs_review``/``await_human_review``. Seul un ``case_reviewer_impl``
+    injecté (tests) peut emprunter les chemins défensifs ci-dessus.
     """
     result = state.get("review_result")
     if result is None:
@@ -345,10 +358,8 @@ def route_review(state: ClaimState) -> Route:
     except ValueError:
         return FAILURE
 
-    if rec is Recommendation.APPROVE:
+    if rec in (Recommendation.APPROVE, Recommendation.REJECT):
         return NEEDS_REVIEW if result.human_review_required else END
-    if rec is Recommendation.REJECT:
-        return END
     if rec is Recommendation.PENDING:
         return NEEDS_REVIEW
     return FAILURE

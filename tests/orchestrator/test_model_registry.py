@@ -136,19 +136,22 @@ class TestSelection:
             AgentName.SECURITY_GATE,
             AgentName.PRIVACY,
             AgentName.FHIR_VALIDATOR,
+            AgentName.CASE_REVIEWER,
         ):
             assert ModelCapability.STRUCTURED_OUTPUT in AGENT_REQUIRED_CAPABILITIES[agent]
 
     def test_tool_calling_agents_require_tool_calling(self):
-        for agent in (AgentName.MEDICAL_CODING, AgentName.DOCUMENT_OCR):
-            assert ModelCapability.TOOL_CALLING in AGENT_REQUIRED_CAPABILITIES[agent]
-
-    def test_stub_agents_require_no_capability(self):
         for agent in (
-            AgentName.IDENTITY_COVERAGE,
+            AgentName.MEDICAL_CODING,
+            AgentName.DOCUMENT_OCR,
             AgentName.CLINICAL_CONSISTENCY,
             AgentName.FRAUD_DETECTION,
-            AgentName.CASE_REVIEWER,
+        ):
+            assert ModelCapability.TOOL_CALLING in AGENT_REQUIRED_CAPABILITIES[agent]
+
+    def test_agents_without_declared_llm_capability_require_no_capability(self):
+        for agent in (
+            AgentName.IDENTITY_COVERAGE,
             AgentName.AUDIT,
         ):
             assert AGENT_REQUIRED_CAPABILITIES[agent] == frozenset()
@@ -163,6 +166,9 @@ class TestSelection:
             AgentName.FHIR_VALIDATOR,
             AgentName.MEDICAL_CODING,
             AgentName.DOCUMENT_OCR,
+            AgentName.CASE_REVIEWER,
+            AgentName.CLINICAL_CONSISTENCY,
+            AgentName.FRAUD_DETECTION,
         ):
             spec = registry.select_for_agent(agent, model_id)
             assert spec.model_id == model_id

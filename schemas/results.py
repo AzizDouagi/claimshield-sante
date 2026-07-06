@@ -10,11 +10,13 @@ Chaque résultat :
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Annotated
 
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 
 from schemas.domain import (
     DataClassification,
@@ -53,6 +55,22 @@ def _reject_security_leak(value: str | None, field_name: str) -> str | None:
         raise ValueError(f"Chemin absolu interdit dans {field_name}")
     if _SECRET_HINT_RE.search(value):
         raise ValueError(f"Secret potentiel interdit dans {field_name}")
+    return value
+
+
+_MAX_NEWLINES_IN_STRUCTURED_FIELD = 2
+
+
+def _reject_unstructured_content(value: str, field_name: str) -> str:
+    """Interdit, en plus des chemins absolus et secrets, tout contenu
+    multi-lignes assimilable à un document brut, un texte OCR complet ou un
+    prompt complet dans un champ de preuve ou de motif structuré."""
+    _reject_security_leak(value, field_name)
+    if value.count("\n") > _MAX_NEWLINES_IN_STRUCTURED_FIELD:
+        raise ValueError(
+            f"Contenu multi-lignes interdit dans {field_name} — jamais un "
+            "document brut, un texte OCR complet ou un prompt complet."
+        )
     return value
 
 
@@ -133,7 +151,7 @@ class ClaimIntakeResult(StrictModel):
     error_count: int = Field(default=0, ge=0)
     reasons: list[str] = Field(default_factory=list)
     errors: list[StructuredError] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
 
 
 # ── 2. Security Gate Agent ────────────────────────────────────────────────────
@@ -475,7 +493,7 @@ class FhirValidatorResult(StrictModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
 
 
 # ── Champs essentiels — Document/OCR Agent (Étape 7) ─────────────────────────
@@ -896,53 +914,266 @@ class MedicalCodingResult(StrictModel):
     codings: list[ProcedureCoding] = Field(default_factory=list)
     table_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
 
 
 # ── 8. Clinical Consistency Agent ─────────────────────────────────────────────
 
 
+class ClinicalEvidenceSource(str, Enum):
+    """Origine d'une preuve clinique — jamais une valeur brute non attribuée."""
+
+    OCR_EXTRACTION = "ocr_extraction"
+    MEDICAL_CODING = "medical_coding"
+
+
+class ClinicalEvidence(StrictModel):
+    """Preuve structurée minimale appuyant un signal ou une incohérence clinique.
+
+    Toujours attribuée à une source et à un champ précis — jamais une valeur
+    flottante sans origine. ``value`` est toujours une chaîne courte (jamais un
+    objet complexe, un document brut ou un texte OCR complet) : la preuve
+    référence une donnée déjà extraite/validée, elle ne transporte jamais de
+    contenu de document. ``evidence_id`` est l'identifiant opaque référencé
+    par ``ClinicalConsistencyResult.evidence_ids`` — jamais dérivé d'un
+    contenu sensible, jamais réutilisable pour retrouver la valeur brute.
+    """
+
+    evidence_id: str = Field(default_factory=lambda: f"EVID-{uuid.uuid4().hex[:10]}")
+    source: ClinicalEvidenceSource
+    field: str = Field(..., min_length=1, max_length=100)
+    document_reference: str | None = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Type de document (ex. 'INVOICE', 'PRESCRIPTION') si la preuve provient "
+            "de l'OCR, ou identifiant de l'évaluation source (ex. 'coding_result') "
+            "sinon — jamais un chemin de fichier ni un contenu de document."
+        ),
+    )
+    value: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("value")
+    @classmethod
+    def _value_no_raw_document(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "value")
+
+
 class ClinicalSignal(StrictModel):
-    signal_type: str
-    description: str
+    """Anomalie de cohérence clinique détectée — toujours référencée.
+
+    ``fields_compared``/``documents_compared`` : au moins un des deux est
+    obligatoire (validé ci-dessous) — un signal ne peut jamais reposer sur une
+    simple description libre sans référence structurée à ce qui a été comparé.
+    """
+
+    signal_type: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=1000)
     fields_compared: list[str] = Field(default_factory=list)
-    severity: str = "WARNING"
+    documents_compared: list[str] = Field(default_factory=list)
+    evidence: list[ClinicalEvidence] = Field(default_factory=list)
+    severity: SeverityLevel = SeverityLevel.MEDIUM
+
+    @model_validator(mode="after")
+    def _must_reference_fields_or_documents(self) -> "ClinicalSignal":
+        if not self.fields_compared and not self.documents_compared:
+            raise ValueError(
+                "ClinicalSignal doit référencer au moins un champ "
+                "(fields_compared) ou un document (documents_compared) comparé "
+                "— jamais une sortie libre non structurée."
+            )
+        return self
+
+
+class ClinicalInconsistency(StrictModel):
+    """Incohérence concrète entre deux valeurs déjà validées (ex. compteur OCR
+    vs codes résolus) — toujours appuyée par au moins une preuve structurée.
+
+    Distinct de ``DisagreementPoint`` (désaccord générique de statut entre
+    agents, consommé par ``CaseReviewerResult``/``tools.consistency`` — sans
+    ``evidence`` ni ``severity``) : une ``ClinicalInconsistency`` est un
+    désaccord de valeur interne à l'analyse clinique, jamais un nouveau
+    désaccord de statut entre agents.
+    """
+
+    inconsistency_type: str = Field(..., min_length=1, max_length=100)
+    expected: str = Field(..., min_length=1, max_length=500)
+    observed: str = Field(..., min_length=1, max_length=500)
+    severity: SeverityLevel = SeverityLevel.MEDIUM
+    evidence: list[ClinicalEvidence] = Field(..., min_length=1)
+
+    @field_validator("expected", "observed")
+    @classmethod
+    def _no_raw_document(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "expected/observed")
+
+
+class ClinicalResultPayload(StrictModel):
+    """Détail métier de l'évaluation clinique — jamais de contenu brut.
+
+    Distinct de l'enveloppe ``ClinicalConsistencyResult`` (statut, trace LLM,
+    confiance, erreurs, identifiants de preuve, besoin de revue) : ce
+    sous-modèle porte uniquement les données propres à l'analyse clinique
+    elle-même, réutilisable tel quel si un futur agent devait produire une
+    enveloppe générique similaire.
+    """
+
+    procedure_count: int | None = Field(default=None, ge=0)
+    medication_count: int | None = Field(default=None, ge=0)
+    prescription_required: bool | None = None
+    signals: list[ClinicalSignal] = Field(default_factory=list)
+    inconsistencies: list[ClinicalInconsistency] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+    @field_validator("reasons")
+    @classmethod
+    def _reasons_no_raw_document(cls, v: list[str]) -> list[str]:
+        return [_reject_unstructured_content(item, "reasons") for item in v]
 
 
 class ClinicalConsistencyResult(StrictModel):
-    """Cohérence clinique entre ordonnance, consultation et chronologie."""
+    """Cohérence clinique entre ordonnance, consultation et chronologie.
+
+    Enveloppe générique : ``status``/``llm_trace``/``confidence``/``errors``/
+    ``evidence_ids``/``human_review_required`` sont le contrat commun exposé à
+    l'orchestrateur et à la revue humaine ; ``result_payload`` porte le détail
+    métier (voir ``ClinicalResultPayload``). ``llm_trace`` est obligatoire et
+    ne peut jamais être ``None`` : un résultat sans trace LLM ne représente
+    jamais une exécution valide (règle projet fail-closed).
+    """
 
     case_id: str
     status: VerificationStatus
-    procedure_count: int | None = None
-    medication_count: int | None = None
-    prescription_required: bool | None = None
-    signals: list[ClinicalSignal] = Field(default_factory=list)
+    llm_trace: LlmMetadata
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
-    reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    errors: list[StructuredError] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    human_review_required: bool = False
+    result_payload: ClinicalResultPayload = Field(default_factory=ClinicalResultPayload)
+
+    @model_validator(mode="after")
+    def _evidence_ids_must_reference_real_evidence(self) -> "ClinicalConsistencyResult":
+        real_ids = {
+            evidence.evidence_id
+            for signal in self.result_payload.signals
+            for evidence in signal.evidence
+        } | {
+            evidence.evidence_id
+            for inconsistency in self.result_payload.inconsistencies
+            for evidence in inconsistency.evidence
+        }
+        unknown = [i for i in self.evidence_ids if i not in real_ids]
+        if unknown:
+            raise ValueError(
+                f"evidence_ids référence des preuves inexistantes : {unknown} — "
+                "jamais un identifiant inventé."
+            )
+        return self
 
 
 # ── 9. Fraud Detection Agent ──────────────────────────────────────────────────
 
 
+class FraudEvidenceSource(str, Enum):
+    """Origine d'une preuve anti-fraude — jamais une valeur brute non attribuée."""
+
+    OCR_EXTRACTION = "ocr_extraction"
+    MEDICAL_CODING = "medical_coding"
+    IDENTITY_COVERAGE = "identity_coverage"
+    DUPLICATE_INDEX = "duplicate_index"
+
+
+class FraudEvidence(StrictModel):
+    """Preuve structurée minimale appuyant un signal anti-fraude.
+
+    Même patron que ``ClinicalEvidence`` : toujours attribuée, jamais de
+    contenu de document brut, jamais de texte OCR complet.
+    """
+
+    evidence_id: str = Field(default_factory=lambda: f"EVID-{uuid.uuid4().hex[:10]}")
+    source: FraudEvidenceSource
+    field: str = Field(..., min_length=1, max_length=100)
+    document_reference: str | None = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Identifiant de l'évaluation source (ex. 'identity_coverage_result', "
+            "'coding_result') — jamais un chemin de fichier ni un contenu de document."
+        ),
+    )
+    value: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("value")
+    @classmethod
+    def _value_no_raw_document(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "value")
+
+
 class FraudSignal(StrictModel):
-    signal_type: str
-    description: str
+    """Signal de risque pondéré — toujours référencé par au moins une preuve.
+
+    ``evidence`` ne peut jamais être vide : un signal de fraude combine
+    uniquement des preuves déjà validées par d'autres agents (voir
+    ``agents/fraud_detection_agent/agent.py``), jamais une affirmation non
+    appuyée.
+    """
+
+    signal_type: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=1000)
     risk_contribution: float = Field(ge=0.0, le=1.0)
+    severity: SeverityLevel = SeverityLevel.MEDIUM
+    evidence: list[FraudEvidence] = Field(..., min_length=1)
 
 
-class FraudDetectionResult(StrictModel):
-    """Détection de doublons et anomalies sur données synthétiques."""
+class FraudResultPayload(StrictModel):
+    """Détail métier de la détection de fraude — jamais de contenu brut.
 
-    case_id: str
-    status: VerificationStatus
+    Distinct de l'enveloppe ``FraudDetectionResult`` (voir
+    ``ClinicalResultPayload`` pour le même patron côté cohérence clinique).
+    """
+
     duplicate_invoice: bool | None = None
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     signals: list[FraudSignal] = Field(default_factory=list)
     threshold_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+
+    @field_validator("reasons")
+    @classmethod
+    def _reasons_no_raw_document(cls, v: list[str]) -> list[str]:
+        return [_reject_unstructured_content(item, "reasons") for item in v]
+
+
+class FraudDetectionResult(StrictModel):
+    """Détection de doublons et anomalies sur données synthétiques.
+
+    Même enveloppe générique que ``ClinicalConsistencyResult`` — voir sa
+    docstring pour le rôle de chaque champ commun.
+    """
+
+    case_id: str
+    status: VerificationStatus
+    llm_trace: LlmMetadata
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    errors: list[StructuredError] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    human_review_required: bool = False
+    result_payload: FraudResultPayload = Field(default_factory=FraudResultPayload)
+
+    @model_validator(mode="after")
+    def _evidence_ids_must_reference_real_evidence(self) -> "FraudDetectionResult":
+        real_ids = {
+            evidence.evidence_id
+            for signal in self.result_payload.signals
+            for evidence in signal.evidence
+        }
+        unknown = [i for i in self.evidence_ids if i not in real_ids]
+        if unknown:
+            raise ValueError(
+                f"evidence_ids référence des preuves inexistantes : {unknown} — "
+                "jamais un identifiant inventé."
+            )
+        return self
 
 
 # ── 10. Case Reviewer Agent ───────────────────────────────────────────────────
@@ -964,7 +1195,7 @@ class CaseReviewerResult(StrictModel):
     disagreements: list[DisagreementPoint] = Field(default_factory=list)
     human_review_required: bool = True
     human_review_reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
 
 
 # ── 11. Audit Agent ───────────────────────────────────────────────────────────

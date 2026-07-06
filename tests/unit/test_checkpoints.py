@@ -15,6 +15,7 @@ from schemas.results import (
     AuditEvent,
     ClaimIntakeResult,
     ClaimManifest,
+    LlmMetadata,
     SecurityGateResult,
 )
 
@@ -31,6 +32,7 @@ def _checkpointable_state() -> dict:
         ),
         accepted_count=1,
         quarantined_count=0,
+        llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
     )
     security_result = SecurityGateResult(
         claim_id="CLM-0001",

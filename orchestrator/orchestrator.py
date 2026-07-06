@@ -99,19 +99,19 @@ AGENT_RESULT_MODELS: dict[AgentName, type[StrictModel]] = {
 par ``AgentCallRequest`` (cohérence de ``requested_model``) et
 ``AgentCallOutcome`` (validation de ``result_payload``)."""
 
-_STUB_AGENT_RESULT_FIELDS: dict[AgentName, str] = {
+_ADDITIONAL_AGENT_RESULT_FIELDS: dict[AgentName, str] = {
     AgentName.CLINICAL_CONSISTENCY: "clinical_result",
     AgentName.FRAUD_DETECTION: "fraud_result",
     AgentName.CASE_REVIEWER: "review_result",
     AgentName.AUDIT: "audit_result",
 }
-"""Champ ``ClaimState`` des 4 agents stubs — absents de
+"""Champs ``ClaimState`` des agents absents de
 ``graph.edges.RELAUNCH_RESULT_FIELDS`` (non relançables par décision
 humaine), donc ajoutés ici pour compléter ``AGENT_RESULT_FIELD``."""
 
 AGENT_RESULT_FIELD: dict[AgentName, str] = {
     AgentName(name): field for name, field in RELAUNCH_RESULT_FIELDS.items()
-} | _STUB_AGENT_RESULT_FIELDS
+} | _ADDITIONAL_AGENT_RESULT_FIELDS
 """Champ ``ClaimState`` prouvant qu'un agent a déjà produit un résultat pour
 le dossier — une entrée par agent (11), dont 7 réutilisées directement de
 ``graph.edges.RELAUNCH_RESULT_FIELDS``. Source unique de vérité pour

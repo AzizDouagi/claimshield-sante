@@ -91,16 +91,19 @@ def _make_not_evaluated_result(
     rule_version: str,
     reason: str,
 ) -> FhirValidatorResult:
-    return FhirValidatorResult(
+    return _finalize_with_llm(
         case_id=case_id,
-        status=VerificationStatus.FAIL,
+        deterministic_status=VerificationStatus.FAIL,
         bundle_expected=True,
         profile_checked=None,
         rule_version=rule_version,
+        resource_types=[],
         validation_scope="NOT_EVALUATED",
         errors=[reason],
         warnings=[],
-        reasons=[reason, "Validation FHIR non exécutée."],
+        deterministic_reasons=[reason, "Validation FHIR non exécutée."],
+        sha256_verified=False,
+        references_checked=False,
     )
 
 
@@ -111,19 +114,124 @@ def _make_not_provided_result(
     fhir_version: str,
     validation_scope: str,
 ) -> FhirValidatorResult:
-    return FhirValidatorResult(
+    return _finalize_with_llm(
         case_id=case_id,
-        status=VerificationStatus.PASS,
+        deterministic_status=VerificationStatus.PASS,
         bundle_expected=False,
         profile_checked=fhir_version,
         rule_version=rule_version,
+        resource_types=[],
         validation_scope=validation_scope,
         errors=[],
         warnings=[],
-        reasons=[
+        deterministic_reasons=[
             "Bundle FHIR non fourni et non attendu pour ce dossier (NOT_PROVIDED).",
             "Validation structurelle ignorée.",
         ],
+        sha256_verified=False,
+        references_checked=False,
+    )
+
+
+def _finalize_with_llm(
+    *,
+    case_id: str,
+    deterministic_status: VerificationStatus,
+    bundle_expected: bool,
+    profile_checked: str | None,
+    rule_version: str,
+    resource_types: list[str],
+    validation_scope: str,
+    errors: list[str],
+    warnings: list[str],
+    deterministic_reasons: list[str],
+    sha256_verified: bool,
+    references_checked: bool,
+) -> FhirValidatorResult:
+    """Construit le résultat final après appel LLM obligatoire.
+
+    La Phase A prépare des faits vérifiables (erreurs, avertissements, types de
+    ressources, intégrité SHA-256). Elle ne produit jamais seule le résultat
+    final. Si le LLM est indisponible ou invalide, la sortie est mise en
+    NEEDS_REVIEW au lieu de réussir de manière déterministe.
+    """
+    llm_metadata = build_llm_metadata(_AGENT_NAME)
+    llm_decision = _invoke_llm_fhir(
+        deterministic_status=deterministic_status.value,
+        errors=list(errors),
+        warnings=list(warnings),
+        resource_types=resource_types,
+        sha256_verified=sha256_verified,
+        validation_scope=validation_scope,
+    )
+
+    final_status = deterministic_status
+    reasons: list[str] = []
+
+    if llm_decision is None:
+        final_status = VerificationStatus.NEEDS_REVIEW
+        reasons.append(
+            "LLM indisponible ou réponse invalide : validation FHIR mise en revue."
+        )
+    else:
+        llm_status_map = {
+            "PASS": VerificationStatus.PASS,
+            "NEEDS_REVIEW": VerificationStatus.NEEDS_REVIEW,
+            "FAIL": VerificationStatus.FAIL,
+        }
+        llm_vs = llm_status_map.get(llm_decision.recommended_status, deterministic_status)
+        if deterministic_status == VerificationStatus.PASS:
+            final_status = llm_vs
+        elif deterministic_status == VerificationStatus.NEEDS_REVIEW:
+            final_status = (
+                VerificationStatus.FAIL
+                if llm_vs == VerificationStatus.FAIL
+                else deterministic_status
+            )
+        else:
+            final_status = deterministic_status
+
+        if llm_decision.clinical_context:
+            reasons.append(llm_decision.clinical_context)
+        reasons.extend(llm_decision.reasons)
+
+    reasons.extend(deterministic_reasons)
+
+    if not reasons:
+        if final_status == VerificationStatus.PASS:
+            reasons.append(
+                f"Bundle FHIR {profile_checked or 'R4'} valide — structure et ressources conformes."
+            )
+        elif final_status == VerificationStatus.NEEDS_REVIEW:
+            reasons.append("Bundle FHIR chargé avec avertissements — revue recommandée.")
+        else:
+            reasons.append("Validation FHIR échouée — voir la liste des erreurs.")
+
+    if final_status != VerificationStatus.FAIL:
+        if sha256_verified:
+            reasons.append("Intégrité SHA-256 confirmée.")
+        else:
+            reasons.append("Intégrité SHA-256 non vérifiable — hash attendu absent du manifest.")
+
+    reasons.append(
+        "Validation structurelle uniquement : la conformité FHIR ne prouve pas "
+        "la vérité médicale ni la cohérence clinique du contenu."
+    )
+
+    return FhirValidatorResult(
+        case_id=case_id,
+        status=final_status,
+        bundle_expected=bundle_expected,
+        profile_checked=profile_checked,
+        rule_version=rule_version,
+        resource_types=resource_types,
+        resource_count=len(resource_types),
+        references_checked=references_checked and final_status != VerificationStatus.FAIL,
+        validation_scope=validation_scope,
+        errors=errors,
+        warnings=warnings,
+        reasons=reasons,
+        llm_metadata=llm_metadata,
     )
 
 
@@ -283,16 +391,21 @@ def run(
 
     # Arrêt précoce sur échec SHA-256
     if sha256_errors:
-        return FhirValidatorResult(
+        return _finalize_with_llm(
             case_id=case_id,
-            status=VerificationStatus.FAIL,
+            deterministic_status=VerificationStatus.FAIL,
             bundle_expected=bundle_expected,
             profile_checked=None,
             rule_version=rule_version,
+            resource_types=[],
             validation_scope=validation_scope,
             errors=sha256_errors,
             warnings=[],
-            reasons=["Validation FHIR interrompue : intégrité du bundle non confirmée."],
+            deterministic_reasons=[
+                "Validation FHIR interrompue : intégrité du bundle non confirmée."
+            ],
+            sha256_verified=False,
+            references_checked=False,
         )
 
     # Étape 6 — validation structurelle et des ressources
@@ -309,83 +422,31 @@ def run(
         if bundle is not None and not load_errors:
             resource_types = extract_resource_types(bundle)
 
-    # ── Phase B : LLM — contexte clinique et statut final ────────────────────
-    llm_decision = _invoke_llm_fhir(
-        deterministic_status=status.value,
-        errors=list(errors),
-        warnings=list(warnings),
-        resource_types=resource_types,
-        sha256_verified=sha256_verified,
-        validation_scope=validation_scope,
-    )
-
-    # Le statut final est celui du LLM si disponible ; on ne peut pas assouplir un FAIL
-    final_status = status
-    if llm_decision is None:
-        final_status = VerificationStatus.FAIL
+    deterministic_reasons: list[str] = []
+    if status == VerificationStatus.PASS:
+        deterministic_reasons.append(
+            f"Bundle FHIR {profile_checked or fhir_version} valide — structure et ressources conformes."
+        )
+    elif status == VerificationStatus.NEEDS_REVIEW:
+        deterministic_reasons.append("Bundle FHIR chargé avec avertissements — revue recommandée.")
+        deterministic_reasons.extend(list(warnings)[:5])
     else:
-        llm_status_map = {
-            "PASS": VerificationStatus.PASS,
-            "NEEDS_REVIEW": VerificationStatus.NEEDS_REVIEW,
-            "FAIL": VerificationStatus.FAIL,
-        }
-        llm_vs = llm_status_map.get(llm_decision.recommended_status, status)
-        # Le LLM peut durcir une décision technique, jamais l'assouplir.
-        if status == VerificationStatus.PASS:
-            final_status = llm_vs
-        elif status == VerificationStatus.NEEDS_REVIEW:
-            final_status = VerificationStatus.FAIL if llm_vs == VerificationStatus.FAIL else status
+        deterministic_reasons.append("Validation FHIR échouée — voir la liste des erreurs.")
+        deterministic_reasons.extend(list(errors)[:5])
 
-    # ── Phase C : construction des raisons ────────────────────────────────────
-    reasons: list[str] = []
-
-    if llm_decision is None:
-        reasons.append("LLM indisponible : validation FHIR interrompue en mode FAIL.")
-    elif llm_decision.clinical_context:
-        reasons.append(llm_decision.clinical_context)
-
-    if llm_decision and llm_decision.reasons:
-        reasons.extend(llm_decision.reasons)
-    elif llm_decision is not None:
-        # Fallback de motifs déterministes si le LLM n'a pas fourni de raisons.
-        if final_status == VerificationStatus.PASS:
-            reasons.append(
-                f"Bundle FHIR {profile_checked or fhir_version} valide — "
-                "structure et ressources conformes."
-            )
-        elif final_status == VerificationStatus.NEEDS_REVIEW:
-            reasons.append("Bundle FHIR chargé avec avertissements — revue recommandée.")
-            reasons.extend(list(warnings)[:5])
-        else:
-            reasons.append("Validation FHIR échouée — voir la liste des erreurs.")
-            reasons.extend(list(errors)[:5])
-
-    # Statut de l'intégrité SHA-256
-    if final_status != VerificationStatus.FAIL or not sha256_errors:
-        if sha256_verified:
-            reasons.append("Intégrité SHA-256 confirmée.")
-        elif expected_sha256 is None:
-            reasons.append("Intégrité SHA-256 non vérifiable — hash attendu absent du manifest.")
-
-    reasons.append(
-        "Validation structurelle uniquement : la conformité FHIR ne prouve pas "
-        "la vérité médicale ni la cohérence clinique du contenu."
-    )
-
-    return FhirValidatorResult(
+    return _finalize_with_llm(
         case_id=case_id,
-        status=final_status,
+        deterministic_status=status,
         bundle_expected=bundle_expected,
         profile_checked=profile_checked,
         rule_version=rule_version,
         resource_types=resource_types,
-        resource_count=len(resource_types),
-        references_checked=resolved_path is not None and final_status != VerificationStatus.FAIL,
         validation_scope=validation_scope,
         errors=errors,
         warnings=warnings,
-        reasons=reasons,
-        llm_metadata=build_llm_metadata(_AGENT_NAME),
+        deterministic_reasons=deterministic_reasons,
+        sha256_verified=sha256_verified,
+        references_checked=resolved_path is not None,
     )
 
 
@@ -445,16 +506,19 @@ def node(state: ClaimState) -> dict:
         fhir_input = FhirValidatorInput(**fhir_input_raw)
     except (ValidationError, TypeError) as exc:
         case_id = str(fhir_input_raw.get("case_id", state.get("case_id", "UNKNOWN")))
-        result = FhirValidatorResult(
+        result = _finalize_with_llm(
             case_id=case_id,
-            status=VerificationStatus.FAIL,
+            deterministic_status=VerificationStatus.FAIL,
             bundle_expected=bool(fhir_input_raw.get("bundle_expected", True)),
             profile_checked=None,
             rule_version=rule_version,
+            resource_types=[],
             validation_scope="STRUCTURAL_ONLY",
             errors=[f"fhir_input invalide : {exc}"],
             warnings=[],
-            reasons=["Entrée FHIR invalide — validation Pydantic échouée."],
+            deterministic_reasons=["Entrée FHIR invalide — validation Pydantic échouée."],
+            sha256_verified=False,
+            references_checked=False,
         )
         audit = _build_audit_event(
             case_id, result, sha256_verified=False, security_gate_checked=False

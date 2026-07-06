@@ -14,7 +14,7 @@ LangGraph.  Il est sérialisé à chaque checkpoint et restauré lors d'une repr
 | **Résultats d'agents** | `intake_result`, `security_result`, `privacy_result`, `ocr_result`, `fhir_result`, `coding_result`, `clinical_result`, `fraud_result`, `review_result`, `audit_result` | Un objet Pydantic par agent, écrasable. |
 | **Historiques** | `completed_steps`, `errors`, `alerts`, `audit_trail`, `final_justification` | Append-only via reducer `operator.add`. |
 | **HITL** | `human_decision` | Écrit uniquement par le point d'interruption LangGraph. |
-| **Décision finale** | `final_recommendation`, `final_justification` | Produits par `case_reviewer_agent`. |
+| **Pré-recommandation / décision finale** | `final_recommendation`, `final_justification` | Pré-recommandation produite par `case_reviewer_agent`, issue finale après HITL/nœuds terminaux. |
 
 ---
 
@@ -161,7 +161,7 @@ nœuds successifs.
     "audit_trail": [AuditEvent(...), AuditEvent(...), ...],
     "final_justification": ["Tous les contrôles sont passés."],
 
-    # Décision finale
+    # Pré-recommandation / décision finale
     "final_recommendation": "APPROVE",
 }
 ```

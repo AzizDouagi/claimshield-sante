@@ -51,13 +51,17 @@ def mock_llm(request):
 @pytest.fixture(autouse=True)
 def deterministic_agent_llm(monkeypatch) -> None:
     """Donne aux tests hérités une réponse LLM stable et alignée sur la Phase A."""
+    from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
     from agents.claim_intake_agent.schemas import LlmIntakeDecision
+    from agents.clinical_consistency_agent.schemas import LlmClinicalDecision
     from agents.document_ocr_agent.schemas import LlmOcrDecision
     from agents.fhir_validator_agent.schemas import LlmFhirDecision
+    from agents.fraud_detection_agent.schemas import LlmFraudDecision
     from agents.identity_coverage_agent.schemas import LlmIdentityCoverageDecision
     from agents.medical_coding_agent.schemas import LlmCodingDecision
     from agents.privacy_agent.schemas import LlmPrivacyDecision
     from agents.security_gate_agent.schemas import LlmSecurityDecision
+    from schemas.domain import Recommendation
 
     def intake_decision(**kwargs):
         status = str(kwargs["global_status"]).upper()
@@ -117,6 +121,27 @@ def deterministic_agent_llm(monkeypatch) -> None:
     def coding_decision(*_args, **_kwargs):
         return LlmCodingDecision(resolved=[], overall_rationale="")
 
+    def clinical_decision(data):
+        return LlmClinicalDecision(
+            clinical_context="Contexte clinique de test aligné sur les signaux déterministes.",
+            reasons=[],
+        )
+
+    def fraud_decision(data):
+        return LlmFraudDecision(
+            rationale="Justification anti-fraude de test alignée sur les signaux déterministes.",
+            reasons=[],
+        )
+
+    def case_review_decision(data):
+        recommendation = data.get("deterministic_pre_recommendation", "PENDING")
+        return LlmCaseReviewDecision(
+            recommendation=Recommendation(recommendation),
+            summary="Synthèse reviewer de test alignée sur les résultats agents.",
+            reasons=["Pré-recommandation LLM de test non finale."],
+            human_review_reasons=["Validation humaine obligatoire en test."],
+        )
+
     monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", intake_decision)
     monkeypatch.setattr("agents.security_gate_agent.agent._invoke_llm_security", security_decision)
     monkeypatch.setattr("agents.fhir_validator_agent.agent._invoke_llm_fhir", fhir_decision)
@@ -127,4 +152,7 @@ def deterministic_agent_llm(monkeypatch) -> None:
     monkeypatch.setattr("agents.medical_coding_agent.agent._invoke_llm_react", coding_decision)
     monkeypatch.setattr("agents.privacy_agent.agent._invoke_llm_privacy", privacy_decision)
     monkeypatch.setattr("agents.document_ocr_agent.agent._invoke_llm_ocr", ocr_decision)
+    monkeypatch.setattr("agents.clinical_consistency_agent.agent._invoke_llm_clinical", clinical_decision)
+    monkeypatch.setattr("agents.fraud_detection_agent.agent._invoke_llm_fraud", fraud_decision)
+    monkeypatch.setattr("agents.case_reviewer_agent.agent._invoke_llm_case_review", case_review_decision)
     yield

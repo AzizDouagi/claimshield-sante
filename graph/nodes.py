@@ -22,15 +22,25 @@ l'orchestrateur ; ``graph/nodes.py`` ne fait plus que :
 Aucune instance globale cachée dans ce module.
 
 Agents avec implémentation réelle
-----------------------------------
+---------------------------------
 claim_intake · security_gate · privacy · fhir_validator
 medical_coding · document_ocr · identity_coverage
+clinical_consistency · fraud_detection · case_reviewer
 
-Agents avec interface injectable (stub NOT_EVALUATED/PENDING par défaut)
------------------------------------------------------------------------
-clinical_consistency · fraud_detection · case_reviewer · audit
+Agents avec interface injectable (stub NOT_EVALUATED par défaut)
+----------------------------------------------------------------
+audit
 
-Pour ces derniers, l'implémentation alternative se fournit à
+``clinical_consistency`` et ``fraud_detection`` conservent eux aussi leur
+point d'injection (``*_impl``, voir ``agents/clinical_consistency_agent/agent.py``
+et ``agents/fraud_detection_agent/agent.py``) pour l'injection de tests, mais
+leur implémentation par défaut exécute désormais une évaluation réelle
+(Phase A déterministe + Phase B LLM) — ce n'est plus un stub NOT_EVALUATED.
+``case_reviewer`` suit la même convention d'injection, avec une implémentation
+LLM réelle par défaut qui produit une pré-recommandation non finale et force la
+revue humaine.
+
+Pour case_reviewer et audit, l'implémentation alternative se fournit à
 ``build_orchestrator(*_impl=...)`` (ou ``build_workflow(*_impl=...)``, qui la
 lui transmet) — jamais en modifiant ce module.
 
@@ -425,9 +435,13 @@ def build_orchestrator(
     permet à un test de patcher ``agents.<nom>.agent.node`` après coup, comme
     avant l'introduction de l'orchestrateur.
 
-    Les 4 agents stubs utilisent leur implémentation injectée
-    (``*_impl``) si fournie, sinon leur stub NOT_EVALUATED/PENDING par
-    défaut — jamais importés en dur ailleurs que dans ce module.
+    Les 4 agents à point d'injection (``clinical_consistency``,
+    ``fraud_detection``, ``case_reviewer``, ``audit``) utilisent leur
+    implémentation injectée (``*_impl``) si fournie ; sinon, ``clinical_consistency``
+    et ``fraud_detection`` retombent sur leur évaluation réelle par défaut
+    (étape 12) tandis que ``case_reviewer`` et ``audit`` retombent sur leur
+    stub NOT_EVALUATED/PENDING — jamais importés en dur ailleurs que dans ce
+    module.
     """
     registry = model_registry if model_registry is not None else build_default_registry()
     policy = (

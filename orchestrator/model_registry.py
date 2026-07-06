@@ -44,7 +44,7 @@ class ModelCapability(str, enum.Enum):
     """Capacité qu'un modèle doit exposer pour servir un agent donné.
 
     STRUCTURED_OUTPUT — ``llm.with_structured_output(...)`` (claim_intake,
-    security_gate, privacy, fhir_validator).
+    security_gate, privacy, fhir_validator, case_reviewer).
     TOOL_CALLING — ``create_react_agent(llm, tools=...)`` (medical_coding,
     document_ocr).
     """
@@ -60,11 +60,11 @@ AGENT_REQUIRED_CAPABILITIES: dict[AgentName, frozenset[ModelCapability]] = {
     AgentName.FHIR_VALIDATOR: frozenset({ModelCapability.STRUCTURED_OUTPUT}),
     AgentName.MEDICAL_CODING: frozenset({ModelCapability.TOOL_CALLING}),
     AgentName.DOCUMENT_OCR: frozenset({ModelCapability.TOOL_CALLING}),
-    # Agents non encore câblés à un LLM (stubs) : aucune capacité requise.
+    AgentName.CASE_REVIEWER: frozenset({ModelCapability.STRUCTURED_OUTPUT}),
+    AgentName.CLINICAL_CONSISTENCY: frozenset({ModelCapability.TOOL_CALLING}),
+    AgentName.FRAUD_DETECTION: frozenset({ModelCapability.TOOL_CALLING}),
+    # Agents sans exigence déclarée à l'orchestrateur pour l'instant.
     AgentName.IDENTITY_COVERAGE: frozenset(),
-    AgentName.CLINICAL_CONSISTENCY: frozenset(),
-    AgentName.FRAUD_DETECTION: frozenset(),
-    AgentName.CASE_REVIEWER: frozenset(),
     AgentName.AUDIT: frozenset(),
 }
 """Capacités minimales requises par agent — source unique de vérité pour

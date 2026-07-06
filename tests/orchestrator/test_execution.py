@@ -33,7 +33,7 @@ from orchestrator.policies import (
     evaluate_tool_authorization,
     get_authorized_tool,
 )
-from schemas.results import MedicalCodingResult, SecurityGateResult, StructuredError
+from schemas.results import LlmMetadata, MedicalCodingResult, SecurityGateResult, StructuredError
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -89,7 +89,13 @@ def _valid_security_result(state: dict) -> dict:
 
 
 def _valid_coding_result(state: dict) -> dict:
-    return {"coding_result": MedicalCodingResult(case_id=state["case_id"], status="PASS")}
+    return {
+        "coding_result": MedicalCodingResult(
+            case_id=state["case_id"],
+            status="PASS",
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        )
+    }
 
 
 # ── 1. Sortie Pydantic invalide ───────────────────────────────────────────────

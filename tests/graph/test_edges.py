@@ -447,11 +447,15 @@ class TestRouteReview:
     def test_approve_with_human_returns_needs_review(self):
         assert route_review(_review_state(Recommendation.APPROVE, human=True)) == NEEDS_REVIEW
 
-    def test_reject_returns_end(self):
-        assert route_review(_review_state(Recommendation.REJECT)) == END
+    def test_reject_no_human_returns_end(self):
+        """Chemin défensif/legacy — l'implémentation réelle ne produit
+        jamais human_review_required=False (voir test_reject_with_human_requires_review)."""
+        assert route_review(_review_state(Recommendation.REJECT, human=False)) == END
 
-    def test_reject_with_human_still_returns_end(self):
-        assert route_review(_review_state(Recommendation.REJECT, human=True)) == END
+    def test_reject_with_human_requires_review(self):
+        """Un REJECT reste une décision de dossier : jamais finalisé
+        (END/audit) sans revue humaine, exactement comme APPROVE."""
+        assert route_review(_review_state(Recommendation.REJECT, human=True)) == NEEDS_REVIEW
 
     def test_pending_returns_needs_review(self):
         assert route_review(_review_state(Recommendation.PENDING)) == NEEDS_REVIEW

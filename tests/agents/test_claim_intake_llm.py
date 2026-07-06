@@ -3,7 +3,7 @@ from pathlib import Path
 from agents.claim_intake_agent.agent import run
 from agents.claim_intake_agent.schemas import LlmIntakeDecision
 from config.settings import Settings
-from schemas.domain import IntakeStatus
+from schemas.domain import IntakeReasonCode, IntakeStatus
 from services.storage import StorageService
 
 
@@ -35,6 +35,7 @@ def test_claim_intake_llm_nominal(tmp_path, monkeypatch):
     assert result.status == IntakeStatus.ACCEPTED
     assert result.manifest.status == IntakeStatus.ACCEPTED
     assert result.reasons == ["Dossier accepté par LLM."]
+    assert result.llm_metadata is not None
 
 
 def test_claim_intake_llm_indisponible_error(tmp_path, monkeypatch):
@@ -44,7 +45,31 @@ def test_claim_intake_llm_indisponible_error(tmp_path, monkeypatch):
 
     assert result.status == IntakeStatus.ERROR
     assert result.manifest.status == IntakeStatus.ERROR
+    assert result.llm_metadata is not None
     assert any("LLM indisponible" in reason for reason in result.reasons)
+    assert any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)
+
+
+def test_claim_intake_llm_indisponible_sur_dossier_vide_fail_closed(tmp_path, monkeypatch):
+    calls = []
+
+    def unavailable_llm(**kwargs):
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", unavailable_llm)
+    empty_source = tmp_path / "empty-source"
+    empty_source.mkdir()
+
+    result = run("CLM-9005", empty_source, storage=_storage(tmp_path))
+
+    assert len(calls) == 1
+    assert calls[0]["file_count"] == 0
+    assert result.status == IntakeStatus.ERROR
+    assert result.manifest.status == IntakeStatus.ERROR
+    assert result.llm_metadata is not None
+    assert any(error.code == IntakeReasonCode.EMPTY_CLAIM for error in result.errors)
+    assert any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)
 
 
 def test_claim_intake_llm_json_invalide_error(tmp_path, monkeypatch):
@@ -53,3 +78,4 @@ def test_claim_intake_llm_json_invalide_error(tmp_path, monkeypatch):
     result = run("CLM-9004", _source(tmp_path), storage=_storage(tmp_path))
 
     assert result.status == IntakeStatus.ERROR
+    assert any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)

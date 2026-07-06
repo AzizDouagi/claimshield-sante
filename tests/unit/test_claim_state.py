@@ -15,7 +15,7 @@ from datetime import datetime
 import pytest
 
 from schemas.domain import IntakeStatus, SecurityDecision
-from schemas.results import AuditEvent, ClaimIntakeResult, ClaimManifest, SecurityGateResult
+from schemas.results import AuditEvent, ClaimIntakeResult, ClaimManifest, LlmMetadata, SecurityGateResult
 from state.claim_state import ClaimState, validate_state_update
 
 
@@ -81,6 +81,7 @@ def test_updates_concurrentes_appendent_sans_supprimer_resultats_distincts():
         ),
         accepted_count=0,
         quarantined_count=0,
+        llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
     )
     security_result = SecurityGateResult(
         claim_id="CLM-0001",

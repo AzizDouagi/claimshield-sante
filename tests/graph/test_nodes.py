@@ -44,6 +44,7 @@ from schemas.results import (
     IdentityCoverageResult,
     IdentityResult,
     CoverageResult,
+    LlmMetadata,
     MedicalCodingResult,
     PrivacyResult,
     SecurityGateResult,
@@ -70,6 +71,7 @@ def _valid_result(name: str, case_id: str = "CLM-0001"):
             ),
             accepted_count=1,
             quarantined_count=0,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
     if name == "security_gate":
         return SecurityGateResult(claim_id=case_id, decision=SecurityDecision.ALLOW, reasons=["ok"])
@@ -81,9 +83,18 @@ def _valid_result(name: str, case_id: str = "CLM-0001"):
             contains_real_personal_data=False,
         )
     if name == "fhir_validator":
-        return FhirValidatorResult(case_id=case_id, status=VerificationStatus.PASS, bundle_expected=True)
+        return FhirValidatorResult(
+            case_id=case_id,
+            status=VerificationStatus.PASS,
+            bundle_expected=True,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        )
     if name == "medical_coding":
-        return MedicalCodingResult(case_id=case_id, status=VerificationStatus.PASS)
+        return MedicalCodingResult(
+            case_id=case_id,
+            status=VerificationStatus.PASS,
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        )
     if name == "document_ocr":
         return DocumentOcrResult(
             claim_id=case_id,
@@ -533,13 +544,14 @@ class TestNodeRetryIntegration:
                 calls["count"] += 1
                 if calls["count"] < 2:
                     raise ConnectionError("connexion refusée")
-                from schemas.results import ClinicalConsistencyResult
+                from schemas.results import ClinicalConsistencyResult, ClinicalResultPayload
 
                 return ClinicalConsistencyResult(
                     case_id=str(state.get("case_id", "CLM-0000")),
                     status=VerificationStatus.PASS,
+                    llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
                     confidence=0.9,
-                    reasons=["test: retry réussi"],
+                    result_payload=ClinicalResultPayload(reasons=["test: retry réussi"]),
                 )
 
         orch = build_orchestrator(
@@ -703,6 +715,7 @@ def _fake_medical_coding_agent(calls: list[str]):
                 case_id=state["case_id"],
                 status=VerificationStatus.PASS,
                 reasons=["faux agent déterministe : correspondance simulée"],
+                llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
             ),
             "coding_input": None,
             "current_step": "medical_coding",

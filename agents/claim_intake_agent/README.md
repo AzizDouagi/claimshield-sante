@@ -23,7 +23,13 @@ Pipeline d'exécution (dans l'ordre) :
 4. Construction du `ClaimManifest`
 5. Appel LLM avec prompt système versionné pour produire une décision Pydantic
    (`LlmIntakeDecision`) alignée sur les contrôles déterministes
-6. Retour du `ClaimIntakeResult` + persistance du manifest sur disque
+6. Retour du `ClaimIntakeResult` avec `llm_metadata` obligatoire + persistance
+   du manifest sur disque
+
+Tout chemin d'exécution passe par l'appel LLM, y compris les refus précoces
+(`EMPTY_CLAIM`, dépassement de quota). Si le LLM est indisponible ou retourne
+une réponse invalide, l'agent échoue en `ERROR` fail-closed avec une erreur
+structurée `LLM_OUTPUT_INVALID`.
 
 ---
 
@@ -86,6 +92,7 @@ ClaimIntakeResult(
     error_count=0,
     reasons=["4 fichier(s) accepté(s) et stockés — dossier prêt pour traitement"],
     errors=[],
+    llm_metadata=LlmMetadata(model_name="gemma4:latest", prompt_version="1.0.0"),
 )
 ```
 

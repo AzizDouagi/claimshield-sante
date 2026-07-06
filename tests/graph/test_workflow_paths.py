@@ -1,9 +1,10 @@
-"""Chemin nominal complet — graph/workflow.py — ClaimShield Santé.
+"""Chemin nominal jusqu'à revue humaine — graph/workflow.py — ClaimShield Santé.
 
 Un seul scénario, plusieurs angles de vérification : toutes les vérifications
-réussissent (ACCEPTED/ALLOW/PASS/APPROVE), le pipeline traverse les 12 nœuds
-métier dans l'ordre défini par la feuille de route et atteint END, sans
-aucune interruption ni échec.
+réussissent (ACCEPTED/ALLOW/PASS/APPROVE), puis le Case Reviewer produit une
+pré-recommandation non finale. La revue humaine est obligatoire : le pipeline
+s'arrête donc à ``needs_review`` avec interruption HITL, sans audit/finalize
+avant validation humaine.
 
 Aucun appel LLM réel : les 7 agents réels (claim_intake, security_gate,
 privacy, document_ocr, fhir_validator, identity_coverage, medical_coding)
@@ -12,8 +13,8 @@ noms ``graph.workflow`` **avant** l'appel à ``compile_workflow()`` — LangGrap
 capture les fonctions au moment du ``add_node()``. case_reviewer utilise le
 mécanisme d'injection réel (``case_reviewer_impl=``) plutôt qu'un
 monkeypatch, pour exercer le chemin d'injection officiel. clinical_consistency,
-fraud_detection et audit restent sur leurs stubs par défaut (NOT_EVALUATED) :
-ce sont des objets Python déterministes, sans LLM.
+fraud_detection reste sur son implémentation déterministe de test ; audit ne
+s'exécute pas avant la revue humaine.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult
+from schemas.results import CaseReviewerResult, LlmMetadata
 
 # ── Ordre métier attendu (feuille de route) ──────────────────────────────────
 
@@ -47,8 +48,7 @@ EXPECTED_NOMINAL_ORDER: list[str] = [
     "clinical_consistency",
     "fraud_detection",
     "case_reviewer",
-    "audit",
-    "finalize",
+    "needs_review",
 ]
 
 # Agents réels remplacés par de faux agents déterministes (jamais de LLM).
@@ -102,6 +102,7 @@ class _ApprovingCaseReviewer:
             justification=["Toutes les vérifications ont réussi — approbation nominale."],
             human_review_required=False,
             human_review_reasons=[],
+            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
         )
 
 
@@ -208,7 +209,7 @@ def nominal_app(deterministic_agents: dict[str, int], call_counts: dict[str, int
     """Workflow compilé pour le chemin nominal complet.
 
     ``interrupt_before=[]`` : aucune interruption HITL statique n'est
-    pertinente ici (le dossier ne déclenche jamais needs_review).
+    pertinente ici ; l'interruption dynamique vient de ``await_human_review``.
     ``case_reviewer_impl`` : injection réelle d'une approbation déterministe.
     """
     reviewer = _ApprovingCaseReviewer(call_counts)
@@ -234,14 +235,14 @@ def valid_claim_state() -> dict:
 
 
 class TestNominalPath:
-    """Chemin nominal complet — toutes les vérifications réussissent."""
+    """Chemin nominal — toutes les vérifications réussissent avant HITL."""
 
-    def test_reaches_end_with_approve_and_no_errors(self, nominal_app, valid_claim_state):
+    def test_reaches_human_review_with_approve_and_no_errors(self, nominal_app, valid_claim_state):
         result = nominal_app.invoke(valid_claim_state)
 
-        assert "__interrupt__" not in result
+        assert "__interrupt__" in result
         assert result.get("final_recommendation") == Recommendation.APPROVE
-        assert result.get("current_step") == "finalize"
+        assert result.get("current_step") == "needs_review"
         assert result.get("errors", []) == []
 
     def test_completed_steps_follows_business_order(self, nominal_app, valid_claim_state):
@@ -266,8 +267,10 @@ class TestNominalPath:
             assert count == 1, f"{name} appelé {count} fois (attendu 1)"
 
     def test_no_node_outside_expected_order_completes(self, nominal_app, valid_claim_state):
-        """Aucune étape imprévue (quarantine, needs_review, failure) ne s'exécute."""
+        """Aucune étape terminale ne s'exécute avant validation humaine."""
         result = nominal_app.invoke(valid_claim_state)
 
         unexpected = set(result["completed_steps"]) - set(EXPECTED_NOMINAL_ORDER)
         assert unexpected == set()
+        assert "audit" not in result["completed_steps"]
+        assert "finalize" not in result["completed_steps"]

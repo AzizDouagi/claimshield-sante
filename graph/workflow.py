@@ -334,13 +334,17 @@ def build_workflow(
             ``await_human_review`` avant de router vers ``failure``.
             ``None`` → ``Settings.claimshield_max_correction_attempts``.
         clinical_consistency_impl: Implémentation injectable de l'agent
-            clinical_consistency (étape non encore livrée). ``None`` → stub
-            NOT_EVALUATED. Jamais importée en dur : transmise à
+            clinical_consistency (étape 12 — implémenté). ``None`` → évaluation
+            réelle par défaut (Phase A déterministe + Phase B LLM, voir
+            ``agents/clinical_consistency_agent/agent.py``). Jamais importée
+            en dur : transmise à
             ``build_orchestrator(clinical_consistency_impl=...)`` (ignorée
             si ``orchestrator`` est fourni explicitement).
-        fraud_detection_impl: Idem pour fraud_detection (``None`` → stub
-            NOT_EVALUATED).
-        case_reviewer_impl: Idem pour case_reviewer (``None`` → stub PENDING).
+        fraud_detection_impl: Idem pour fraud_detection (``None`` → évaluation
+            réelle par défaut, étape 12).
+        case_reviewer_impl: Idem pour case_reviewer (``None`` → synthèse LLM
+            réelle par défaut, pré-recommandation non finale + revue humaine
+            obligatoire).
         audit_impl: Idem pour audit (``None`` → stub NOT_EVALUATED).
 
     Returns:
@@ -368,19 +372,19 @@ def build_workflow(
             impl is not None
             for impl in (clinical_consistency_impl, fraud_detection_impl, case_reviewer_impl, audit_impl)
         ):
-            stub_orchestrator = build_orchestrator(
+            injectable_orchestrator = build_orchestrator(
                 clinical_consistency_impl=clinical_consistency_impl,
                 fraud_detection_impl=fraud_detection_impl,
                 case_reviewer_impl=case_reviewer_impl,
                 audit_impl=audit_impl,
             )
-            stub_nodes = build_node_registry(stub_orchestrator)
+            injectable_nodes = build_node_registry(injectable_orchestrator)
         else:
-            stub_nodes = _default_agent_nodes
-        # Les 7 agents réels utilisent l'orchestrateur par défaut du module
+            injectable_nodes = _default_agent_nodes
+        # Les agents réels utilisent l'orchestrateur par défaut du module
         # (``_default_orchestrator``) — noms de module monkeypatchables
         # individuellement (ex. tests), exactement comme avant l'introduction
-        # de l'orchestrateur. Seuls les 4 agents stubs varient avec *_impl.
+        # de l'orchestrateur. Les agents injectables varient avec *_impl.
         node_fns = {
             "claim_intake": node_claim_intake,
             "security_gate": node_security_gate,
@@ -389,10 +393,10 @@ def build_workflow(
             "fhir_validator": node_fhir_validator,
             "identity_coverage": node_identity_coverage,
             "medical_coding": node_medical_coding,
-            "clinical_consistency": stub_nodes["clinical_consistency"],
-            "fraud_detection": stub_nodes["fraud_detection"],
-            "case_reviewer": stub_nodes["case_reviewer"],
-            "audit": stub_nodes["audit"],
+            "clinical_consistency": injectable_nodes["clinical_consistency"],
+            "fraud_detection": injectable_nodes["fraud_detection"],
+            "case_reviewer": injectable_nodes["case_reviewer"],
+            "audit": injectable_nodes["audit"],
         }
 
     graph = StateGraph(ClaimState)
@@ -408,8 +412,10 @@ def build_workflow(
     graph.add_node("identity_coverage", node_fns["identity_coverage"])
     graph.add_node("medical_coding", node_fns["medical_coding"])
 
-    # ── Nœuds agents — interfaces injectables (stubs NOT_EVALUATED/PENDING) ──
+    # ── Nœuds agents — interfaces injectables ────────────────────────────────
     #
+    # clinical_consistency, fraud_detection et case_reviewer évaluent réellement
+    # par défaut ; audit reste un stub NOT_EVALUATED.
     # Jamais importés en dur : l'implémentation (*_impl, voir build_orchestrator)
     # est déjà résolue dans orchestrator.agent_registry — ce module ne fait que
     # câbler le nœud générique correspondant.
@@ -545,8 +551,10 @@ def build_workflow(
     # ── Arêtes normales — stubs et nœuds de clôture ──────────────────────────
     #
     # Règle : ces nœuds n'ont PAS de add_conditional_edges.
-    # clinical_consistency et fraud_detection sont des stubs NOT_EVALUATED :
-    # leur sortie est déterministe — aucune décision de routage requise.
+    # clinical_consistency et fraud_detection (étape 12) écrivent bien un
+    # statut réel (PASS/NEEDS_REVIEW/FAIL) mais ne routent pas encore le
+    # graphe eux-mêmes — cette synthèse reste le rôle de case_reviewer ; leur
+    # arête de sortie reste donc inconditionnelle.
 
     graph.add_edge("clinical_consistency", "fraud_detection")
     graph.add_edge("fraud_detection", "case_reviewer")

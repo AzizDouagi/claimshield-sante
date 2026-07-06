@@ -39,8 +39,10 @@ from types import ModuleType
 from langchain_core.tools import BaseTool
 
 from agents.claim_intake_agent import tools as _claim_intake_tools
+from agents.clinical_consistency_agent import tools as _clinical_consistency_tools
 from agents.document_ocr_agent import tools as _document_ocr_tools
 from agents.fhir_validator_agent import tools as _fhir_validator_tools
+from agents.fraud_detection_agent import tools as _fraud_detection_tools
 from agents.identity_coverage_agent import tools as _identity_coverage_tools
 from agents.medical_coding_agent import tools as _medical_coding_tools
 from agents.privacy_agent import tools as _privacy_tools
@@ -116,8 +118,9 @@ _TOOL_MODULE_BY_AGENT: dict[AgentName, ModuleType] = {
     AgentName.MEDICAL_CODING: _medical_coding_tools,
     AgentName.DOCUMENT_OCR: _document_ocr_tools,
     AgentName.IDENTITY_COVERAGE: _identity_coverage_tools,
-    # clinical_consistency / fraud_detection / case_reviewer / audit : stubs
-    # sans module tools.py — absents de ce dict, traités via .get(..., ()) ci-dessous.
+    AgentName.CLINICAL_CONSISTENCY: _clinical_consistency_tools,
+    AgentName.FRAUD_DETECTION: _fraud_detection_tools,
+    # Agents sans module tools.py — absents de ce dict, traités via .get(..., ()) ci-dessous.
 }
 
 
@@ -148,8 +151,8 @@ ALLOWED_TOOLS_PER_AGENT: dict[AgentName, frozenset[str]] = {
     for agent_name, tools_by_name in _TOOL_OBJECTS_BY_AGENT.items()
 }
 """Outils ``@tool`` autorisés par agent, dérivés par introspection des
-modules ``agents/<nom>/tools.py`` réels. Les 4 agents stubs (clinical_
-consistency, fraud_detection, case_reviewer, audit) n'ont pas d'entrée :
+modules ``agents/<nom>/tools.py`` réels. Les agents sans ``tools.py``
+(clinical_consistency, fraud_detection, case_reviewer, audit) n'ont pas d'entrée :
 ``evaluate_tool_authorization`` retombe alors sur un frozenset vide — aucun
 outil n'est autorisé pour un agent qui n'a pas encore de tools.py."""
 
@@ -157,7 +160,7 @@ outil n'est autorisé pour un agent qui n'a pas encore de tools.py."""
 def evaluate_tool_authorization(agent_name: AgentName, tool_name: str) -> PolicyDecision:
     """ALLOW si ``tool_name`` fait partie des outils réels exposés par
     ``agents/<agent_name>/tools.py``, DENY sinon (y compris pour les 4
-    agents stubs, qui n'ont aucun outil autorisé)."""
+    agents sans ``tools.py``, qui n'ont aucun outil autorisé)."""
     allowed = ALLOWED_TOOLS_PER_AGENT.get(agent_name, frozenset())
     if tool_name in allowed:
         return PolicyDecision(
@@ -207,7 +210,7 @@ def build_authorized_tools(agent_name: AgentName) -> tuple[BaseTool, ...]:
     même pas sa description. Le prompt système n'est jamais le mécanisme de
     permission — seule cette liste l'est.
 
-    Un agent sans ``tools.py`` (les 4 stubs) reçoit un tuple vide.
+    Un agent sans ``tools.py`` reçoit un tuple vide.
     """
     return tuple(_TOOL_OBJECTS_BY_AGENT.get(agent_name, {}).values())
 
@@ -221,7 +224,7 @@ def get_authorized_tool(agent_name: AgentName, tool_name: str) -> BaseTool:
       - un outil réel mais appartenant à un autre agent (tentative de
         contournement : demander par son nom un outil absent de la propre
         allowlist de l'agent, en espérant qu'aucun contrôle ne le refasse) ;
-      - un agent sans allowlist (stub).
+      - un agent sans allowlist d'outils.
 
     Lève ``ToolAccessError`` dans tous ces cas — jamais d'accès « par
     défaut » à un outil non listé, quel que soit le contenu du prompt

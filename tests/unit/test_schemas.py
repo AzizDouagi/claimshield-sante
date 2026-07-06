@@ -26,6 +26,7 @@ from schemas.domain import (
 from schemas.results import (
     AuditResult,
     FraudDetectionResult,
+    FraudResultPayload,
     IdentityCoverageResult,
     IdentityResult,
     CoverageResult,
@@ -152,7 +153,7 @@ def test_mutable_collections_use_default_factory():
         EncounterInfo.model_fields["diagnosis_codes"],
         SecurityGateResult.model_fields["findings"],
         IdentityCoverageResult.model_fields["evidence"],
-        FraudDetectionResult.model_fields["signals"],
+        FraudResultPayload.model_fields["signals"],
     ]
     for field in collection_fields:
         assert field.default_factory is not None
@@ -276,21 +277,32 @@ def test_resultats_agents_acceptent_uniquement_metadata_llm_minimales():
         prompt_version="1.0.0",
         confidence=0.82,
     )
-    result_classes = [
-        res.ClaimIntakeResult,
-        res.SecurityGateResult,
-        res.PrivacyResult,
-        res.IdentityCoverageResult,
-        res.FhirValidatorResult,
-        res.DocumentOcrResult,
-        res.MedicalCodingResult,
-        res.ClinicalConsistencyResult,
-        res.FraudDetectionResult,
-        res.CaseReviewerResult,
-        res.AuditResult,
+    result_classes_with_trace_field = [
+        (res.ClaimIntakeResult, "llm_metadata"),
+        (res.SecurityGateResult, "llm_metadata"),
+        (res.PrivacyResult, "llm_metadata"),
+        (res.IdentityCoverageResult, "llm_metadata"),
+        (res.FhirValidatorResult, "llm_metadata"),
+        (res.DocumentOcrResult, "llm_metadata"),
+        (res.MedicalCodingResult, "llm_metadata"),
+        (res.ClinicalConsistencyResult, "llm_trace"),
+        (res.FraudDetectionResult, "llm_trace"),
+        (res.CaseReviewerResult, "llm_metadata"),
+        (res.AuditResult, "llm_metadata"),
     ]
-    for result_class in result_classes:
-        assert result_class.model_fields["llm_metadata"].annotation == LlmMetadata | None
+    for result_class, trace_field_name in result_classes_with_trace_field:
+        required_trace_classes = {
+            res.ClaimIntakeResult,
+            res.CaseReviewerResult,
+            res.FhirValidatorResult,
+            res.MedicalCodingResult,
+            res.ClinicalConsistencyResult,
+            res.FraudDetectionResult,
+        }
+        expected_annotation = (
+            LlmMetadata if result_class in required_trace_classes else LlmMetadata | None
+        )
+        assert result_class.model_fields[trace_field_name].annotation == expected_annotation
 
     gate = res.SecurityGateResult(
         claim_id="CLM-0001",
@@ -491,6 +503,7 @@ def test_all_models_json_serializable():
             ),
             accepted_count=0,
             quarantined_count=0,
+            llm_metadata=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
         ),
         res.SecurityGateResult(
             claim_id="CLM-0001",
@@ -508,7 +521,12 @@ def test_all_models_json_serializable():
             identity=res.IdentityResult(status=dom.VerificationStatus.PASS),
             coverage=res.CoverageResult(status=dom.VerificationStatus.PASS),
         ),
-        res.FhirValidatorResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS, bundle_expected=True),
+        res.FhirValidatorResult(
+            case_id="CLM-0001",
+            status=dom.VerificationStatus.PASS,
+            bundle_expected=True,
+            llm_metadata=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
         res.DocumentOcrResult(
             claim_id="CLM-0001",
             file_path="incoming/CLM-0001/facture.pdf",
@@ -519,10 +537,28 @@ def test_all_models_json_serializable():
             document_type=dom.DocumentType.INVOICE,
             ocr_source=dom.OcrSource.PDF_TEXT,
         ),
-        res.MedicalCodingResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
-        res.ClinicalConsistencyResult.model_validate({"case_id": "CLM-0001", "status": "PASS"}),
-        res.FraudDetectionResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
-        res.CaseReviewerResult(case_id="CLM-0001", recommendation=dom.Recommendation.APPROVE),
+        res.MedicalCodingResult(
+            case_id="CLM-0001",
+            status=dom.VerificationStatus.PASS,
+            llm_metadata=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
+        res.ClinicalConsistencyResult.model_validate(
+            {
+                "case_id": "CLM-0001",
+                "status": "PASS",
+                "llm_trace": {"model_name": "test-llm", "prompt_version": "test"},
+            }
+        ),
+        res.FraudDetectionResult(
+            case_id="CLM-0001",
+            status=dom.VerificationStatus.PASS,
+            llm_trace=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
+        res.CaseReviewerResult(
+            case_id="CLM-0001",
+            recommendation=dom.Recommendation.APPROVE,
+            llm_metadata=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+        ),
         res.AuditEvent(case_id="CLM-0001", event_id="evt-1", actor="intake", action="ingest", outcome="ok"),
         res.AuditResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),
     ]
@@ -540,8 +576,11 @@ def test_fraud_result_from_oracle():
     result = FraudDetectionResult(
         case_id=gt["case_id"],
         status=VerificationStatus(ef["status"]),
-        duplicate_invoice=ef["duplicate_invoice"],
-        reasons=ef["reasons"],
+        llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        result_payload=FraudResultPayload(
+            duplicate_invoice=ef["duplicate_invoice"],
+            reasons=ef["reasons"],
+        ),
     )
-    assert result.duplicate_invoice is False
+    assert result.result_payload.duplicate_invoice is False
     assert result.status == VerificationStatus.PASS
