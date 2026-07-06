@@ -6,6 +6,19 @@
 - Ajouts associés : `agents/case_reviewer_agent/prompt.py`, `prompts/case_reviewer_agent.yaml`, `LlmCaseReviewDecision`, tests `tests/agents/test_case_reviewer_llm.py`.
 - Dette restante dans cette section : `audit_agent` reste à migrer vers un vrai agent LLM ; les constats historiques ci-dessous sont conservés comme référence d'audit initiale.
 
+## Mise à jour post-audit — Relance humaine (RELAUNCH_TARGETS)
+
+- Résolu après audit : le constat MAJEUR « Relance humaine exclut clinical/fraud/case/audit » (`graph/edges.py:64`, lignes 298/564/611/636 ci-dessous) est partiellement résolu. `clinical_consistency`, `fraud_detection` et `case_reviewer` sont réintégrés dans `RELAUNCH_TARGETS`/`RELAUNCH_RESULT_FIELDS` — ils n'étaient exclus que tant qu'ils restaient des stubs ; leur implémentation réelle (étape 12) permet désormais de les relancer individuellement après une décision NEEDS_MORE_INFO, sous la même précondition que les 7 agents historiques (résultat déjà présent pour ce dossier).
+- `audit` reste volontairement exclu : `audit_agent` demeure un stub jamais évalué avant la revue humaine dans le pipeline actuel — sa précondition de relance ne peut structurellement jamais être satisfaite à ce stade. Ce n'est donc plus une lacune mais une garantie explicite, documentée dans `graph/edges.py::RELAUNCH_TARGETS`.
+- Tests associés : `tests/graph/test_edges.py` (relance/précondition pour les 3 agents réintégrés, refus explicite d'`audit`), `tests/graph/test_workflow.py::test_relaunch_to_clinical_consistency_reexecutes_it` (preuve bout-en-bout sur graphe compilé réel).
+
+## Mise à jour post-audit — Chemin de bypass de l'audit (route_human_review)
+
+- Résolu après audit : le constat « Human-in-the-loop : chemin de bypass théorique et trace audit humaine insuffisante » (ligne 85 ci-dessous) était réel, pas seulement théorique — `route_human_review` routait `APPROVE` directement vers `END` et `REJECT` directement vers `failure`, court-circuitant systématiquement le nœud `audit` (qui n'était donc jamais atteint par aucun chemin réellement exécuté du graphe compilé, puisque `case_reviewer` force toujours la revue humaine).
+- `route_human_review` route désormais `APPROVE`/`MODIFY`/`REJECT` tous les trois vers `audit` — aucun chemin terminal ne le contourne. Un nouveau `route_after_audit` décide ensuite `finalize` (nominal) ou `failure` (rejet contrôlé) selon la décision humaine enregistrée, remplaçant l'ancienne arête inconditionnelle `audit → finalize` (qui ne pouvait de toute façon jamais représenter un rejet).
+- `graph/technical_nodes.py::ALLOWED_HUMAN_ACTIONS` étendu à `MODIFY` (traité comme `APPROVE`).
+- Tests associés : `tests/graph/test_edges.py::TestRouteHumanReview`/`TestRouteAfterAudit`, `tests/graph/test_workflow.py::test_audit_has_conditional_edges`, `tests/graph/test_workflow_interrupt_resume.py` (preuve bout-en-bout : `audit`/`finalize` dans `completed_steps` pour APPROVE, `audit`/`failure` pour REJECT).
+
 ## 1. Résumé exécutif
 
 - Score global : 68/100

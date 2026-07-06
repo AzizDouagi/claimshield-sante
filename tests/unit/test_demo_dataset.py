@@ -27,6 +27,7 @@ from schemas.domain import (
 )
 from schemas.results import (
     CaseReviewerResult,
+    CaseReviewerResultPayload,
     ClinicalConsistencyResult,
     ClinicalResultPayload,
     CoverageResult,
@@ -389,9 +390,10 @@ def test_case_reviewer_result_valide(case_id: str):
     gt = load_gt(case_id)
     CaseReviewerResult(
         case_id=case_id,
-        recommendation=Recommendation(gt["expected_recommendation"]),
-        justification=gt.get("recommendation_reasons", []),
-        human_review_required=gt.get("human_review_required", False),
-        human_review_reasons=gt.get("human_review_reasons", []),
-        llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+        result_payload=CaseReviewerResultPayload(
+            recommendation=Recommendation(gt["expected_recommendation"]),
+            justification=gt.get("recommendation_reasons", []),
+            human_review_reasons=gt.get("human_review_reasons") or ["Validation humaine obligatoire."],
+        ),
     )

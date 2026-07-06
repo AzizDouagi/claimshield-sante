@@ -136,7 +136,7 @@ class TestInterruptAndResume:
         counts_before_resume = dict(call_counts)
 
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
             config=config,
         )
 
@@ -155,36 +155,43 @@ class TestInterruptAndResume:
 
     def test_human_decision_is_integrated_before_continuation(self, monkeypatch):
         """La décision humaine détermine effectivement la suite : APPROVE
-        termine directement à END, sans passer par failure."""
+        traverse audit puis finalize (jamais failure) avant d'atteindre END —
+        aucun chemin terminal ne contourne l'audit."""
         app, _, _ = _build_app(monkeypatch)
         config = make_thread_config("CLM-0003")
         app.invoke(_initial_state("CLM-0003"), config=config)
 
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
             config=config,
         )
 
-        assert result["human_decision"]["decision"] == "APPROVE"
+        assert result["human_decision"]["action"] == "APPROVE"
         assert result["human_decision"]["actor"] == "reviewer@example.com"
         assert "await_human_review" in result["completed_steps"]
+        assert "audit" in result["completed_steps"]
+        assert "finalize" in result["completed_steps"]
         assert "__interrupt__" not in result
         assert "failure" not in result["completed_steps"]
 
     def test_reject_decision_routes_to_failure_instead_of_approve(self, monkeypatch):
         """Preuve complémentaire que la décision pilote réellement la suite :
-        une décision différente (REJECT) produit un chemin différent."""
+        une décision différente (REJECT) produit un chemin différent — mais
+        traverse elle aussi audit d'abord (rejet contrôlé, jamais un
+        contournement direct vers failure)."""
         app, _, _ = _build_app(monkeypatch)
         config = make_thread_config("CLM-0004")
         app.invoke(_initial_state("CLM-0004"), config=config)
 
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "REJECT"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "REJECT", "justification": "Preuves insuffisantes."}),
             config=config,
         )
 
-        assert result["human_decision"]["decision"] == "REJECT"
+        assert result["human_decision"]["action"] == "REJECT"
+        assert "audit" in result["completed_steps"]
         assert "failure" in result["completed_steps"]
+        assert "finalize" not in result["completed_steps"]
         assert result.get("final_recommendation") == Recommendation.REJECT
 
     def test_different_thread_id_does_not_recover_previous_state(self, monkeypatch):
@@ -194,7 +201,7 @@ class TestInterruptAndResume:
 
         other_config = make_thread_config("CLM-0006")
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
             config=other_config,
         )
 

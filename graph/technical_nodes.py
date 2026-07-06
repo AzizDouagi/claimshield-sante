@@ -31,13 +31,16 @@ Distinction avec les nœuds agents (``graph/nodes.py``)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
+from graph.checkpoints import get_thread_id
+from human_review.models import ReviewAction
+from human_review.service import validate_and_audit_human_decision
 from schemas.domain import Recommendation
-from state.claim_state import ClaimState, HumanDecision, validate_state_update
+from state.claim_state import ClaimState, validate_state_update
 
 
 # ── Configuration immuable d'un nœud technique ───────────────────────────────
@@ -110,8 +113,19 @@ node_needs_review = _make_technical_node(_TechnicalNodeConfig(
 
 # ── Nœud HITL — interruption LangGraph dynamique ─────────────────────────────
 
-ALLOWED_HUMAN_ACTIONS: tuple[str, ...] = ("APPROVE", "REJECT", "NEEDS_MORE_INFO")
-"""Actions que l'intervenant peut choisir en réponse à l'interruption."""
+ALLOWED_HUMAN_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewAction)
+"""Actions que l'intervenant peut choisir en réponse à l'interruption —
+dérivées directement de ``human_review.models.ReviewAction``
+(``APPROVE``/``MODIFY``/``REJECT``/``RETRY``), source unique de vérité :
+jamais recopiées en dur ici, pour ne jamais désynchroniser les deux.
+
+``MODIFY`` est traité par ``graph.edges.route_human_review`` comme
+``APPROVE`` : un chemin terminal (vers ``audit`` puis ``finalize``), jamais
+un chemin de relance — il ne porte donc pas de ``target_node`` (même
+validation que ``APPROVE``/``REJECT``, appliquée par
+``human_review.models.HumanDecision``). ``RETRY`` (anciennement
+``NEEDS_MORE_INFO``, renommé lors de l'unification des deux vocabulaires)
+est la seule action à en exiger un — voir ``route_human_review``."""
 
 # Champs *_result inspectés pour construire les preuves minimisées de l'interruption.
 _EVIDENCE_RESULT_KEYS: tuple[str, ...] = (
@@ -158,96 +172,143 @@ def _collect_motifs(state: ClaimState) -> list[str]:
     return motifs or ["Revue humaine requise — aucun motif spécifique enregistré."]
 
 
-def _build_human_review_payload(state: ClaimState) -> dict[str, Any]:
-    """Construit le payload transmis à ``interrupt()`` — aucune donnée brute."""
+def _collect_review_result_summary(state: ClaimState) -> dict[str, Any] | None:
+    """Résumé minimisé de la synthèse ``case_reviewer_agent``, si disponible.
+
+    Ne renvoie jamais le ``CaseReviewerResult`` complet (instance Pydantic) —
+    un payload d'interruption doit rester JSON-natif et minimal : uniquement
+    la pré-recommandation (toujours révisable), sa justification et les
+    risques déjà calculés par l'agent. ``None`` si ``review_result`` n'a pas
+    encore été produit pour ce dossier.
+    """
+    review_result = state.get("review_result")
+    payload = getattr(review_result, "result_payload", None)
+    if payload is None:
+        return None
+    recommendation = getattr(payload, "recommendation", None)
+    return {
+        "recommendation": str(getattr(recommendation, "value", recommendation))
+        if recommendation is not None
+        else None,
+        "justification": list(getattr(payload, "justification", None) or []),
+        "risks": list(getattr(payload, "risks", None) or []),
+    }
+
+
+def _extract_thread_id(config: Mapping[str, Any] | None) -> str | None:
+    """Extrait le ``thread_id`` de la configuration LangGraph, si présente.
+
+    Retourne ``None`` plutôt que de lever — un appel direct hors contexte de
+    graphe (tests, ``config`` absent) ne doit jamais empêcher la construction
+    du payload ; c'est ``interrupt()`` lui-même qui échoue dans ce cas
+    (``RuntimeError``, aucun runtime de graphe disponible).
+    """
+    if config is None:
+        return None
+    try:
+        return get_thread_id(config)
+    except ValueError:
+        return None
+
+
+def _build_human_review_payload(
+    state: ClaimState, *, thread_id: str | None = None
+) -> dict[str, Any]:
+    """Construit le payload transmis à ``interrupt()`` — aucune donnée brute.
+
+    Contient ``case_id``, ``thread_id`` (identifiant de reprise — nécessaire
+    pour retrouver le bon checkpoint via ``Command(resume=...)``), les
+    motifs de revue, des preuves minimisées, un résumé de la synthèse
+    ``case_reviewer_agent`` (``review_result``, voir
+    ``_collect_review_result_summary``) et les actions autorisées.
+    """
     return {
         "case_id": str(state.get("case_id", "INCONNU")),
+        "thread_id": thread_id,
         "motifs": _collect_motifs(state),
         "preuves_minimisees": _collect_minimized_evidence(state),
+        "review_result": _collect_review_result_summary(state),
         "actions_autorisees": list(ALLOWED_HUMAN_ACTIONS),
     }
 
 
-def _validate_human_decision(raw: Any) -> HumanDecision:
-    """Valide la décision fournie à la reprise via ``Command(resume=...)``.
-
-    Lève ``ValueError`` si la décision est absente, mal formée ou hors du
-    périmètre autorisé — la reprise n'accepte qu'une décision validée.
-    """
-    if not isinstance(raw, Mapping):
-        raise ValueError(
-            "Décision humaine invalide : un mapping est attendu en reprise "
-            f"(reçu {type(raw).__name__})"
-        )
-
-    actor = raw.get("actor")
-    if not isinstance(actor, str) or not actor.strip():
-        raise ValueError("Décision humaine invalide : champ 'actor' obligatoire et non vide.")
-
-    decision = raw.get("decision")
-    if decision not in ALLOWED_HUMAN_ACTIONS:
-        raise ValueError(
-            f"Décision humaine invalide : {decision!r} — attendu l'une de "
-            f"{ALLOWED_HUMAN_ACTIONS}"
-        )
-
-    target_node = raw.get("target_node")
-    if decision == "NEEDS_MORE_INFO":
-        if not isinstance(target_node, str) or not target_node.strip():
-            raise ValueError(
-                "Décision humaine invalide : 'target_node' obligatoire et non vide "
-                "pour NEEDS_MORE_INFO — le nœud à relancer doit être explicite."
-            )
-    elif target_node is not None:
-        raise ValueError(
-            "Décision humaine invalide : 'target_node' n'est autorisé qu'avec "
-            "NEEDS_MORE_INFO."
-        )
-
-    validated: HumanDecision = {
-        "actor": actor.strip(),
-        "decision": decision,
-        "decided_at": raw.get("decided_at") or datetime.now(UTC),
-    }
-    if decision == "NEEDS_MORE_INFO":
-        validated["target_node"] = target_node.strip()
-    comment = raw.get("comment")
-    if isinstance(comment, str) and comment.strip():
-        validated["comment"] = comment.strip()
-    return validated
+def _collect_decision_evidence_ids(state: ClaimState) -> list[str]:
+    """Identifiants de preuves déjà validées par ``case_reviewer_agent``,
+    tracés dans l'audit de la décision humaine — jamais recalculés ici."""
+    review_result = state.get("review_result")
+    return list(getattr(review_result, "evidence_ids", None) or [])
 
 
-def node_await_human_review(state: ClaimState) -> dict:
+def node_await_human_review(
+    state: ClaimState, config: Optional[RunnableConfig] = None
+) -> dict:
     """Suspend le graphe via ``interrupt()`` en attente d'une décision humaine.
 
-    Le payload transmis à ``interrupt()`` contient ``case_id``, les motifs de
-    revue, des preuves minimisées (statuts/décisions déjà publics des agents,
-    jamais de contenu brut) et les actions autorisées. La reprise se fait par
-    ``app.invoke(Command(resume=decision), config=...)`` en réutilisant
-    obligatoirement le même ``thread_id`` que l'invocation initiale — sinon
-    LangGraph ne retrouve pas le checkpoint en attente et redémarre le nœud
-    depuis le début plutôt que de reprendre l'exécution interrompue.
+    Le payload transmis à ``interrupt()`` contient ``case_id``, ``thread_id``
+    (extrait de ``config`` — ``None`` si absent, ex. appel direct hors
+    graphe), un résumé minimisé de ``review_result`` (pré-recommandation,
+    justification, risques — voir ``_collect_review_result_summary``), les
+    motifs de revue, des preuves minimisées (statuts/décisions déjà publics
+    des agents, jamais de contenu brut) et les actions autorisées. La
+    reprise se fait par ``app.invoke(Command(resume=decision), config=...)``
+    en réutilisant obligatoirement le même ``thread_id`` que l'invocation
+    initiale — sinon LangGraph ne retrouve pas le checkpoint en attente et
+    redémarre le nœud depuis le début plutôt que de reprendre l'exécution
+    interrompue.
 
-    Pour une décision NEEDS_MORE_INFO, incrémente ``correction_attempts`` —
+    La décision reprise est validée par
+    ``human_review.service.validate_and_audit_human_decision`` — le même
+    modèle Pydantic strict (``human_review.models.HumanDecision``,
+    ``extra="forbid"``, ``justification`` obligatoire) que le contrat
+    framework-agnostique de ``human_review/`` : ce nœud n'a plus sa propre
+    validation maison. ``case_id`` n'a pas besoin d'être fourni explicitement
+    dans le payload de reprise — il est complété automatiquement depuis le
+    state si absent (déjà connu du graphe, redondant à redemander à
+    l'humain). Toute décision invalide (justification absente, action
+    inconnue, ``target_node`` manquant/superflu...) lève
+    ``HumanDecisionValidationError`` (sous-classe de ``ValueError``) : la
+    fonction n'atteint jamais son ``return``, aucune mise à jour de state
+    n'est produite, ``human_decision`` n'est jamais fixé, et
+    ``graph.edges.route_human_review`` (qui route vers ``END``/``failure``/
+    une relance) n'est donc jamais atteint. Le graphe ne peut jamais
+    progresser vers ``END`` sur la base d'une décision invalide.
+
+    La décision validée est à la fois stockée dans ``human_decision``
+    (``model_dump(mode="json")`` — un dict JSON-natif, pas l'instance
+    Pydantic) et **auditée** : l'``AuditEvent`` retourné par
+    ``validate_and_audit_human_decision`` (action, justification tronquée,
+    auteur, horodatage de la décision, preuves déjà validées par
+    ``case_reviewer_agent``) est ajouté à ``audit_trail`` — jamais de
+    document brut, de prompt complet ou de texte OCR complet.
+
+    Pour une décision RETRY, incrémente ``correction_attempts`` —
     le compteur que ``graph.edges.route_human_review`` compare à une limite
     configurable (``Settings.claimshield_max_correction_attempts``) avant
     d'autoriser la relance vers ``human_decision.target_node``.
     """
     case_id = str(state.get("case_id", "INCONNU"))
-    payload = _build_human_review_payload(state)
+    thread_id = _extract_thread_id(config)
+    payload = _build_human_review_payload(state, thread_id=thread_id)
     raw_decision = interrupt(payload)
-    decision = _validate_human_decision(raw_decision)
-    decision_label = decision.get("decision", "INCONNU")
+
+    if isinstance(raw_decision, Mapping) and "case_id" not in raw_decision:
+        raw_decision = {**raw_decision, "case_id": case_id}
+
+    evidence_ids = _collect_decision_evidence_ids(state)
+    decision, audit_event = validate_and_audit_human_decision(
+        raw_decision, evidence_ids=evidence_ids
+    )
 
     updates: dict[str, Any] = {
         "current_step": "await_human_review",
         "completed_steps": ["await_human_review"],
-        "human_decision": decision,
+        "human_decision": decision.model_dump(mode="json"),
+        "audit_trail": [audit_event],
         "alerts": [
-            f"[workflow] Décision humaine reçue pour {case_id} : {decision_label}"
+            f"[workflow] Décision humaine reçue pour {case_id} : {decision.action.value}"
         ],
     }
-    if decision_label == "NEEDS_MORE_INFO":
+    if decision.action is ReviewAction.RETRY:
         updates["correction_attempts"] = int(state.get("correction_attempts", 0)) + 1
     validate_state_update(updates)
     return updates

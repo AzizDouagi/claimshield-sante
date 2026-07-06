@@ -9,7 +9,7 @@ angles spécifiques au pipeline étape 12, sur un graphe compilé réel :
      ``needs_review``, jamais vers une fin silencieuse ;
   B. aucun agent ne décide seul APPROVE/REJECT final — ``final_recommendation``
      n'existe qu'après le passage de ``case_reviewer`` et correspond
-     toujours exactement à ``review_result.recommendation`` ;
+     toujours exactement à ``review_result.result_payload.recommendation`` ;
   C. fail-closed si le LLM de ``clinical_consistency``/``fraud_detection``
      est absent (injoignable) ou renvoie une sortie non conforme — jamais un
      succès fabriqué, jamais une exception qui remonte ;
@@ -304,12 +304,12 @@ class TestCriticalSignalsReachCaseReviewer:
     def test_case_reviewer_recommendation_reflects_clinical_fail(self, monkeypatch):
         app = _build_app(monkeypatch, **_clinical_critical_kwargs())
         result = app.invoke(_initial_state())
-        assert result["review_result"].recommendation is Recommendation.REJECT
+        assert result["review_result"].result_payload.recommendation is Recommendation.REJECT
 
     def test_case_reviewer_recommendation_reflects_fraud_fail(self, monkeypatch):
         app = _build_app(monkeypatch, **_fraud_critical_kwargs())
         result = app.invoke(_initial_state())
-        assert result["review_result"].recommendation is Recommendation.REJECT
+        assert result["review_result"].result_payload.recommendation is Recommendation.REJECT
 
     def test_clean_case_still_reaches_case_reviewer_and_requires_review(self, monkeypatch):
         """Même sans signal critique, la pré-recommandation reste non finale :
@@ -343,7 +343,7 @@ class TestNoAgentDecidesAlone:
         app = _build_app(monkeypatch, **kwargs_factory())
         result = app.invoke(_initial_state())
 
-        assert result.get("final_recommendation") == result["review_result"].recommendation
+        assert result.get("final_recommendation") == result["review_result"].result_payload.recommendation
 
     def test_final_recommendation_absent_before_case_reviewer_runs(self, monkeypatch):
         """Parcourt les états intermédiaires (stream) : final_recommendation

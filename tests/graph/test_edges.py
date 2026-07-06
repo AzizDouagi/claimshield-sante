@@ -21,6 +21,7 @@ from graph.edges import (
     RELAUNCH_RESULT_FIELDS,
     RELAUNCH_TARGETS,
     RETRY,
+    route_after_audit,
     route_coding,
     route_fhir,
     route_human_review,
@@ -109,7 +110,7 @@ def _review_state(recommendation: str | None, *, human: bool = False) -> dict:
         return {}
     return {
         "review_result": SimpleNamespace(
-            recommendation=recommendation,
+            result_payload=SimpleNamespace(recommendation=recommendation),
             human_review_required=human,
         )
     }
@@ -464,7 +465,12 @@ class TestRouteReview:
         assert route_review({}) == FAILURE
 
     def test_invalid_recommendation_returns_failure(self):
-        state = {"review_result": SimpleNamespace(recommendation="INVALID", human_review_required=False)}
+        state = {
+            "review_result": SimpleNamespace(
+                result_payload=SimpleNamespace(recommendation="INVALID"),
+                human_review_required=False,
+            )
+        }
         assert route_review(state) == FAILURE
 
 
@@ -483,7 +489,7 @@ def _human_review_state(
     par ``route_human_review`` avant toute relance."""
     if decision is None:
         return {"correction_attempts": correction_attempts}
-    human_decision = {"actor": "reviewer@example.com", "decision": decision}
+    human_decision = {"actor": "reviewer@example.com", "action": decision}
     if target_node is not None:
         human_decision["target_node"] = target_node
     state = {"human_decision": human_decision, "correction_attempts": correction_attempts}
@@ -495,41 +501,49 @@ def _human_review_state(
 
 
 class TestRouteHumanReview:
-    def test_approve_returns_end(self):
+    def test_approve_returns_audit(self):
+        """Aucun chemin terminal ne contourne l'audit — APPROVE y passe
+        d'abord, route_after_audit décide ensuite finalize/failure."""
         state = _human_review_state("APPROVE")
-        assert route_human_review(state, max_attempts=3) == END
+        assert route_human_review(state, max_attempts=3) == "audit"
 
-    def test_reject_returns_failure(self):
+    def test_modify_returns_audit(self):
+        state = _human_review_state("MODIFY")
+        assert route_human_review(state, max_attempts=3) == "audit"
+
+    def test_reject_returns_audit(self):
+        """REJECT passe aussi par audit — un rejet contrôlé, jamais un
+        contournement direct vers failure."""
         state = _human_review_state("REJECT")
-        assert route_human_review(state, max_attempts=3) == FAILURE
+        assert route_human_review(state, max_attempts=3) == "audit"
 
     def test_needs_more_info_under_limit_returns_target_node(self):
         state = _human_review_state(
-            "NEEDS_MORE_INFO", target_node="document_ocr", correction_attempts=1
+            "RETRY", target_node="document_ocr", correction_attempts=1
         )
         assert route_human_review(state, max_attempts=3) == "document_ocr"
 
     def test_needs_more_info_at_limit_returns_target_node(self):
         """attempts == max_attempts est encore autorisé (limite inclusive)."""
         state = _human_review_state(
-            "NEEDS_MORE_INFO", target_node="fhir_validator", correction_attempts=3
+            "RETRY", target_node="fhir_validator", correction_attempts=3
         )
         assert route_human_review(state, max_attempts=3) == "fhir_validator"
 
     def test_needs_more_info_beyond_limit_returns_failure(self):
         state = _human_review_state(
-            "NEEDS_MORE_INFO", target_node="document_ocr", correction_attempts=4
+            "RETRY", target_node="document_ocr", correction_attempts=4
         )
         assert route_human_review(state, max_attempts=3) == FAILURE
 
     def test_needs_more_info_unknown_target_node_returns_failure(self):
         state = _human_review_state(
-            "NEEDS_MORE_INFO", target_node="finalize", correction_attempts=1
+            "RETRY", target_node="finalize", correction_attempts=1
         )
         assert route_human_review(state, max_attempts=3) == FAILURE
 
     def test_needs_more_info_missing_target_node_returns_failure(self):
-        state = _human_review_state("NEEDS_MORE_INFO", correction_attempts=1)
+        state = _human_review_state("RETRY", correction_attempts=1)
         assert route_human_review(state, max_attempts=3) == FAILURE
 
     def test_needs_more_info_never_ran_returns_failure(self):
@@ -537,10 +551,44 @@ class TestRouteHumanReview:
         pour ce dossier — même s'il appartient à RELAUNCH_TARGETS et que le
         compteur est sous la limite."""
         state = _human_review_state(
-            "NEEDS_MORE_INFO",
+            "RETRY",
             target_node="medical_coding",
             correction_attempts=1,
             target_has_run=False,
+        )
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    @pytest.mark.parametrize(
+        "target_node", ["clinical_consistency", "fraud_detection", "case_reviewer"]
+    )
+    def test_needs_more_info_relaunches_agents_reimplemented_since_stage_12(self, target_node):
+        """clinical_consistency/fraud_detection/case_reviewer sont désormais
+        des agents réels (non des stubs) : relançables dès qu'ils ont déjà
+        produit un résultat pour ce dossier, comme les 7 agents historiques."""
+        state = _human_review_state(
+            "RETRY", target_node=target_node, correction_attempts=1
+        )
+        assert route_human_review(state, max_attempts=3) == target_node
+
+    @pytest.mark.parametrize(
+        "target_node", ["clinical_consistency", "fraud_detection", "case_reviewer"]
+    )
+    def test_needs_more_info_refuses_reimplemented_agent_never_run(self, target_node):
+        """Même précondition « déjà exécuté » pour les agents réintégrés :
+        aucune relance possible sans résultat existant pour ce dossier."""
+        state = _human_review_state(
+            "RETRY",
+            target_node=target_node,
+            correction_attempts=1,
+            target_has_run=False,
+        )
+        assert route_human_review(state, max_attempts=3) == FAILURE
+
+    def test_needs_more_info_audit_is_never_a_valid_target(self):
+        """audit_agent reste un stub — jamais une cible de relance valide,
+        même si un humain la demande explicitement."""
+        state = _human_review_state(
+            "RETRY", target_node="audit", correction_attempts=1
         )
         assert route_human_review(state, max_attempts=3) == FAILURE
 
@@ -558,8 +606,42 @@ class TestRouteHumanReview:
         expected = {
             "claim_intake", "security_gate", "privacy", "document_ocr",
             "fhir_validator", "identity_coverage", "medical_coding",
+            "clinical_consistency", "fraud_detection", "case_reviewer",
         }
         assert RELAUNCH_TARGETS == expected
+
+    def test_audit_is_never_a_relaunch_target(self):
+        """audit_agent reste un stub jamais évalué avant la revue humaine —
+        aucun audit_result ne peut donc jamais satisfaire sa précondition de
+        relance ; l'exclure de RELAUNCH_TARGETS est une garantie explicite,
+        pas un oubli (voir audit.md, constat historique « relance limitée »,
+        résolu pour les autres agents mais volontairement pas pour audit)."""
+        assert "audit" not in RELAUNCH_TARGETS
+        assert "audit" not in RELAUNCH_RESULT_FIELDS
+
+
+# ── 11ter. route_after_audit — clôture contrôlée par l'audit ─────────────────
+
+
+class TestRouteAfterAudit:
+    def test_reject_routes_to_failure(self):
+        state = {"human_decision": {"actor": "a", "action": "REJECT"}}
+        assert route_after_audit(state) == FAILURE
+
+    def test_approve_routes_to_end(self):
+        state = {"human_decision": {"actor": "a", "action": "APPROVE"}}
+        assert route_after_audit(state) == END
+
+    def test_modify_routes_to_end(self):
+        state = {"human_decision": {"actor": "a", "action": "MODIFY"}}
+        assert route_after_audit(state) == END
+
+    def test_missing_human_decision_defaults_to_end(self):
+        """Défensif uniquement : audit n'est jamais atteint sans qu'une
+        décision humaine ait déjà été enregistrée par route_human_review ;
+        en son absence, le défaut est le chemin nominal, jamais un blocage
+        silencieux."""
+        assert route_after_audit({}) == END
 
 
 # ── 11. Invariants transversaux ───────────────────────────────────────────────
@@ -579,6 +661,7 @@ class TestRouteInvariants:
         route_verification_fan_in,
         route_identity_coverage,
         route_result_consistency,
+        route_after_audit,
     ]
 
     @pytest.mark.parametrize("fn", FUNCTIONS)

@@ -27,13 +27,13 @@ from graph.technical_nodes import (
     _collect_motifs,
     _TechnicalNodeConfig,
     _make_technical_node,
-    _validate_human_decision,
     node_await_human_review,
     node_failure,
     node_finalize,
     node_needs_review,
     node_quarantine,
 )
+from human_review.service import HumanDecisionValidationError
 from schemas.domain import Recommendation
 from state.claim_state import ClaimState, validate_state_update
 
@@ -181,57 +181,14 @@ class TestHumanReviewHelpers:
     def test_collect_minimized_evidence_ignores_missing_results(self):
         assert _collect_minimized_evidence(_empty_state()) == {}
 
-    def test_validate_human_decision_accepts_valid_payload(self):
-        decision = _validate_human_decision(
-            {"actor": "reviewer@example.com", "decision": "APPROVE"}
-        )
-        assert decision["actor"] == "reviewer@example.com"
-        assert decision["decision"] == "APPROVE"
-        assert "decided_at" in decision
-
-    def test_validate_human_decision_keeps_comment(self):
-        decision = _validate_human_decision(
-            {"actor": "a", "decision": "REJECT", "comment": "motif détaillé"}
-        )
-        assert decision["comment"] == "motif détaillé"
-
-    def test_validate_human_decision_rejects_non_mapping(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision("APPROVE")
-
-    def test_validate_human_decision_rejects_missing_actor(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision({"decision": "APPROVE"})
-
-    def test_validate_human_decision_rejects_blank_actor(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision({"actor": "   ", "decision": "APPROVE"})
-
-    def test_validate_human_decision_rejects_unknown_action(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision({"actor": "a", "decision": "MAYBE"})
-
-    def test_validate_human_decision_needs_more_info_requires_target_node(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision({"actor": "a", "decision": "NEEDS_MORE_INFO"})
-
-    def test_validate_human_decision_needs_more_info_rejects_blank_target_node(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision(
-                {"actor": "a", "decision": "NEEDS_MORE_INFO", "target_node": "   "}
-            )
-
-    def test_validate_human_decision_needs_more_info_keeps_target_node(self):
-        decision = _validate_human_decision(
-            {"actor": "a", "decision": "NEEDS_MORE_INFO", "target_node": "document_ocr"}
-        )
-        assert decision["target_node"] == "document_ocr"
-
-    def test_validate_human_decision_rejects_target_node_with_other_actions(self):
-        with pytest.raises(ValueError):
-            _validate_human_decision(
-                {"actor": "a", "decision": "APPROVE", "target_node": "document_ocr"}
-            )
+    # La validation de la décision humaine (justification obligatoire,
+    # actions/target_node autorisés) n'est plus une fonction maison de ce
+    # module : ``node_await_human_review`` délègue entièrement à
+    # ``human_review.service.validate_and_audit_human_decision`` — voir
+    # ``tests/human_review/test_service.py``/``test_interrupt_resume.py``
+    # pour la couverture exhaustive de cette validation (Pydantic stricte).
+    # Les tests ci-dessous (``TestNodeAwaitHumanReview``) vérifient
+    # uniquement l'intégration bout-en-bout dans le nœud LangGraph réel.
 
 
 class TestNodeAwaitHumanReview:
@@ -272,33 +229,116 @@ class TestNodeAwaitHumanReview:
         assert payload["motifs"] == ["confiance limite"]
         assert payload["actions_autorisees"] == list(ALLOWED_HUMAN_ACTIONS)
 
+    def test_simple_interrupt_stores_case_id_thread_id_review_result_and_actions(self):
+        """Test d'interruption simple : le payload minimal transmis à
+        ``interrupt()`` porte bien case_id, thread_id, review_result (même
+        absent) et les actions autorisées — rien de plus n'est requis pour
+        qu'un humain sache quel dossier revoir, sur quel thread reprendre et
+        avec quelles actions."""
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-SIMPLE-1", "checkpoint_ns": ""}}
+        result = app.invoke(
+            {"case_id": "CLM-SIMPLE-1", "alerts": [], "errors": []},
+            config=config,
+        )
+
+        assert "__interrupt__" in result
+        payload = result["__interrupt__"][0].value
+        assert payload["case_id"] == "CLM-SIMPLE-1"
+        assert payload["thread_id"] == "CLM-SIMPLE-1"
+        assert payload["review_result"] is None
+        assert payload["actions_autorisees"] == list(ALLOWED_HUMAN_ACTIONS)
+
+    def test_interrupt_payload_includes_review_result_summary_when_available(self):
+        from schemas.results import CaseReviewerResult, CaseReviewerResultPayload, LlmMetadata
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-SIMPLE-2", "checkpoint_ns": ""}}
+        review_result = CaseReviewerResult(
+            case_id="CLM-SIMPLE-2",
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.PENDING,
+                justification=["Motif de synthèse."],
+                risks=["Score de risque de fraude élevé (0.75)."],
+                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
+            ),
+        )
+        result = app.invoke(
+            {
+                "case_id": "CLM-SIMPLE-2",
+                "alerts": [],
+                "errors": [],
+                "review_result": review_result,
+            },
+            config=config,
+        )
+
+        payload = result["__interrupt__"][0].value
+        assert payload["review_result"] == {
+            "recommendation": "PENDING",
+            "justification": ["Motif de synthèse."],
+            "risks": ["Score de risque de fraude élevé (0.75)."],
+        }
+
     def test_resume_with_same_thread_id_completes(self):
         from langgraph.types import Command
 
         app = self._build_app()
-        config = {"configurable": {"thread_id": "CLM-INT-2", "checkpoint_ns": ""}}
-        app.invoke({"case_id": "CLM-INT-2", "alerts": [], "errors": []}, config=config)
-
-        result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
-            config=config,
-        )
-        assert "__interrupt__" not in result
-        assert result["human_decision"]["decision"] == "APPROVE"
-        assert result["completed_steps"] == ["await_human_review"]
-
-    def test_resume_needs_more_info_increments_correction_attempts(self):
-        from langgraph.types import Command
-
-        app = self._build_app()
-        config = {"configurable": {"thread_id": "CLM-INT-CORR-1", "checkpoint_ns": ""}}
-        app.invoke({"case_id": "CLM-INT-CORR-1", "alerts": [], "errors": []}, config=config)
+        config = {"configurable": {"thread_id": "CLM-9002", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-9002", "alerts": [], "errors": []}, config=config)
 
         result = app.invoke(
             Command(
                 resume={
                     "actor": "reviewer@example.com",
-                    "decision": "NEEDS_MORE_INFO",
+                    "action": "APPROVE",
+                    "justification": "Dossier conforme.",
+                }
+            ),
+            config=config,
+        )
+        assert "__interrupt__" not in result
+        assert result["human_decision"]["action"] == "APPROVE"
+        assert result["completed_steps"] == ["await_human_review"]
+
+    def test_resume_produces_an_audit_event(self):
+        """La décision humaine est désormais auditée — voir
+        ``human_review.service.build_human_decision_audit_event``."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-9010", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-9010", "alerts": [], "errors": []}, config=config)
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "APPROVE",
+                    "justification": "Dossier conforme.",
+                }
+            ),
+            config=config,
+        )
+        assert len(result["audit_trail"]) == 1
+        event = result["audit_trail"][0]
+        assert event.outcome == "APPROVE"
+        assert event.details["justification"] == "Dossier conforme."
+
+    def test_resume_needs_more_info_increments_correction_attempts(self):
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-9003", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-9003", "alerts": [], "errors": []}, config=config)
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "RETRY",
+                    "justification": "Pièce manquante.",
                     "target_node": "document_ocr",
                 }
             ),
@@ -311,27 +351,9 @@ class TestNodeAwaitHumanReview:
         from langgraph.types import Command
 
         app = self._build_app()
-        config = {"configurable": {"thread_id": "CLM-INT-CORR-2", "checkpoint_ns": ""}}
+        config = {"configurable": {"thread_id": "CLM-9004", "checkpoint_ns": ""}}
         app.invoke(
-            {"case_id": "CLM-INT-CORR-2", "alerts": [], "errors": [], "correction_attempts": 2},
-            config=config,
-        )
-
-        result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
-            config=config,
-        )
-        assert result["correction_attempts"] == 2  # inchangé — APPROVE ne consomme pas d'essai
-
-    def test_correction_attempts_accumulates_across_relaunches(self):
-        """Compteur minimal : chaque NEEDS_MORE_INFO incrémente à partir de
-        la valeur déjà présente dans le state (pas de remise à zéro)."""
-        from langgraph.types import Command
-
-        app = self._build_app()
-        config = {"configurable": {"thread_id": "CLM-INT-CORR-3", "checkpoint_ns": ""}}
-        app.invoke(
-            {"case_id": "CLM-INT-CORR-3", "alerts": [], "errors": [], "correction_attempts": 2},
+            {"case_id": "CLM-9004", "alerts": [], "errors": [], "correction_attempts": 2},
             config=config,
         )
 
@@ -339,7 +361,32 @@ class TestNodeAwaitHumanReview:
             Command(
                 resume={
                     "actor": "reviewer@example.com",
-                    "decision": "NEEDS_MORE_INFO",
+                    "action": "APPROVE",
+                    "justification": "Dossier conforme.",
+                }
+            ),
+            config=config,
+        )
+        assert result["correction_attempts"] == 2  # inchangé — APPROVE ne consomme pas d'essai
+
+    def test_correction_attempts_accumulates_across_relaunches(self):
+        """Compteur minimal : chaque RETRY incrémente à partir de
+        la valeur déjà présente dans le state (pas de remise à zéro)."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-9005", "checkpoint_ns": ""}}
+        app.invoke(
+            {"case_id": "CLM-9005", "alerts": [], "errors": [], "correction_attempts": 2},
+            config=config,
+        )
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "RETRY",
+                    "justification": "Pièce manquante.",
                     "target_node": "document_ocr",
                 }
             ),
@@ -363,7 +410,13 @@ class TestNodeAwaitHumanReview:
 
         other_config = {"configurable": {"thread_id": "CLM-INT-OTHER", "checkpoint_ns": ""}}
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "APPROVE",
+                    "justification": "Dossier conforme.",
+                }
+            ),
             config=other_config,
         )
         assert "__interrupt__" in result
@@ -377,8 +430,67 @@ class TestNodeAwaitHumanReview:
         config = {"configurable": {"thread_id": "CLM-INT-4", "checkpoint_ns": ""}}
         app.invoke({"case_id": "CLM-INT-4", "alerts": [], "errors": []}, config=config)
 
-        with pytest.raises(Exception):
-            app.invoke(Command(resume={"actor": "a", "decision": "MAYBE"}), config=config)
+        with pytest.raises(HumanDecisionValidationError):
+            app.invoke(
+                Command(resume={"actor": "a", "action": "MAYBE", "justification": "Motif."}),
+                config=config,
+            )
+
+    def test_resume_without_justification_raises(self):
+        """Justification obligatoire : une décision par ailleurs valide mais
+        sans justification est refusée, jamais acceptée par défaut."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-NOJUST", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-NOJUST", "alerts": [], "errors": []}, config=config)
+
+        with pytest.raises(HumanDecisionValidationError):
+            app.invoke(Command(resume={"actor": "a", "action": "APPROVE"}), config=config)
+
+    def test_never_reaches_end_without_valid_human_decision(self):
+        """Garantie centrale : une décision humaine invalide ne fait jamais
+        progresser le graphe — ni ``human_decision`` ni ``current_step`` ne
+        sont mis à jour, et le nœud reste en échec (jamais un ``END``
+        silencieux ni une valeur par défaut acceptée à sa place)."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-INT-5", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-INT-5", "alerts": [], "errors": []}, config=config)
+
+        with pytest.raises(HumanDecisionValidationError):
+            app.invoke(
+                Command(resume={"actor": "a", "action": "MAYBE", "justification": "Motif."}),
+                config=config,
+            )
+
+        state_after_invalid = app.get_state(config)
+        assert state_after_invalid.values.get("human_decision") is None
+        assert "current_step" not in state_after_invalid.values
+        assert "__end__" not in state_after_invalid.values
+        assert len(state_after_invalid.tasks) == 1
+        assert state_after_invalid.tasks[0].error is not None
+
+    def test_valid_decision_on_a_fresh_thread_reaches_end(self):
+        """Contrepreuve : sur un dossier distinct, une décision valide dès la
+        reprise fait bien progresser le graphe jusqu'à ``END`` — la garantie
+        ci-dessus ne bloque que les décisions invalides, jamais les valides."""
+        from langgraph.types import Command
+
+        app = self._build_app()
+        config = {"configurable": {"thread_id": "CLM-9006", "checkpoint_ns": ""}}
+        app.invoke({"case_id": "CLM-9006", "alerts": [], "errors": []}, config=config)
+
+        result = app.invoke(
+            Command(
+                resume={"actor": "a", "action": "APPROVE", "justification": "Dossier conforme."}
+            ),
+            config=config,
+        )
+        assert "__interrupt__" not in result
+        assert result["human_decision"]["action"] == "APPROVE"
+        assert result["current_step"] == "await_human_review"
 
 
 # ── TestNodeFailure ───────────────────────────────────────────────────────────

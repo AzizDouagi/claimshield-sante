@@ -17,7 +17,7 @@ Topologie
                │                │                │                │                │                │                ├─[CONTINUE]──► clinical_consistency
                │                │                │                │                │                │                │               ──► fraud_detection
                │                │                │                │                │                │                │               ──► case_reviewer
-               │                │                │                │                │                │                │               ├─[ROUTE_END]──► audit ──► finalize ──► END
+               │                │                │                │                │                │                │               ├─[ROUTE_END]──► audit ──► [finalize/failure]** ──► END
                │                │                │                │                │                │                │               ├─[NEEDS_REVIEW]──► needs_review ──► await_human_review*
                │                │                │                │                │                │                │               └─[FAILURE]──► failure ──► END
                │                │                │                │                │                │                ├─[NEEDS_REVIEW]──► needs_review ──► await_human_review*
@@ -36,10 +36,24 @@ Topologie
                └─[FAILURE/RETRY]──► failure ──► END
 
     * await_human_review ──► route_human_review (voir graph.edges) :
-                 ├─[APPROVE]──────────► END
-                 ├─[REJECT]───────────► failure ──► END
-                 └─[NEEDS_MORE_INFO]──► relancer (nœud demandé, si sous la
+                 ├─[APPROVE/MODIFY]───► audit ──► [finalize/failure]** ──► END
+                 ├─[REJECT]───────────► audit ──► [finalize/failure]** ──► END
+                 └─[RETRY]──► relancer (nœud demandé, si sous la
                                          limite) ──► ... └─[au-delà]──► failure ──► END
+
+    ** audit ──► route_after_audit (voir graph.edges) :
+                 ├─[REJECT enregistré]──► failure ──► END
+                 └─[sinon, APPROVE/MODIFY]──► finalize ──► END
+       Aucun chemin terminal ne contourne audit — APPROVE/MODIFY/REJECT y
+       passent tous, seule la destination *après* audit diffère.
+
+    ⚠️ Homonymie assumée : le ``RETRY`` de ``[FAILURE/RETRY]`` plus haut dans
+       ce diagramme est la route technique ``graph.edges.RETRY`` (erreur
+       transitoire sur un nœud, ex. ``route_ocr``/``route_fhir``) — sans
+       rapport avec le ``RETRY`` de ``await_human_review`` ci-dessus, qui est
+       une **action humaine** (``human_decision["action"] == "RETRY"``,
+       alignée sur ``human_review.models.ReviewAction.RETRY``). Deux espaces
+       de noms distincts, jamais comparés l'un à l'autre dans le code.
 
 Règle arêtes
 ------------
@@ -47,9 +61,9 @@ Règle arêtes
 * Arête **normale** depuis un nœud → aucune arête conditionnelle depuis ce même nœud.
 * Nœuds à arêtes conditionnelles :
   claim_intake · security_gate · privacy · document_ocr · fhir_validator
-  identity_coverage · medical_coding · case_reviewer · await_human_review
+  identity_coverage · medical_coding · case_reviewer · await_human_review · audit
 * Nœuds à arête normale uniquement :
-  clinical_consistency · fraud_detection · audit · quarantine · needs_review
+  clinical_consistency · fraud_detection · quarantine · needs_review
   failure · finalize
 
 Nœuds HITL
@@ -62,28 +76,38 @@ Nœuds HITL
 suspend le graphe *pendant* son exécution via ``langgraph.types.interrupt()``
 (interruption dynamique). Le payload transmis contient ``case_id``, les
 motifs de revue, des preuves minimisées et les actions autorisées
-(``APPROVE`` / ``REJECT`` / ``NEEDS_MORE_INFO``). La reprise se fait avec
+(``APPROVE`` / ``REJECT`` / ``RETRY`` / ``MODIFY`` — voir
+``graph.technical_nodes.ALLOWED_HUMAN_ACTIONS``). La reprise se fait avec
 ``app.invoke(Command(resume=decision), config=config)`` en réutilisant
 impérativement le ``thread_id`` de l'invocation initiale — voir
 ``graph.checkpoints.assert_same_thread_id`` / ``CheckpointSession.assert_resume``.
 
-Route de relance (« relancer »)
---------------------------------
+Route de relance (« relancer ») et clôture contrôlée par l'audit
+------------------------------------------------------------------
 Après ``await_human_review``, ``graph.edges.route_human_review`` route selon
-``human_decision.decision`` :
+``human_decision.action`` :
 
-- ``APPROVE`` → ``END``.
-- ``REJECT`` → ``failure``.
-- ``NEEDS_MORE_INFO`` → reprend explicitement au nœud demandé
+- ``APPROVE``/``MODIFY``/``REJECT`` → ``audit`` (chemin terminal — **aucun
+  des trois ne contourne jamais l'audit**, contrairement au comportement
+  antérieur où ``APPROVE`` allait directement à ``END`` et ``REJECT``
+  directement à ``failure``). ``graph.edges.route_after_audit`` route ensuite
+  ``audit`` vers ``failure`` si la décision enregistrée était ``REJECT``,
+  sinon vers ``finalize`` (``APPROVE``/``MODIFY``) — un rejet passe donc par
+  un « failure contrôlé » (audité) plutôt qu'un court-circuit direct.
+- ``RETRY`` → reprend explicitement au nœud demandé
   (``human_decision.target_node``, doit appartenir à
   ``graph.edges.RELAUNCH_TARGETS``), à condition que ``correction_attempts``
   (compteur minimal incrémenté par ``node_await_human_review`` à chaque
-  NEEDS_MORE_INFO — aucun compteur générique existant à réutiliser) ne
+  RETRY — aucun compteur générique existant à réutiliser) ne
   dépasse pas la limite configurable ``max_correction_attempts``
   (``build_workflow(max_correction_attempts=...)`` ou
   ``compile_workflow(max_correction_attempts=...)``, sinon
   ``Settings.claimshield_max_correction_attempts``, défaut 3). Au-delà de
-  cette limite → ``failure`` (empêche toute boucle infinie de corrections).
+  cette limite → ``failure`` directement (pas d'audit : aucune décision
+  terminale n'a été prise, il n'y a rien de nouveau à auditer par rapport à
+  la dernière tentative). Ce n'est pas un chemin terminal : il boucle dans
+  le pipeline, qui repassera par ``case_reviewer``/HITL — et donc par
+  ``audit`` — avant toute fin ultérieure.
 """
 from __future__ import annotations
 
@@ -101,6 +125,7 @@ from graph.edges import (
     QUARANTINE,
     RELAUNCH_TARGETS,
     RETRY,
+    route_after_audit,
     route_coding,
     route_fhir,
     route_human_review,
@@ -330,7 +355,7 @@ def build_workflow(
             construction des nœuds agents (son propre ``agent_registry``
             fait déjà foi) — même convention que ``graph=`` pour
             ``compile_workflow``.
-        max_correction_attempts: Limite de relances (NEEDS_MORE_INFO) après
+        max_correction_attempts: Limite de relances (RETRY) après
             ``await_human_review`` avant de router vers ``failure``.
             ``None`` → ``Settings.claimshield_max_correction_attempts``.
         clinical_consistency_impl: Implémentation injectable de l'agent
@@ -528,11 +553,13 @@ def build_workflow(
         },
     )
 
-    # Route de relance (« relancer ») : la décision humaine NEEDS_MORE_INFO
+    # Route de relance (« relancer ») : la décision humaine RETRY
     # reprend explicitement au nœud demandé (path_map en identité sur
     # RELAUNCH_TARGETS) tant que le compteur correction_attempts ne dépasse
     # pas max_correction_attempts — au-delà, route_human_review renvoie
-    # FAILURE. APPROVE → END, REJECT → failure.
+    # FAILURE. APPROVE/MODIFY/REJECT convergent tous vers "audit" — aucun
+    # chemin terminal ne contourne l'audit (voir route_after_audit ci-dessous
+    # pour la suite : audit → finalize ou audit → failure).
     attempts_limit = (
         max_correction_attempts
         if max_correction_attempts is not None
@@ -543,8 +570,8 @@ def build_workflow(
         partial(route_human_review, max_attempts=attempts_limit),
         {
             **{node_name: node_name for node_name in RELAUNCH_TARGETS},
-            ROUTE_END: END,
-            FAILURE:   "failure",
+            "audit":  "audit",
+            FAILURE:  "failure",
         },
     )
 
@@ -559,7 +586,19 @@ def build_workflow(
     graph.add_edge("clinical_consistency", "fraud_detection")
     graph.add_edge("fraud_detection", "case_reviewer")
 
-    graph.add_edge("audit", "finalize")
+    # audit décide finalize (nominal) ou failure (rejet contrôlé) selon la
+    # décision humaine enregistrée — voir route_after_audit. Remplace
+    # l'ancienne arête inconditionnelle audit → finalize : celle-ci laissait
+    # échapper le cas REJECT (déjà écarté vers "failure" avant même
+    # d'atteindre audit) et ne pouvait donc jamais représenter un rejet.
+    graph.add_conditional_edges(
+        "audit",
+        route_after_audit,
+        {
+            ROUTE_END: "finalize",
+            FAILURE:   "failure",
+        },
+    )
     graph.add_edge("finalize", END)
 
     graph.add_edge("quarantine", END)

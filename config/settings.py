@@ -157,7 +157,7 @@ class Settings(BaseSettings):
         3,
         alias="CLAIMSHIELD_MAX_CORRECTION_ATTEMPTS",
         description=(
-            "Nombre maximal de relances (NEEDS_MORE_INFO) autorisées après "
+            "Nombre maximal de relances (RETRY) autorisées après "
             "await_human_review avant de router vers failure — empêche toute "
             "boucle infinie de corrections."
         ),

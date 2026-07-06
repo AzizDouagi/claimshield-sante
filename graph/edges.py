@@ -8,11 +8,17 @@ Routes disponibles
 ``continue``     — nœud suivant dans le pipeline nominal.
 ``quarantine``   — fichier/dossier mis en quarantaine ; revue humaine bloquante.
 ``needs_review`` — pipeline poursuit, une vérification humaine est signalée.
-``retry``        — erreur transitoire sur un nœud ; peut être relancé.
+``retry``        — erreur transitoire sur un nœud technique ; peut être
+                    relancée automatiquement. Sans rapport avec l'action
+                    humaine ``RETRY`` ci-dessous (espaces de noms distincts :
+                    celle-ci est une valeur de ``Route``, l'action humaine
+                    est une chaîne de ``human_decision["action"]``, jamais
+                    comparée à cette constante).
 ``failure``      — erreur irrécupérable ; fin du pipeline sans approbation.
 ``end``          — pipeline terminé ; recommandation finale disponible.
-``relancer``     — décision humaine NEEDS_MORE_INFO : reprise au nœud
-                    explicitement demandé (``human_decision.target_node``).
+``relancer``     — décision humaine ``RETRY`` (alignée sur
+                    ``human_review.models.ReviewAction.RETRY``) : reprise au
+                    nœud explicitement demandé (``human_decision.target_node``).
                     Route dynamique — voir ``route_human_review``.
 
 Utilisation dans workflow.py
@@ -69,11 +75,23 @@ RELAUNCH_TARGETS: frozenset[str] = frozenset({
     "fhir_validator",
     "identity_coverage",
     "medical_coding",
+    "clinical_consistency",
+    "fraud_detection",
+    "case_reviewer",
 })
-"""Nœuds vers lesquels une correction humaine (NEEDS_MORE_INFO) peut relancer
-le pipeline. N'inclut ni les nœuds techniques (quarantine, needs_review,
-await_human_review, failure, finalize) ni les stubs non évalués en aval
-(clinical_consistency, fraud_detection, case_reviewer, audit)."""
+"""Nœuds vers lesquels une correction humaine (RETRY) peut relancer
+le pipeline — explicitement relançables ET déjà exécutés pour ce dossier
+(seconde condition vérifiée séparément par ``RELAUNCH_RESULT_FIELDS`` dans
+``route_human_review``, jamais par ce seul ensemble). N'inclut ni les nœuds
+techniques (quarantine, needs_review, await_human_review, failure, finalize)
+ni ``audit`` : `audit_agent` reste un stub jamais évalué avant la revue
+humaine (aucun ``audit_result`` ne peut donc jamais satisfaire sa
+précondition de relance — l'inclure serait un ajout inerte). Historique :
+`clinical_consistency`/`fraud_detection`/`case_reviewer` étaient exclus tant
+qu'ils restaient des stubs (voir `audit.md`, constat MAJEUR « relance humaine
+limitée ») — réintégrés depuis leur implémentation réelle (étape 12 pour les
+deux premiers), un dossier revu peut donc désormais faire relancer n'importe
+lequel des 10 agents non-stub du pipeline."""
 
 RELAUNCH_RESULT_FIELDS: dict[str, str] = {
     "claim_intake": "intake_result",
@@ -83,13 +101,19 @@ RELAUNCH_RESULT_FIELDS: dict[str, str] = {
     "fhir_validator": "fhir_result",
     "identity_coverage": "identity_coverage_result",
     "medical_coding": "coding_result",
+    "clinical_consistency": "clinical_result",
+    "fraud_detection": "fraud_result",
+    "case_reviewer": "review_result",
 }
 """Champ ``*_result`` prouvant qu'un nœud relançable a déjà tourné pour ce
 dossier. Utilisé comme précondition par ``route_human_review`` plutôt que
 ``completed_steps`` : certains nœuds y écrivent sous un ``step_name``
 différent du nom du nœud dans le graphe (ex. document_ocr → « document_ocr_agent »,
 fhir_validator → « fhir_validation »), alors que le champ ``*_result`` est
-toujours écrit sous le nom stable de son propre agent."""
+toujours écrit sous le nom stable de son propre agent. Une clé absente d'ici
+(ex. ``audit``) est structurellement non relançable, quelle que soit
+``RELAUNCH_TARGETS`` : ``route_human_review`` traite l'absence d'entrée
+comme une précondition jamais satisfaite."""
 
 
 # ── Helper interne ────────────────────────────────────────────────────────────
@@ -342,20 +366,23 @@ def route_review(state: ClaimState) -> Route:
                                                             sans humain)
     PENDING                               → needs_review (en attente d'information)
 
-    L'implémentation réelle de ``case_reviewer_agent`` force toujours
-    ``human_review_required=True`` : la pré-recommandation n'est jamais finale,
-    APPROVE comme REJECT — aucune des deux ne peut donc jamais atteindre
-    ``end`` (donc ``audit``/``finalize``/``END``) sans passer par
-    ``needs_review``/``await_human_review``. Seul un ``case_reviewer_impl``
-    injecté (tests) peut emprunter les chemins défensifs ci-dessus.
+    Depuis la migration de ``CaseReviewerResult`` vers l'enveloppe générique
+    (``schemas/results.py``), ``human_review_required=False`` est de toute
+    façon **rejeté par le schéma** — aucune instance réelle de
+    ``CaseReviewerResult`` ne peut donc plus jamais emprunter les chemins
+    défensifs ci-dessus : APPROVE comme REJECT atteignent toujours
+    ``needs_review``/``await_human_review`` avant ``end``. Ces branches ne
+    restent accessibles qu'à un objet non validé par le schéma (ex. un mock de
+    test type ``SimpleNamespace``), jamais à une vraie instance produite par
+    ``case_reviewer_agent``.
     """
     result = state.get("review_result")
     if result is None:
         return FAILURE
 
     try:
-        rec = Recommendation(result.recommendation)
-    except ValueError:
+        rec = Recommendation(result.result_payload.recommendation)
+    except (ValueError, AttributeError):
         return FAILURE
 
     if rec in (Recommendation.APPROVE, Recommendation.REJECT):
@@ -368,9 +395,13 @@ def route_review(state: ClaimState) -> Route:
 def route_human_review(state: ClaimState, *, max_attempts: int) -> str:
     """Route après await_human_review — décision humaine validée.
 
-    APPROVE          → end     (décision humaine favorable, pipeline clos)
-    REJECT           → failure (décision humaine défavorable, REJECT final)
-    NEEDS_MORE_INFO  → route de relance (« relancer ») : reprise au nœud
+    APPROVE/MODIFY   → audit    (chemin terminal — voir ``route_after_audit``
+                                  pour la suite : audit puis finalize)
+    REJECT           → audit    (chemin terminal aussi — voir
+                                  ``route_after_audit`` : audit puis failure,
+                                  un rejet contrôlé, jamais un contournement
+                                  de l'audit)
+    RETRY            → route de relance (« relancer ») : reprise au nœud
                        explicitement demandé par l'humain
                        (``human_decision.target_node``), à condition que :
                          - ce nœud fasse partie de ``RELAUNCH_TARGETS`` ;
@@ -382,10 +413,26 @@ def route_human_review(state: ClaimState, *, max_attempts: int) -> str:
                            amont) ne sont alors pas garanties disponibles ;
                          - le compteur ``correction_attempts`` (incrémenté
                            par ``node_await_human_review`` à chaque
-                           NEEDS_MORE_INFO) ne dépasse pas ``max_attempts``.
+                           RETRY) ne dépasse pas ``max_attempts``.
                        Si l'une de ces conditions échoue (nœud hors périmètre,
                        jamais exécuté, ou limite dépassée) → failure : l'agent
-                       cible n'est jamais exécuté sans ses préconditions.
+                       cible n'est jamais exécuté sans ses préconditions. Ce
+                       n'est pas un chemin terminal (il boucle dans le
+                       pipeline, qui repassera par ``case_reviewer``/HITL, et
+                       donc par ``audit``, avant toute fin) — il ne traverse
+                       jamais ``audit`` directement, ce n'est pas nécessaire.
+
+    Absence de décision ou valeur inconnue → failure directement, sans passer
+    par ``audit`` : cas purement défensif (jamais atteignable en exécution
+    réelle du graphe compilé — ``node_await_human_review``, via
+    ``human_review.service.validate_and_audit_human_decision``, garantit
+    qu'une décision invalide ne produit jamais de mise à jour de state, donc
+    jamais d'appel à cette fonction dans ce cas ; seul un appel direct/test
+    peut l'atteindre).
+
+    Aucun chemin terminal (APPROVE/MODIFY/REJECT) ne contourne jamais
+    ``audit`` — contrairement à l'ancien comportement qui routait APPROVE
+    directement vers ``END`` et REJECT directement vers ``failure``.
 
     Contrairement aux autres fonctions de routage, la valeur retournée pour
     une relance n'est pas une route fixe du type ``Route`` : c'est le nom du
@@ -396,12 +443,10 @@ def route_human_review(state: ClaimState, *, max_attempts: int) -> str:
     if not decision:
         return FAILURE
 
-    outcome = decision.get("decision")
-    if outcome == "APPROVE":
-        return END
-    if outcome == "REJECT":
-        return FAILURE
-    if outcome == "NEEDS_MORE_INFO":
+    outcome = decision.get("action")
+    if outcome in ("APPROVE", "MODIFY", "REJECT"):
+        return "audit"
+    if outcome == "RETRY":
         target_node = decision.get("target_node")
         attempts = state.get("correction_attempts", 0)
         result_field = RELAUNCH_RESULT_FIELDS.get(target_node)
@@ -410,3 +455,23 @@ def route_human_review(state: ClaimState, *, max_attempts: int) -> str:
             return target_node
         return FAILURE
     return FAILURE
+
+
+def route_after_audit(state: ClaimState) -> Route:
+    """Route après ``audit`` — dernière étape avant clôture du pipeline.
+
+    Décide entre ``finalize`` (chemin nominal) et ``failure`` (rejet
+    contrôlé) selon la décision humaine enregistrée par
+    ``node_await_human_review`` : REJECT → failure, APPROVE/MODIFY → finalize.
+    N'est jamais atteint par la route de relance (RETRY) : celle-ci
+    boucle dans le pipeline sans jamais traverser ``audit`` directement (voir
+    ``route_human_review``).
+
+    Fonction volontairement minimale — un seul champ déjà validé
+    (``human_decision.action``) est relu, jamais un nouveau calcul métier :
+    ``audit`` a pour seul rôle de journaliser, jamais de décider.
+    """
+    decision = state.get("human_decision") or {}
+    if decision.get("action") == "REJECT":
+        return FAILURE
+    return END

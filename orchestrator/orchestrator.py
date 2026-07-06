@@ -100,20 +100,19 @@ par ``AgentCallRequest`` (cohérence de ``requested_model``) et
 ``AgentCallOutcome`` (validation de ``result_payload``)."""
 
 _ADDITIONAL_AGENT_RESULT_FIELDS: dict[AgentName, str] = {
-    AgentName.CLINICAL_CONSISTENCY: "clinical_result",
-    AgentName.FRAUD_DETECTION: "fraud_result",
-    AgentName.CASE_REVIEWER: "review_result",
     AgentName.AUDIT: "audit_result",
 }
-"""Champs ``ClaimState`` des agents absents de
-``graph.edges.RELAUNCH_RESULT_FIELDS`` (non relançables par décision
-humaine), donc ajoutés ici pour compléter ``AGENT_RESULT_FIELD``."""
+"""Champ ``ClaimState`` de l'agent absent de
+``graph.edges.RELAUNCH_RESULT_FIELDS`` (``audit_agent`` reste un stub jamais
+relançable par décision humaine — voir la docstring de
+``graph.edges.RELAUNCH_TARGETS``), donc ajouté ici pour compléter
+``AGENT_RESULT_FIELD``."""
 
 AGENT_RESULT_FIELD: dict[AgentName, str] = {
     AgentName(name): field for name, field in RELAUNCH_RESULT_FIELDS.items()
 } | _ADDITIONAL_AGENT_RESULT_FIELDS
 """Champ ``ClaimState`` prouvant qu'un agent a déjà produit un résultat pour
-le dossier — une entrée par agent (11), dont 7 réutilisées directement de
+le dossier — une entrée par agent (11), dont 10 réutilisées directement de
 ``graph.edges.RELAUNCH_RESULT_FIELDS``. Source unique de vérité pour
 ``orchestrator/routing.py`` (préconditions) et ``orchestrator/executor.py``
 (extraction du résultat après exécution)."""

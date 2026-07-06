@@ -45,7 +45,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult, LlmMetadata
+from schemas.results import CaseReviewerResult, CaseReviewerResultPayload, LlmMetadata
 
 # ── Ordre métier nominal (feuille de route) ──────────────────────────────────
 
@@ -113,11 +113,13 @@ class _CaseReviewerStub:
         self._call_counts["case_reviewer"] += 1
         return CaseReviewerResult(
             case_id=str(state.get("case_id", "UNKNOWN")),
-            recommendation=self._recommendation,
-            justification=list(self._reasons),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
             human_review_required=self._human_review_required,
-            human_review_reasons=list(self._reasons),
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=self._recommendation,
+                justification=list(self._reasons),
+                human_review_reasons=list(self._reasons),
+            ),
         )
 
 
@@ -422,7 +424,7 @@ def _extract_recorded_code(result: dict, scenario: _BlockingScenario) -> Any:
     if scenario.blocking_node == "identity_coverage":
         return evidence.identity.status
     if scenario.blocking_node == "case_reviewer":
-        return evidence.recommendation
+        return evidence.result_payload.recommendation
     raise AssertionError(f"Nœud bloquant inattendu : {scenario.blocking_node}")
 
 

@@ -47,11 +47,20 @@ class TestPipelineStructure:
     def test_result_field_has_one_entry_per_agent(self):
         assert set(AGENT_RESULT_FIELD.keys()) == set(AgentName)
 
-    def test_result_field_reuses_relaunch_result_fields_for_seven_agents(self):
+    def test_result_field_reuses_relaunch_result_fields_for_relaunchable_agents(self):
         from graph.edges import RELAUNCH_RESULT_FIELDS
 
         for name, field in RELAUNCH_RESULT_FIELDS.items():
             assert AGENT_RESULT_FIELD[AgentName(name)] == field
+
+    def test_result_field_audit_not_reused_from_relaunch_result_fields(self):
+        """audit_agent reste un stub jamais relançable — son entrée dans
+        AGENT_RESULT_FIELD vient de _ADDITIONAL_AGENT_RESULT_FIELDS, jamais
+        de graph.edges.RELAUNCH_RESULT_FIELDS (qui ne le référence pas)."""
+        from graph.edges import RELAUNCH_RESULT_FIELDS
+
+        assert "audit" not in RELAUNCH_RESULT_FIELDS
+        assert AGENT_RESULT_FIELD[AgentName.AUDIT] == "audit_result"
 
 
 # ── 2. Préconditions satisfaites ──────────────────────────────────────────────

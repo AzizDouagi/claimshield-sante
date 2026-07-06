@@ -87,13 +87,23 @@ _FORBIDDEN_LLM_PAYLOAD_KEYS: frozenset[str] = frozenset({
 
 
 class HumanDecision(TypedDict, total=False):
-    """Décision saisie par le gestionnaire après interruption LangGraph."""
+    """Décision saisie par le gestionnaire après interruption LangGraph.
 
+    Reflète exactement (``model_dump(mode="json")``) le modèle Pydantic
+    strict ``human_review.models.HumanDecision`` — ``node_await_human_review``
+    délègue désormais entièrement sa validation à
+    ``human_review.service.validate_and_audit_human_decision`` (justification
+    obligatoire, ``extra="forbid"``) : ce ``TypedDict`` n'est qu'une
+    projection typée du dict déjà validé, jamais une validation indépendante.
+    ``case_id`` est complété automatiquement depuis le state si absent du
+    payload de reprise (déjà connu du graphe)."""
+
+    case_id: str
     actor: str
-    decision: str          # "APPROVE" | "REJECT" | "NEEDS_MORE_INFO"
-    comment: str
+    action: str             # "APPROVE" | "MODIFY" | "REJECT" | "RETRY"
+    justification: str
     decided_at: datetime
-    target_node: str       # obligatoire si decision == "NEEDS_MORE_INFO" — nœud à relancer
+    target_node: str        # obligatoire si action == "RETRY" — nœud à relancer
 
 
 # ── État principal ────────────────────────────────────────────────────────────
@@ -266,7 +276,7 @@ class ClaimState(TypedDict, total=False):
     human_decision: HumanDecision | None
 
     # ── Compteur de corrections (HITL — route de relance) ────────────────────
-    # Incrémenté par node_await_human_review à chaque décision NEEDS_MORE_INFO.
+    # Incrémenté par node_await_human_review à chaque décision RETRY.
     # Écrasé (pas de reducer) : reflète le nombre total de relances demandées
     # pour ce dossier. Comparé à une limite configurable par route_human_review
     # pour empêcher toute boucle infinie de corrections.

@@ -33,7 +33,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult, LlmMetadata
+from schemas.results import CaseReviewerResult, CaseReviewerResultPayload, LlmMetadata
 
 # ── Ordre métier attendu (feuille de route) ──────────────────────────────────
 
@@ -98,11 +98,12 @@ class _ApprovingCaseReviewer:
         self._call_counts["case_reviewer"] += 1
         return CaseReviewerResult(
             case_id=str(state.get("case_id", "UNKNOWN")),
-            recommendation=Recommendation.APPROVE,
-            justification=["Toutes les vérifications ont réussi — approbation nominale."],
-            human_review_required=False,
-            human_review_reasons=[],
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.APPROVE,
+                justification=["Toutes les vérifications ont réussi — approbation nominale."],
+                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
+            ),
         )
 
 

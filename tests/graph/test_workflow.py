@@ -47,7 +47,7 @@ from schemas.domain import (
     SecurityDecision,
     VerificationStatus,
 )
-from schemas.results import CaseReviewerResult, LlmMetadata
+from schemas.results import CaseReviewerResult, CaseReviewerResultPayload, LlmMetadata
 
 
 @dataclass
@@ -76,14 +76,13 @@ _ALL_NODES = _AGENT_NODES | _TECHNICAL_NODES | {"__start__"}
 _CONDITIONAL_SOURCES = {
     "claim_intake", "security_gate", "privacy",
     "document_ocr", "fhir_validator", "identity_coverage", "medical_coding",
-    "case_reviewer", "await_human_review",
+    "case_reviewer", "await_human_review", "audit",
 }
 # Arêtes normales attendues (source, destination).
 _EXPECTED_UNCONDITIONAL = {
     ("__start__", "claim_intake"),
     ("clinical_consistency", "fraud_detection"),
     ("fraud_detection", "case_reviewer"),
-    ("audit", "finalize"),
     ("finalize", "__end__"),
     ("quarantine", "__end__"),
     ("needs_review", "await_human_review"),
@@ -191,9 +190,13 @@ class TestWorkflowTopology:
         app = self._app()
         assert ("fraud_detection", "case_reviewer") in app.builder.edges
 
-    def test_audit_to_finalize_unconditional(self):
+    def test_audit_has_conditional_edges(self):
+        """audit décide finalize (nominal) ou failure (rejet contrôlé) selon
+        la décision humaine — plus une simple arête inconditionnelle vers
+        finalize (voir route_after_audit) : aucun chemin terminal ne
+        contourne l'audit, y compris un REJECT."""
         app = self._app()
-        assert ("audit", "finalize") in app.builder.edges
+        assert "audit" in app.builder.branches
 
     def test_finalize_to_end(self):
         app = self._app()
@@ -547,7 +550,7 @@ class TestWorkflowHumanReview:
         payload = result["__interrupt__"][0].value
         assert payload["case_id"] == "CLM-0008"
         assert "[document_ocr] confiance limite — revue requise." in payload["motifs"]
-        assert payload["actions_autorisees"] == ["APPROVE", "REJECT", "NEEDS_MORE_INFO"]
+        assert payload["actions_autorisees"] == ["APPROVE", "MODIFY", "REJECT", "RETRY"]
         assert "needs_review" in result.get("completed_steps", [])
         assert "await_human_review" not in result.get("completed_steps", [])
 
@@ -561,12 +564,12 @@ class TestWorkflowHumanReview:
         app.invoke(_initial_state(), config=config)
 
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
             config=config,
         )
 
         assert "__interrupt__" not in result
-        assert result["human_decision"]["decision"] == "APPROVE"
+        assert result["human_decision"]["action"] == "APPROVE"
         assert "await_human_review" in result["completed_steps"]
 
     def test_resume_with_different_thread_id_does_not_resume(self, monkeypatch):
@@ -587,7 +590,7 @@ class TestWorkflowHumanReview:
 
         other_config = {"configurable": {"thread_id": "CLM-0007", "checkpoint_ns": ""}}
         result = app.invoke(
-            Command(resume={"actor": "reviewer@example.com", "decision": "APPROVE"}),
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
             config=other_config,
         )
         assert "__interrupt__" in result
@@ -603,7 +606,7 @@ class TestWorkflowRelaunchRoute:
     """
 
     def test_successful_correction_resumes_at_requested_node(self, monkeypatch):
-        """NEEDS_MORE_INFO(target_node=document_ocr) relance bien document_ocr
+        """RETRY(target_node=document_ocr) relance bien document_ocr
         (2e appel observé) et le pipeline progresse au-delà de needs_review —
         ici jusqu'à fhir_validator, mocké pour échouer, ce qui prouve que la
         relance a repris l'exécution normale du graphe plutôt que de rester
@@ -681,7 +684,7 @@ class TestWorkflowRelaunchRoute:
             Command(
                 resume={
                     "actor": "reviewer@example.com",
-                    "decision": "NEEDS_MORE_INFO",
+                    "action": "RETRY", "justification": "Pièce manquante.",
                     "target_node": "document_ocr",
                 }
             ),
@@ -695,8 +698,189 @@ class TestWorkflowRelaunchRoute:
         assert "failure" in result.get("completed_steps", [])
         assert result.get("final_recommendation") == Recommendation.REJECT
 
+    def test_relaunch_to_clinical_consistency_reexecutes_it(self, monkeypatch):
+        """clinical_consistency est réintégré dans RELAUNCH_TARGETS depuis son
+        implémentation réelle (étape 12) : preuve bout-en-bout qu'un
+        RETRY(target_node=clinical_consistency) le rejoue
+        effectivement (2e appel observé), exactement comme document_ocr.
+        """
+        from langgraph.types import Command
+        from schemas.results import (
+            ClinicalConsistencyResult,
+            ClinicalResultPayload,
+            FraudDetectionResult,
+        )
+
+        call_count = {"clinical": 0}
+        case_id = "CLM-9301"
+
+        def mock_claim_intake(state: dict) -> dict:
+            return {
+                "intake_status": IntakeStatus.ACCEPTED,
+                "intake_input": None,
+                "current_step": "claim_intake",
+                "completed_steps": ["claim_intake"],
+            }
+
+        def mock_security_gate(state: dict) -> dict:
+            return {
+                "security_result": _StubResult(decision=SecurityDecision.ALLOW),
+                "security_input": None,
+                "current_step": "security_gate",
+                "completed_steps": ["security_gate"],
+            }
+
+        def mock_privacy(state: dict) -> dict:
+            return {
+                "privacy_result": _StubResult(decision=PrivacyDecision.ALLOW),
+                "privacy_input": None,
+                "current_step": "privacy",
+                "completed_steps": ["privacy"],
+            }
+
+        def mock_document_ocr(state: dict) -> dict:
+            return {
+                "ocr_result": _StubResult(status=VerificationStatus.PASS),
+                "ocr_input": None,
+                "current_step": "document_ocr",
+                "completed_steps": ["document_ocr"],
+            }
+
+        def mock_fhir_validator(state: dict) -> dict:
+            return {
+                "fhir_result": _StubResult(status=VerificationStatus.PASS),
+                "fhir_input": None,
+                "current_step": "fhir_validator",
+                "completed_steps": ["fhir_validator"],
+            }
+
+        @dataclass
+        class _IdentityCoverageStub:
+            identity: Any = None
+            coverage: Any = None
+
+        def mock_identity_coverage(state: dict) -> dict:
+            return {
+                "identity_coverage_result": _IdentityCoverageStub(
+                    identity=_StubResult(status=VerificationStatus.PASS),
+                    coverage=_StubResult(status=VerificationStatus.PASS),
+                ),
+                "identity_coverage_input": None,
+                "current_step": "identity_coverage",
+                "completed_steps": ["identity_coverage"],
+            }
+
+        def mock_medical_coding(state: dict) -> dict:
+            return {
+                "coding_result": _StubResult(status=VerificationStatus.PASS),
+                "coding_input": None,
+                "current_step": "medical_coding",
+                "completed_steps": ["medical_coding"],
+            }
+
+        class _ClinicalStub:
+            """1er appel NEEDS_REVIEW (déclenche la revue humaine), 2e appel
+            PASS (correction appliquée par l'humain, comme document_ocr)."""
+
+            def run(self, state: dict) -> ClinicalConsistencyResult:
+                call_count["clinical"] += 1
+                status = (
+                    VerificationStatus.NEEDS_REVIEW
+                    if call_count["clinical"] == 1
+                    else VerificationStatus.PASS
+                )
+                return ClinicalConsistencyResult(
+                    case_id=str(state.get("case_id", case_id)),
+                    status=status,
+                    llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+                    result_payload=ClinicalResultPayload(
+                        reasons=[f"passage {call_count['clinical']}"]
+                    ),
+                )
+
+        class _FraudStub:
+            def run(self, state: dict) -> FraudDetectionResult:
+                return FraudDetectionResult(
+                    case_id=str(state.get("case_id", case_id)),
+                    status=VerificationStatus.PASS,
+                    llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+                )
+
+        class _ReviewStub:
+            """Reflète fidèlement le statut clinical_result — jamais un
+            APPROVE tant que clinical_consistency signale NEEDS_REVIEW."""
+
+            def run(self, state: dict) -> CaseReviewerResult:
+                clinical = state.get("clinical_result")
+                recommendation = (
+                    Recommendation.APPROVE
+                    if clinical is not None and clinical.status is VerificationStatus.PASS
+                    else Recommendation.PENDING
+                )
+                return CaseReviewerResult(
+                    case_id=str(state.get("case_id", case_id)),
+                    llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+                    result_payload=CaseReviewerResultPayload(
+                        recommendation=recommendation,
+                        justification=["Synthèse de test."],
+                        human_review_reasons=[
+                            "Validation humaine obligatoire avant toute décision finale."
+                        ],
+                    ),
+                )
+
+        monkeypatch.setattr(wf, "node_claim_intake", mock_claim_intake)
+        monkeypatch.setattr(wf, "node_security_gate", mock_security_gate)
+        monkeypatch.setattr(wf, "node_privacy", mock_privacy)
+        monkeypatch.setattr(wf, "node_document_ocr", mock_document_ocr)
+        monkeypatch.setattr(wf, "node_fhir_validator", mock_fhir_validator)
+        monkeypatch.setattr(wf, "node_identity_coverage", mock_identity_coverage)
+        monkeypatch.setattr(wf, "node_medical_coding", mock_medical_coding)
+
+        saver = InMemorySaver()
+        app = compile_workflow(
+            saver,
+            interrupt_before=[],
+            clinical_consistency_impl=_ClinicalStub(),
+            fraud_detection_impl=_FraudStub(),
+            case_reviewer_impl=_ReviewStub(),
+        )
+        config = {"configurable": {"thread_id": case_id, "checkpoint_ns": ""}}
+        state = _initial_state()
+        state["case_id"] = case_id
+
+        first = app.invoke(state, config=config)
+        assert "__interrupt__" in first
+        assert call_count["clinical"] == 1
+
+        second = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "RETRY", "justification": "Pièce manquante.",
+                    "target_node": "clinical_consistency",
+                }
+            ),
+            config=config,
+        )
+
+        # La relance a bien rejoué clinical_consistency (2e appel) puis
+        # traversé fraud_detection/case_reviewer — qui exige toujours une
+        # revue humaine (human_review_reasons), donc une nouvelle interruption.
+        assert call_count["clinical"] == 2
+        assert second.get("correction_attempts") == 1
+        assert "__interrupt__" in second
+        assert second["clinical_result"].status is VerificationStatus.PASS
+
+        third = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
+            config=config,
+        )
+        assert "__interrupt__" not in third
+        assert third.get("final_recommendation") == Recommendation.APPROVE
+
     def test_relaunch_beyond_limit_routes_to_failure(self, monkeypatch):
-        """Deux demandes NEEDS_MORE_INFO successives avec max_correction_attempts=1 :
+        """Deux demandes RETRY successives avec max_correction_attempts=1 :
         la première est acceptée (attempts=1 <= 1), document_ocr signale de
         nouveau NEEDS_REVIEW ; la seconde dépasse la limite (attempts=2 > 1)
         et est routée vers failure sans relancer une 3e fois document_ocr.
@@ -754,7 +938,7 @@ class TestWorkflowRelaunchRoute:
         resume_payload = Command(
             resume={
                 "actor": "reviewer@example.com",
-                "decision": "NEEDS_MORE_INFO",
+                "action": "RETRY", "justification": "Pièce manquante.",
                 "target_node": "document_ocr",
             }
         )
@@ -776,6 +960,152 @@ class TestWorkflowRelaunchRoute:
         assert third.get("final_recommendation") == Recommendation.REJECT
 
 
+# ── TestWorkflowIntegrityGuarantees ───────────────────────────────────────────
+
+
+class TestWorkflowIntegrityGuarantees:
+    """Garanties transversales sur le graphe compilé réel :
+      - relance vers un nœud non autorisé refusée, jamais exécutée ;
+      - aucun END sans HumanDecision valide (défensif + preuve positive) ;
+      - reprise sans checkpoint (thread jamais invoqué, ou sans checkpointer
+        du tout) — comportements distincts, aucun des deux n'applique la
+        décision fournie à un dossier qui n'existe pas.
+    """
+
+    def test_relaunch_to_unauthorized_node_is_refused_end_to_end(self, monkeypatch):
+        """target_node hors RELAUNCH_TARGETS (ex. « quarantine », un nœud
+        technique) : jamais exécuté, route vers failure sans interruption."""
+        from langgraph.types import Command
+
+        _make_short_needs_review_agents(monkeypatch)
+        saver = InMemorySaver()
+        app = compile_workflow(saver, interrupt_before=[])
+        config = {"configurable": {"thread_id": "CLM-9100", "checkpoint_ns": ""}}
+        app.invoke(_initial_state(), config=config)
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "RETRY", "justification": "Pièce manquante.",
+                    "target_node": "quarantine",
+                }
+            ),
+            config=config,
+        )
+
+        assert "__interrupt__" not in result
+        assert "quarantine" not in result.get("completed_steps", [])
+        assert "failure" in result.get("completed_steps", [])
+        assert result.get("final_recommendation") == Recommendation.REJECT
+
+    def test_relaunch_to_unknown_string_is_refused_end_to_end(self, monkeypatch):
+        """target_node totalement inconnu (ni un agent, ni un nœud
+        technique) : même refus, jamais une exception non gérée."""
+        from langgraph.types import Command
+
+        _make_short_needs_review_agents(monkeypatch)
+        saver = InMemorySaver()
+        app = compile_workflow(saver, interrupt_before=[])
+        config = {"configurable": {"thread_id": "CLM-9101", "checkpoint_ns": ""}}
+        app.invoke(_initial_state(), config=config)
+
+        result = app.invoke(
+            Command(
+                resume={
+                    "actor": "reviewer@example.com",
+                    "action": "RETRY", "justification": "Pièce manquante.",
+                    "target_node": "ce_noeud_n_existe_pas",
+                }
+            ),
+            config=config,
+        )
+
+        assert "__interrupt__" not in result
+        assert "failure" in result.get("completed_steps", [])
+
+    def test_end_is_never_reached_without_a_valid_human_decision(self, monkeypatch):
+        """Une décision invalide à la reprise ne fait jamais progresser le
+        graphe réel jusqu'à END — le nœud lève, aucune mise à jour de state,
+        aucun `human_decision` jamais fixé."""
+        from langgraph.types import Command
+
+        _make_short_needs_review_agents(monkeypatch)
+        saver = InMemorySaver()
+        app = compile_workflow(saver, interrupt_before=[])
+        config = {"configurable": {"thread_id": "CLM-9102", "checkpoint_ns": ""}}
+        app.invoke(_initial_state(), config=config)
+
+        with pytest.raises(Exception):
+            app.invoke(
+                Command(resume={"actor": "reviewer@example.com", "action": "MAYBE", "justification": "Motif."}),
+                config=config,
+            )
+
+        state = app.get_state(config)
+        assert "human_decision" not in state.values
+        assert "current_step" not in state.values or state.values.get("current_step") != "await_human_review"
+
+    def test_end_is_reached_only_once_a_valid_human_decision_exists(self, monkeypatch):
+        """Contre-preuve positive : dès qu'une décision valide (APPROVE) est
+        fournie, ``human_decision`` est bien présent dans le state qui
+        atteint END (via audit → finalize) — jamais un END produit sans
+        cette trace."""
+        _make_short_needs_review_agents(monkeypatch)
+        saver = InMemorySaver()
+        app = compile_workflow(saver, interrupt_before=[])
+        config = {"configurable": {"thread_id": "CLM-9103", "checkpoint_ns": ""}}
+        app.invoke(_initial_state(), config=config)
+
+        from langgraph.types import Command
+
+        result = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
+            config=config,
+        )
+
+        assert "__interrupt__" not in result
+        assert "human_decision" in result
+        assert result["human_decision"]["action"] == "APPROVE"
+        assert "finalize" in result.get("completed_steps", [])
+
+    def test_resume_without_any_checkpointer_raises(self, monkeypatch):
+        """Sans checkpointer configuré du tout, ``Command(resume=...)`` ne
+        peut structurellement retrouver aucun checkpoint — refus explicite
+        de LangGraph, jamais une reprise silencieuse sur un state fabriqué."""
+        from langgraph.types import Command
+
+        _make_short_needs_review_agents(monkeypatch)
+        app = compile_workflow(None, interrupt_before=[])
+
+        first = app.invoke(_initial_state())
+        assert "__interrupt__" in first
+
+        with pytest.raises(RuntimeError):
+            app.invoke(Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}))
+
+    def test_resume_on_thread_id_never_invoked_restarts_fresh_without_applying_decision(self, monkeypatch):
+        """Checkpoint absent : reprendre un thread_id qui n'a jamais été
+        invoqué (aucun checkpoint enregistré) ne lève pas, mais ne retrouve
+        aucun dossier non plus — LangGraph redémarre une exécution
+        indépendante depuis START ; la décision fournie n'est appliquée à
+        rien de réel."""
+        from langgraph.types import Command
+
+        _make_short_needs_review_agents(monkeypatch)
+        saver = InMemorySaver()
+        app = compile_workflow(saver, interrupt_before=[])
+        config = {"configurable": {"thread_id": "CLM-JAMAIS-INVOQUE", "checkpoint_ns": ""}}
+
+        result = app.invoke(
+            Command(resume={"actor": "reviewer@example.com", "action": "APPROVE", "justification": "Dossier conforme."}),
+            config=config,
+        )
+
+        assert "__interrupt__" in result
+        assert "human_decision" not in result
+
+
 # ── TestWorkflowFutureAgentInjection ──────────────────────────────────────────
 
 
@@ -785,11 +1115,12 @@ class _FakeCaseReviewer:
     def run(self, state: dict) -> CaseReviewerResult:
         return CaseReviewerResult(
             case_id=str(state.get("case_id", "UNKNOWN")),
-            recommendation=Recommendation.APPROVE,
-            justification=["Approuvé par implémentation injectée."],
-            human_review_required=False,
-            human_review_reasons=[],
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.APPROVE,
+                justification=["Approuvé par implémentation injectée."],
+                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
+            ),
         )
 
 

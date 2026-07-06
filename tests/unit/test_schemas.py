@@ -287,7 +287,7 @@ def test_resultats_agents_acceptent_uniquement_metadata_llm_minimales():
         (res.MedicalCodingResult, "llm_metadata"),
         (res.ClinicalConsistencyResult, "llm_trace"),
         (res.FraudDetectionResult, "llm_trace"),
-        (res.CaseReviewerResult, "llm_metadata"),
+        (res.CaseReviewerResult, "llm_trace"),
         (res.AuditResult, "llm_metadata"),
     ]
     for result_class, trace_field_name in result_classes_with_trace_field:
@@ -556,8 +556,11 @@ def test_all_models_json_serializable():
         ),
         res.CaseReviewerResult(
             case_id="CLM-0001",
-            recommendation=dom.Recommendation.APPROVE,
-            llm_metadata=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=res.LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=res.CaseReviewerResultPayload(
+                recommendation=dom.Recommendation.APPROVE,
+                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
+            ),
         ),
         res.AuditEvent(case_id="CLM-0001", event_id="evt-1", actor="intake", action="ingest", outcome="ok"),
         res.AuditResult(case_id="CLM-0001", status=dom.VerificationStatus.PASS),

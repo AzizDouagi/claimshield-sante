@@ -1186,16 +1186,96 @@ class DisagreementPoint(StrictModel):
     observed: str
 
 
-class CaseReviewerResult(StrictModel):
-    """Synthèse et recommandation révisable par un humain."""
+class CaseReviewerResultPayload(StrictModel):
+    """Détail métier de la synthèse multi-agent — jamais de contenu brut.
 
-    case_id: str
+    Distinct de l'enveloppe ``CaseReviewerResult`` (statut verrouillé, trace
+    LLM, confiance, erreurs, identifiants de preuve, revue humaine toujours
+    requise) : ce sous-modèle porte la pré-recommandation elle-même et son
+    argumentaire, même patron que ``ClinicalResultPayload``/``FraudResultPayload``.
+
+    ``risks`` : signaux de risque à porter à l'attention de l'humain (plafond
+    dépassé, score de fraude élevé, incohérence clinique…), toujours dérivés de
+    données déjà calculées par les agents amont — jamais une affirmation
+    inventée par ce module. ``human_review_reasons`` (« questions humain ») ne
+    peut jamais être vide : une revue humaine toujours obligatoire doit
+    toujours porter au moins un motif explicite à examiner.
+    """
+
     recommendation: Recommendation
     justification: list[str] = Field(default_factory=list)
     disagreements: list[DisagreementPoint] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    human_review_reasons: list[str] = Field(..., min_length=1)
+
+    @field_validator("justification", "risks", "human_review_reasons")
+    @classmethod
+    def _no_raw_content(cls, v: list[str], info) -> list[str]:
+        return [_reject_unstructured_content(item, info.field_name) for item in v]
+
+
+class CaseReviewerResult(StrictModel):
+    """Synthèse multi-agent — jamais de décision finale, revue humaine toujours obligatoire.
+
+    Même enveloppe générique que ``ClinicalConsistencyResult``/``FraudDetectionResult``
+    (voir leur docstring pour le rôle des champs communs) : ``status``/``llm_trace``/
+    ``confidence``/``errors``/``evidence_ids``/``human_review_required`` sont le
+    contrat commun exposé à l'orchestrateur et à la revue humaine ; ``result_payload``
+    porte la pré-recommandation elle-même (voir ``CaseReviewerResultPayload``).
+
+    Contrairement aux autres agents de l'enveloppe générique, ``status`` et
+    ``human_review_required`` sont **verrouillés** : ``status`` ne peut jamais être
+    autre chose que ``NEEDS_REVIEW`` et ``human_review_required`` ne peut jamais être
+    ``False`` — aucune instance valide de ``CaseReviewerResult`` ne peut donc
+    représenter une décision finale automatique, quelle que soit l'implémentation qui
+    la construit (garantie de schéma, pas seulement de nœud LangGraph — voir aussi
+    ``agents/case_reviewer_agent/agent.py::_force_human_review`` pour la défense en
+    profondeur côté nœud). La pré-recommandation réelle (APPROVE/REJECT/PENDING,
+    toujours révisable) reste disponible dans ``result_payload.recommendation``.
+    """
+
+    case_id: str
+    status: VerificationStatus = VerificationStatus.NEEDS_REVIEW
+    llm_trace: LlmMetadata
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    errors: list[StructuredError] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Identifiants de preuves déjà validées par les agents amont (ex. "
+            "ClinicalConsistencyResult.evidence_ids, FraudDetectionResult."
+            "evidence_ids) — CaseReviewerResult ne porte aucun objet de preuve "
+            "propre, contrairement à ClinicalConsistencyResult/FraudDetectionResult."
+        ),
+    )
     human_review_required: bool = True
-    human_review_reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata
+    result_payload: CaseReviewerResultPayload
+
+    @field_validator("status")
+    @classmethod
+    def _status_locked_to_needs_review(cls, v: VerificationStatus) -> VerificationStatus:
+        if v is not VerificationStatus.NEEDS_REVIEW:
+            raise ValueError(
+                "status doit toujours être NEEDS_REVIEW : case_reviewer_agent ne "
+                "produit jamais de statut final (PASS/FAIL) — la décision reste "
+                "toujours révisable par un humain."
+            )
+        return v
+
+    @field_validator("human_review_required")
+    @classmethod
+    def _human_review_locked_to_true(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "human_review_required doit toujours être True : aucune décision "
+                "finale automatique n'est autorisée pour case_reviewer_agent."
+            )
+        return v
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def _evidence_ids_no_raw_content(cls, v: list[str]) -> list[str]:
+        return [_reject_unstructured_content(item, "evidence_ids") for item in v]
 
 
 # ── 11. Audit Agent ───────────────────────────────────────────────────────────

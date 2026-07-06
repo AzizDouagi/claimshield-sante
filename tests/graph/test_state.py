@@ -28,6 +28,7 @@ from schemas.results import (
     AuditEvent,
     AuditResult,
     CaseReviewerResult,
+    CaseReviewerResultPayload,
     ClaimIntakeResult,
     ClaimManifest,
     ClinicalConsistencyResult,
@@ -140,8 +141,11 @@ def _agent_results() -> dict:
         ),
         "review_result": CaseReviewerResult(
             case_id=case_id,
-            recommendation=Recommendation.APPROVE,
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.APPROVE,
+                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
+            ),
         ),
         "audit_result": AuditResult(case_id=case_id, status=VerificationStatus.PASS),
     }

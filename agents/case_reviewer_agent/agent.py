@@ -22,8 +22,14 @@ from agents.case_reviewer_agent.prompt import load_case_reviewer_prompt
 from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
-from schemas.domain import Recommendation
-from schemas.results import AuditEvent, CaseReviewerResult, DisagreementPoint
+from schemas.domain import Recommendation, VerificationStatus
+from schemas.results import (
+    AuditEvent,
+    CaseReviewerResult,
+    CaseReviewerResultPayload,
+    DisagreementPoint,
+    StructuredError,
+)
 from state.claim_state import ClaimState, validate_state_update
 from tools.consistency import detect_result_disagreements
 
@@ -171,6 +177,50 @@ def _collect_disagreements(state: ClaimState) -> list[DisagreementPoint]:
     return list(detect_result_disagreements(state))
 
 
+def _collect_risks(snapshot: dict[str, dict[str, object]]) -> list[str]:
+    """Dérive des signaux de risque à porter à l'attention de l'humain.
+
+    Toujours calculés à partir de données déjà produites par les agents amont
+    (jamais une affirmation inventée ici) — voir ``_build_agent_snapshot``.
+    """
+    risks: list[str] = []
+
+    identity_coverage = snapshot["identity_coverage"]
+    if identity_coverage.get("ceiling_exceeded"):
+        risks.append("Plafond de couverture dépassé.")
+    if identity_coverage.get("preauthorization_required"):
+        risks.append("Pré-autorisation requise — à confirmer par l'humain.")
+
+    fraud = snapshot["fraud_detection"]
+    risk_score = fraud.get("risk_score")
+    if isinstance(risk_score, (int, float)) and risk_score >= 0.7:
+        risks.append(f"Score de risque de fraude élevé ({risk_score:.2f}).")
+    if fraud.get("duplicate_invoice") is True:
+        risks.append("Facture potentiellement en doublon.")
+
+    clinical = snapshot["clinical_consistency"]
+    inconsistency_count = clinical.get("inconsistency_count") or 0
+    if isinstance(inconsistency_count, int) and inconsistency_count > 0:
+        risks.append(f"{inconsistency_count} incohérence(s) clinique(s) détectée(s).")
+
+    return risks
+
+
+def _collect_evidence_ids(state: ClaimState) -> list[str]:
+    """Agrège les identifiants de preuves déjà validées par les agents amont.
+
+    Ne construit jamais de nouvel identifiant — reprend tel quel
+    ``evidence_ids`` de ``ClinicalConsistencyResult``/``FraudDetectionResult``,
+    seuls résultats amont à porter des objets de preuve structurés.
+    """
+    ids: list[str] = []
+    for key in ("clinical_result", "fraud_result"):
+        result = state.get(key)
+        if result is not None:
+            ids.extend(getattr(result, "evidence_ids", None) or [])
+    return ids
+
+
 def _deterministic_pre_recommendation(
     snapshot: dict[str, dict[str, object]],
     disagreements: list[DisagreementPoint],
@@ -258,6 +308,10 @@ def _confidence(snapshot: dict[str, dict[str, object]], recommendation: Recommen
     return base
 
 
+def _disagreement_id(point: DisagreementPoint) -> str:
+    return f"{point.agent}.{point.field}"
+
+
 # ── Phase B : LLM ─────────────────────────────────────────────────────────────
 
 
@@ -285,6 +339,54 @@ def _invoke_llm_case_review(data: dict[str, Any]) -> LlmCaseReviewDecision | Non
         return None
 
 
+def _merge_llm_decision(
+    llm_decision: LlmCaseReviewDecision | None,
+    *,
+    known_evidence_ids: set[str],
+    known_risks: set[str],
+    known_disagreement_ids: set[str],
+) -> tuple[Recommendation | None, list[str], list[str]]:
+    """Fusionne la décision LLM — jamais dans ``status``/``human_review_required``,
+    verrouillés au niveau du schéma (voir ``CaseReviewerResult``).
+
+    Toute preuve (``referenced_evidence_ids``), risque
+    (``acknowledged_risks``) ou contradiction (``acknowledged_disagreements``)
+    citée par le LLM mais absente des valeurs réellement calculées par la
+    Phase A est silencieusement ignorée — jamais une affirmation non prouvée
+    acceptée telle quelle.
+    """
+    justification: list[str] = []
+    human_review_reasons: list[str] = [
+        "Validation humaine obligatoire avant toute décision finale."
+    ]
+
+    if llm_decision is None:
+        justification.append(
+            "LLM indisponible ou réponse invalide : pré-recommandation mise en attente."
+        )
+        human_review_reasons.append("Synthèse LLM absente ou invalide.")
+        return None, justification, human_review_reasons
+
+    justification.append(llm_decision.summary)
+    justification.extend(llm_decision.reasons)
+    human_review_reasons.extend(llm_decision.human_review_reasons)
+
+    unknown_evidence = [
+        e for e in llm_decision.referenced_evidence_ids if e not in known_evidence_ids
+    ]
+    unknown_risks = [r for r in llm_decision.acknowledged_risks if r not in known_risks]
+    unknown_disagreements = [
+        d for d in llm_decision.acknowledged_disagreements if d not in known_disagreement_ids
+    ]
+    if unknown_evidence or unknown_risks or unknown_disagreements:
+        justification.append(
+            "LLM a référencé des preuves, risques ou contradictions inexistants — "
+            "références ignorées (aucune affirmation non prouvée acceptée)."
+        )
+
+    return llm_decision.recommendation, justification, human_review_reasons
+
+
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
 
 
@@ -295,6 +397,9 @@ def run(case_id: str, state: ClaimState | None = None) -> CaseReviewerResult:
 
     snapshot = _build_agent_snapshot(review_state)
     disagreements = _collect_disagreements(review_state)
+    risks = _collect_risks(snapshot)
+    evidence_ids = _collect_evidence_ids(review_state)
+    disagreement_ids = [_disagreement_id(point) for point in disagreements]
     deterministic_recommendation, deterministic_reasons = _deterministic_pre_recommendation(
         snapshot,
         disagreements,
@@ -307,31 +412,40 @@ def run(case_id: str, state: ClaimState | None = None) -> CaseReviewerResult:
             "case_id": case_id,
             "agent_results": snapshot,
             "disagreements": [d.model_dump(mode="json") for d in disagreements],
+            "disagreement_ids": disagreement_ids,
+            "risks": risks,
+            "evidence_ids": evidence_ids,
             "deterministic_pre_recommendation": deterministic_recommendation.value,
             "deterministic_reasons": deterministic_reasons[:10],
             "instruction": (
-                "Synthèse explicable uniquement : recommandation non finale, "
-                "revue humaine obligatoire et aucun résultat inventé."
+                "Synthèse explicable uniquement : cite les preuves, risques et "
+                "contradictions fournis, pose les questions nécessaires à l'humain, "
+                "recommandation non finale, revue humaine obligatoire, aucun "
+                "résultat inventé."
             ),
         }
     )
 
-    llm_recommendation: Recommendation | None = None
-    justification: list[str] = []
-    human_review_reasons: list[str] = [
-        "Validation humaine obligatoire avant toute décision finale."
-    ]
-
-    if llm_decision is None:
-        justification.append(
-            "LLM indisponible ou réponse invalide : pré-recommandation mise en attente."
-        )
-        human_review_reasons.append("Synthèse LLM absente ou invalide.")
-    else:
-        llm_recommendation = llm_decision.recommendation
-        justification.append(llm_decision.summary)
-        justification.extend(llm_decision.reasons)
-        human_review_reasons.extend(llm_decision.human_review_reasons)
+    llm_recommendation, justification, human_review_reasons = _merge_llm_decision(
+        llm_decision,
+        known_evidence_ids=set(evidence_ids),
+        known_risks=set(risks),
+        known_disagreement_ids=set(disagreement_ids),
+    )
+    errors: list[StructuredError] = (
+        [
+            StructuredError(
+                code="LLM_UNAVAILABLE",
+                message=(
+                    "Synthèse LLM indisponible ou réponse invalide — "
+                    "pré-recommandation mise en attente."
+                ),
+                field="llm_decision",
+            )
+        ]
+        if llm_decision is None
+        else []
+    )
 
     final_recommendation = _merge_recommendation(
         deterministic_recommendation,
@@ -351,14 +465,23 @@ def run(case_id: str, state: ClaimState | None = None) -> CaseReviewerResult:
     if llm_decision is None:
         confidence = 0.2
 
-    return CaseReviewerResult(
-        case_id=case_id,
+    payload = CaseReviewerResultPayload(
         recommendation=final_recommendation,
         justification=justification,
         disagreements=disagreements,
-        human_review_required=True,
+        risks=risks,
         human_review_reasons=human_review_reasons,
-        llm_metadata=build_llm_metadata(_AGENT_NAME, confidence=confidence),
+    )
+
+    return CaseReviewerResult(
+        case_id=case_id,
+        status=VerificationStatus.NEEDS_REVIEW,
+        llm_trace=build_llm_metadata(_AGENT_NAME, confidence=confidence),
+        confidence=confidence,
+        errors=errors,
+        evidence_ids=evidence_ids,
+        human_review_required=True,
+        result_payload=payload,
     )
 
 
@@ -380,17 +503,22 @@ _DEFAULT_IMPL: CaseReviewerRunnable = _RealImplementation()
 
 
 def _force_human_review(result: CaseReviewerResult) -> CaseReviewerResult:
-    reasons = list(result.human_review_reasons)
+    """Défense en profondeur côté nœud.
+
+    Le schéma ``CaseReviewerResult`` verrouille déjà ``status=NEEDS_REVIEW`` et
+    ``human_review_required=True`` (aucune instance valide ne peut porter
+    d'autre valeur) — cette fonction reste néanmoins nécessaire pour garantir
+    la présence du motif standard dans ``human_review_reasons``, même si une
+    implémentation injectée omet de l'y placer elle-même.
+    """
+    payload = result.result_payload
+    reasons = list(payload.human_review_reasons)
     if "Validation humaine obligatoire avant toute décision finale." not in reasons:
         reasons.insert(0, "Validation humaine obligatoire avant toute décision finale.")
-    if result.human_review_required and reasons == result.human_review_reasons:
+    if reasons == payload.human_review_reasons:
         return result
-    return result.model_copy(
-        update={
-            "human_review_required": True,
-            "human_review_reasons": reasons,
-        }
-    )
+    new_payload = payload.model_copy(update={"human_review_reasons": reasons})
+    return result.model_copy(update={"result_payload": new_payload})
 
 
 def make_node(
@@ -400,35 +528,44 @@ def make_node(
 
     def _node(state: ClaimState) -> dict:
         result = _force_human_review(impl.run(state))
+        payload = result.result_payload
         case_id = str(state.get("case_id", result.case_id))
+        llm_call_id = str(uuid.uuid4())
         audit = AuditEvent(
             event_id=str(uuid.uuid4()),
             case_id=case_id,
             actor=_AGENT_NAME,
             action="case_review",
-            outcome=result.recommendation.value,
+            outcome=payload.recommendation.value,
             details={
+                "status": result.status.value,
                 "human_review_required": str(result.human_review_required),
-                "disagreement_count": str(len(result.disagreements)),
-                "justification_count": str(len(result.justification)),
+                "disagreement_count": str(len(payload.disagreements)),
+                "justification_count": str(len(payload.justification)),
+                "risk_count": str(len(payload.risks)),
+                "evidence_ids": ",".join(result.evidence_ids),
+                "llm_call_id": llm_call_id,
+                "model_name": result.llm_trace.model_name,
+                "prompt_version": result.llm_trace.prompt_version,
+                "errors": ",".join(e.code for e in result.errors),
             },
         )
         updates: dict = {
             "review_result": result,
-            "final_recommendation": result.recommendation,
-            "final_justification": list(result.justification),
+            "final_recommendation": payload.recommendation,
+            "final_justification": list(payload.justification),
             "current_step": _STEP_NAME,
             "completed_steps": [_STEP_NAME],
             "audit_trail": [audit],
             "alerts": [
-                f"Revue dossier : {result.recommendation.value} non finale — "
-                f"{'; '.join(result.human_review_reasons)}"
+                f"Revue dossier : {payload.recommendation.value} non finale — "
+                f"{'; '.join(payload.human_review_reasons)}"
             ],
         }
-        if result.recommendation is Recommendation.REJECT:
+        if payload.recommendation is Recommendation.REJECT:
             updates["errors"] = [
                 f"[{_AGENT_NAME}] Pré-recommandation de rejet — "
-                f"{'; '.join(result.justification)}"
+                f"{'; '.join(payload.justification)}"
             ]
         validate_state_update(updates)
         return updates

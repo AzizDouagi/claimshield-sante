@@ -42,6 +42,7 @@ from schemas.domain import Recommendation, VerificationStatus
 from schemas.results import (
     AuditResult,
     CaseReviewerResult,
+    CaseReviewerResultPayload,
     ClinicalConsistencyResult,
     ClinicalResultPayload,
     FraudDetectionResult,
@@ -121,10 +122,12 @@ class _ReviewApprove:
     def run(self, state):
         return CaseReviewerResult(
             case_id=str(state.get("case_id", "CLM-0000")),
-            recommendation=Recommendation.APPROVE,
-            justification=["test: tous les contrôles passés"],
-            human_review_required=False,
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.APPROVE,
+                justification=["test: tous les contrôles passés"],
+                human_review_reasons=["test: validation humaine requise"],
+            ),
         )
 
 
@@ -132,10 +135,12 @@ class _ReviewReject:
     def run(self, state):
         return CaseReviewerResult(
             case_id=str(state.get("case_id", "CLM-0000")),
-            recommendation=Recommendation.REJECT,
-            justification=["test: doublon confirmé"],
-            human_review_required=False,
-            llm_metadata=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
+            result_payload=CaseReviewerResultPayload(
+                recommendation=Recommendation.REJECT,
+                justification=["test: doublon confirmé"],
+                human_review_reasons=["test: validation humaine requise"],
+            ),
         )
 
 
@@ -249,7 +254,7 @@ class TestMakeNodeDefault:
     def test_case_reviewer_node_recommendation_pending(self):
         node_fn = make_case_reviewer_node()
         updates = node_fn(_state())
-        assert updates["review_result"].recommendation is Recommendation.PENDING
+        assert updates["review_result"].result_payload.recommendation is Recommendation.PENDING
 
     def test_case_reviewer_node_sets_final_recommendation(self):
         node_fn = make_case_reviewer_node()
@@ -305,7 +310,7 @@ class TestMakeNodeInjection:
     def test_case_reviewer_injected_approve(self):
         node_fn = make_case_reviewer_node(_ReviewApprove())
         updates = node_fn(_state())
-        assert updates["review_result"].recommendation is Recommendation.APPROVE
+        assert updates["review_result"].result_payload.recommendation is Recommendation.APPROVE
         assert updates["final_recommendation"] is Recommendation.APPROVE
         assert updates["review_result"].human_review_required is True
 
@@ -356,7 +361,7 @@ class TestGraphNodeStubDefaults:
         node_fn = build_node_registry(build_orchestrator())["case_reviewer"]
         updates = node_fn(_state())
         assert updates["review_result"].human_review_required is True
-        assert updates["review_result"].llm_metadata is not None
+        assert updates["review_result"].llm_trace is not None
 
     def test_node_audit_not_evaluated(self):
         node_fn = build_node_registry(build_orchestrator())["audit"]
@@ -384,7 +389,7 @@ class TestGraphNodeFactories:
         orchestrator = build_orchestrator(case_reviewer_impl=_ReviewApprove())
         node_fn = build_node_registry(orchestrator)["case_reviewer"]
         updates = node_fn(_state())
-        assert updates["review_result"].recommendation is Recommendation.APPROVE
+        assert updates["review_result"].result_payload.recommendation is Recommendation.APPROVE
 
     def test_audit_with_impl_returns_pass(self):
         orchestrator = build_orchestrator(audit_impl=_AuditPass())
