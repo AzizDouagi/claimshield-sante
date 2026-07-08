@@ -77,6 +77,7 @@ from typing import Callable, Protocol, runtime_checkable
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
+from config.logging import get_logger
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import ReaderRole, SeverityLevel, VerificationStatus
@@ -105,6 +106,8 @@ from agents.privacy_agent.schemas import FraudView
 
 _STEP_NAME = "fraud_detection"
 _AGENT_NAME = "fraud_detection_agent"
+
+logger = get_logger(__name__)
 _THRESHOLD_VERSION = "1.0.0"
 
 _NEEDS_REVIEW_THRESHOLD = 0.3
@@ -663,9 +666,20 @@ def run(
         signals, llm_decision.signal_assessments if llm_decision is not None else []
     )
     if adjustment_notes:
+        previous_risk_score = risk_score
         status, risk_score = _determine_status(signals, insufficient_evidence=insufficient_evidence)
         reasons.extend(adjustment_notes)
         evidence_ids = [evidence.evidence_id for signal in signals for evidence in signal.evidence]
+        # P1-1/P3-2 : pondération LLM bornée effectivement appliquée — point
+        # de décision autonome, journalisé pour traçabilité opérationnelle.
+        logger.info(
+            "fraud_detection_signal_weight_adjusted",
+            case_id=case_id,
+            adjustment_count=len(adjustment_notes),
+            risk_score_before=round(previous_risk_score, 2),
+            risk_score_after=round(risk_score, 2),
+            status_after=status.value,
+        )
 
     reasons = _merge_llm_decision(llm_decision, reasons, known_signal_types=known_signal_types)
     errors = (

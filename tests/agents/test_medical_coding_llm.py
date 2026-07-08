@@ -1,3 +1,9 @@
+# P4-1 : "Unknown dental procedure" a été remplacé par une description hors
+# seuil de similarité floue ("Random unclassified surgical intervention
+# xyz123") — depuis l'ajout du matching approximatif (rapidfuzz), l'ancienne
+# description déclenchait désormais rule_applied="fuzzy_candidates_found"
+# (voir tests/rules/test_medical_codes.py::TestFuzzyMatching pour ce palier),
+# ce qui n'était pas l'objet de ces tests, centrés sur le palier keyword_match.
 from agents.medical_coding_agent.agent import run
 from agents.medical_coding_agent.schemas import LlmCodingDecision, LlmResolvedCode
 from schemas.domain import VerificationStatus
@@ -9,7 +15,7 @@ def test_medical_coding_llm_resout_needs_review(monkeypatch):
         lambda *_: LlmCodingDecision(
             resolved=[
                 LlmResolvedCode(
-                    description="Unknown dental procedure",
+                    description="Random unclassified surgical intervention xyz123",
                     proposed_code="34043003",
                     rationale="Correspondance confirmée par outil.",
                 )
@@ -18,7 +24,7 @@ def test_medical_coding_llm_resout_needs_review(monkeypatch):
         ),
     )
 
-    result = run("CLM-9009", procedures=["Unknown dental procedure"])
+    result = run("CLM-9009", procedures=["Random unclassified surgical intervention xyz123"])
 
     assert result.status == VerificationStatus.PASS
     assert result.codings[0].proposed_code == "34043003"
@@ -32,7 +38,7 @@ def test_medical_coding_llm_rejette_code_hallucine(monkeypatch):
         lambda *_: LlmCodingDecision(
             resolved=[
                 LlmResolvedCode(
-                    description="Unknown dental procedure",
+                    description="Random unclassified surgical intervention xyz123",
                     proposed_code="CODE-HALLUCINE",
                     rationale="Code absent du référentiel.",
                 )
@@ -41,7 +47,7 @@ def test_medical_coding_llm_rejette_code_hallucine(monkeypatch):
         ),
     )
 
-    result = run("CLM-9012", procedures=["Unknown dental procedure"])
+    result = run("CLM-9012", procedures=["Random unclassified surgical intervention xyz123"])
 
     assert result.status == VerificationStatus.NEEDS_REVIEW
     assert result.codings[0].proposed_code is None
@@ -56,7 +62,7 @@ def test_medical_coding_llm_indisponible_conserve_phase_a_seule(monkeypatch):
     FAIL forcé. Avant le correctif, ce cas retournait à tort FAIL."""
     monkeypatch.setattr("agents.medical_coding_agent.agent._invoke_llm_react", lambda *_: None)
 
-    result = run("CLM-9010", procedures=["Unknown dental procedure"])
+    result = run("CLM-9010", procedures=["Random unclassified surgical intervention xyz123"])
 
     assert result.status == VerificationStatus.NEEDS_REVIEW
     assert result.codings[0].rule_applied == "keyword_match"
@@ -67,7 +73,7 @@ def test_medical_coding_llm_indisponible_conserve_phase_a_seule(monkeypatch):
 def test_medical_coding_llm_json_invalide_conserve_phase_a_seule(monkeypatch):
     monkeypatch.setattr("agents.medical_coding_agent.agent._invoke_llm_react", lambda *_: None)
 
-    result = run("CLM-9011", procedures=["Unknown dental procedure"])
+    result = run("CLM-9011", procedures=["Random unclassified surgical intervention xyz123"])
 
     assert result.status == VerificationStatus.NEEDS_REVIEW
     assert any("réponse invalide" in reason for reason in result.reasons)

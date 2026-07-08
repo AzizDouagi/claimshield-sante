@@ -68,6 +68,7 @@ from typing import Callable, Protocol, runtime_checkable
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
+from config.logging import get_logger
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import ReaderRole, SeverityLevel, VerificationStatus
@@ -97,6 +98,8 @@ from agents.privacy_agent.schemas import MedicalView
 
 _STEP_NAME = "clinical_consistency"
 _AGENT_NAME = "clinical_consistency_agent"
+
+logger = get_logger(__name__)
 
 # P1-2 : lattice de sévérité — le LLM ne peut jamais proposer un écart de
 # plus d'un cran par rapport à la sévérité déjà calculée par la Phase A.
@@ -664,8 +667,19 @@ def run(
         signals, llm_decision.severity_assessments if llm_decision is not None else []
     )
     if severity_changed:
+        previous_status = status
         status, status_reasons = _status_from_signals(signals)
         reasons.extend(status_reasons)
+        # P1-2/P3-2 : ajustement de sévérité LLM borné effectivement
+        # appliqué — point de décision autonome, journalisé pour
+        # traçabilité opérationnelle.
+        logger.info(
+            "clinical_consistency_severity_adjusted",
+            case_id=case_id,
+            adjustment_count=len(adjustment_notes),
+            status_before=previous_status.value,
+            status_after=status.value,
+        )
     reasons.extend(adjustment_notes)
 
     reasons = _merge_llm_decision(

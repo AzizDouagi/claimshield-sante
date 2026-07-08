@@ -50,26 +50,31 @@ def test_claim_intake_llm_indisponible_error(tmp_path, monkeypatch):
     assert any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)
 
 
-def test_claim_intake_llm_indisponible_sur_dossier_vide_fail_closed(tmp_path, monkeypatch):
+def test_claim_intake_dossier_vide_ne_consulte_jamais_le_llm(tmp_path, monkeypatch):
+    """Un dossier vide est court-circuité déterministiquement AVANT tout
+    appel LLM (voir agent.py::_finalize_without_llm) — même si le LLM était
+    disponible et prêt à répondre, il n'est jamais consulté, et le résultat
+    reste BLOCKED (jamais ERROR, puisqu'aucune panne LLM n'a pu survenir)."""
     calls = []
 
-    def unavailable_llm(**kwargs):
+    def should_never_be_called(**kwargs):
         calls.append(kwargs)
         return None
 
-    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", unavailable_llm)
+    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", should_never_be_called)
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
 
     result = run("CLM-9005", empty_source, storage=_storage(tmp_path))
 
-    assert len(calls) == 1
-    assert calls[0]["file_count"] == 0
-    assert result.status == IntakeStatus.ERROR
-    assert result.manifest.status == IntakeStatus.ERROR
+    assert calls == []
+    assert result.status == IntakeStatus.BLOCKED
+    assert result.manifest.status == IntakeStatus.BLOCKED
     assert result.llm_metadata is not None
     assert any(error.code == IntakeReasonCode.EMPTY_CLAIM for error in result.errors)
-    assert any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)
+    # Jamais LLM_OUTPUT_INVALID ici : aucune panne LLM n'a pu se produire
+    # puisqu'aucun appel n'a jamais été tenté.
+    assert not any(error.code == IntakeReasonCode.LLM_OUTPUT_INVALID for error in result.errors)
 
 
 def test_claim_intake_llm_json_invalide_error(tmp_path, monkeypatch):

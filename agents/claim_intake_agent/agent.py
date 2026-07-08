@@ -126,6 +126,30 @@ def run(
     errors: list[StructuredError] = []
 
     # ── Étape 1 : validation des métadonnées du dossier ─────────────────────
+    # Garde déterministe, AVANT tout appel LLM : un dossier absent (jamais
+    # déposé sur disque) ou vide (déposé mais sans fichier) est un cas non
+    # ambigu — la Phase A a déjà toute l'information nécessaire pour le
+    # bloquer. Appeler le LLM ici n'apporte aucune valeur de décision (rien
+    # à interpréter) et coûte une requête réseau inutile vers Ollama à
+    # chaque dossier vide/absent. Court-circuite donc avant tout appel LLM
+    # (via `_finalize_without_llm`) — seule exception documentée à la règle
+    # "LLM appelé à chaque exécution effective" (voir CLAUDE.md). Le cas
+    # "absent" (répertoire manquant) est traité ici plutôt que de laisser
+    # `source_path.iterdir()` lever un `FileNotFoundError` non géré.
+
+    if not source_path.exists() or not source_path.is_dir():
+        err = StructuredError(
+            code=IntakeReasonCode.EMPTY_CLAIM,
+            message="Le répertoire source du dossier de demande est introuvable",
+            field="source_path",
+        )
+        return _finalize_without_llm(
+            case_id=case_id,
+            manifest=_blocked_manifest(case_id, received_at, depositor_id, [err]),
+            service=svc,
+            reasons=["Dossier absent refusé"],
+            errors=[err],
+        )
 
     candidate_files = sorted(
         [f for f in source_path.iterdir() if f.is_file()],
@@ -138,14 +162,10 @@ def run(
             message="Le dossier de demande ne contient aucun fichier",
             field="source_path",
         )
-        return _finalize_with_llm(
+        return _finalize_without_llm(
             case_id=case_id,
             manifest=_blocked_manifest(case_id, received_at, depositor_id, [err]),
             service=svc,
-            accepted_count=0,
-            quarantined_count=0,
-            duplicate_count=0,
-            error_count=0,
             reasons=["Dossier vide refusé"],
             errors=[err],
         )
@@ -449,6 +469,42 @@ def _blocked_manifest(
     )
 
 
+def _finalize_without_llm(
+    *,
+    case_id: str,
+    manifest: ClaimManifest,
+    service: StorageService,
+    reasons: list[str],
+    errors: list[StructuredError],
+) -> ClaimIntakeResult:
+    """Construit le résultat final sans jamais invoquer le LLM.
+
+    Réservée au cas EMPTY_CLAIM (dossier sans aucun fichier candidat) : la
+    Phase A dispose déjà de toute l'information nécessaire, la décision est
+    non ambiguë et déterministe — un appel LLM n'ajouterait aucune valeur de
+    décision, seulement une requête réseau vers Ollama inutile pour chaque
+    dossier vide. Le statut de ``manifest`` (déjà BLOCKED) est conservé tel
+    quel, jamais réévalué par un LLM absent. ``llm_metadata`` reste peuplé
+    (``build_llm_metadata`` est pure, ne contacte jamais Ollama) uniquement
+    pour satisfaire le contrat de schéma ``ClaimIntakeResult.llm_metadata``
+    (obligatoire) — il ne signifie pas qu'un appel a eu lieu.
+    """
+    llm_metadata = build_llm_metadata(_AGENT_NAME)
+    service.write_intake_manifest(case_id, manifest.model_dump_json(indent=2))
+    return ClaimIntakeResult(
+        claim_id=case_id,
+        status=manifest.status,
+        manifest=manifest,
+        accepted_count=0,
+        quarantined_count=0,
+        duplicate_count=0,
+        error_count=0,
+        reasons=reasons,
+        errors=errors,
+        llm_metadata=llm_metadata,
+    )
+
+
 def _finalize_with_llm(
     *,
     case_id: str | None = None,
@@ -464,10 +520,11 @@ def _finalize_with_llm(
 ) -> ClaimIntakeResult:
     """Appelle le LLM puis construit le résultat final.
 
-    Tous les chemins de ``run()`` passent ici afin qu'aucun résultat d'ingestion
-    valide ne soit purement déterministe. Si le LLM ne produit pas une réponse
-    structurée exploitable, la sortie est forcée en ERROR avec une erreur
-    structurée fail-closed.
+    Tous les chemins de ``run()`` passent ici, à l'exception du dossier vide
+    (EMPTY_CLAIM, voir ``_finalize_without_llm``) — décision non ambiguë déjà
+    prise par la Phase A, un appel LLM n'y apporterait rien. Si le LLM ne
+    produit pas une réponse structurée exploitable, la sortie est forcée en
+    ERROR avec une erreur structurée fail-closed.
     """
     final_case_id = claim_id or case_id or manifest.claim_id
     llm_metadata = build_llm_metadata(_AGENT_NAME)

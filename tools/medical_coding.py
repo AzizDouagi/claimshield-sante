@@ -5,18 +5,25 @@ Charge la table config/rules/medical_codes.yaml (mise en cache après le premier
 
 Logique de recherche par priorité :
   1. Correspondance exacte (description normalisée casefold + strip)
-  2. Correspondance partielle par mots-clés (section keywords du YAML)
-  3. Non trouvé → proposed_code=None, status=NEEDS_REVIEW
+  2. Correspondance approximative (rapidfuzz, P4-1) — candidats bornés au
+     référentiel local, jamais un code inventé ; transmis au LLM comme choix
+     structuré, jamais sélectionnés automatiquement ici.
+  3. Correspondance partielle par mots-clés (section keywords du YAML)
+  4. Non trouvé → proposed_code=None, status=NEEDS_REVIEW
 
-rule_applied : "exact_match" | "keyword_match" | "not_found"
+rule_applied : "exact_match" | "fuzzy_candidates_found" | "keyword_match" | "not_determined"
 """
 from __future__ import annotations
 
+from rapidfuzz import fuzz, process
+
 from schemas.domain import VerificationStatus
-from schemas.results import ProcedureCoding
+from schemas.results import FuzzyCodeCandidate, ProcedureCoding
 from tools.rule_loader import load_rules
 
 _RULES_FILENAME = "medical_codes.yaml"
+_DEFAULT_MIN_SIMILARITY_SCORE = 0.80
+_DEFAULT_FUZZY_LIMIT = 5
 
 
 def load_code_table() -> dict:
@@ -76,6 +83,95 @@ def find_code_alternatives(
     return alternatives
 
 
+def find_fuzzy_candidates(
+    description: str,
+    section: str,
+    table: dict | None = None,
+    *,
+    limit: int = _DEFAULT_FUZZY_LIMIT,
+    score_cutoff: float | None = None,
+) -> list[FuzzyCodeCandidate]:
+    """Recherche des candidats de correspondance approximative (rapidfuzz).
+
+    Bornée strictement aux entrées actives du référentiel local, pour la
+    bonne section (SNOMED-CT/RxNorm) — jamais un code inventé, uniquement
+    des candidats déjà présents dans ``table``. Le seuil de similarité est
+    lu depuis ``table["min_similarity_score"]`` (config/rules/medical_codes.yaml,
+    ``ruleset.thresholds`` — déclaré depuis la v1.1.0 mais jamais utilisé
+    avant P4-1) si ``score_cutoff`` n'est pas fourni explicitement. Le score
+    ``rapidfuzz`` est sur une échelle 0-100 ; le seuil de configuration est
+    sur une échelle 0-1, d'où la conversion ``* 100``.
+
+    Args:
+        description  : description brute de l'acte ou du médicament.
+        section      : "procedures" ou "medications".
+        table        : table YAML déjà chargée (chargée automatiquement si None).
+        limit        : nombre maximal de candidats distincts retournés.
+        score_cutoff : seuil de similarité 0-1 (défaut : celui du référentiel).
+
+    Returns:
+        Liste de FuzzyCodeCandidate triée par similarité décroissante,
+        dédupliquée par code — jamais un même code proposé deux fois via
+        deux synonymes différents. Liste vide si aucun candidat ne dépasse
+        le seuil.
+    """
+    if table is None:
+        table = load_code_table()
+    target_system = _system_for_section(section)
+    threshold = (
+        score_cutoff if score_cutoff is not None
+        else table.get("min_similarity_score", _DEFAULT_MIN_SIMILARITY_SCORE)
+    )
+    normalized = description.strip()
+    if not normalized:
+        return []
+
+    choices: list[str] = []
+    choice_entries: list[dict] = []
+    for entry in table.get("codes", []):
+        if not entry.get("active", True) or entry.get("system") != target_system:
+            continue
+        label = entry.get("label", "")
+        if label:
+            choices.append(label)
+            choice_entries.append(entry)
+        for syn in entry.get("synonyms", []):
+            if syn:
+                choices.append(syn)
+                choice_entries.append(entry)
+
+    if not choices:
+        return []
+
+    matches = process.extract(
+        normalized,
+        choices,
+        scorer=fuzz.WRatio,
+        limit=max(limit * 3, limit),  # marge avant déduplication par code
+        score_cutoff=threshold * 100,
+    )
+
+    seen_codes: set[str] = set()
+    candidates: list[FuzzyCodeCandidate] = []
+    for _matched_text, score, index in matches:
+        entry = choice_entries[index]
+        code = str(entry["code"])
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        candidates.append(
+            FuzzyCodeCandidate(
+                code=code,
+                label=entry.get("label", ""),
+                system=entry.get("system", target_system),
+                similarity_score=round(score / 100, 4),
+            )
+        )
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
 def lookup_code(
     description: str,
     section: str,
@@ -91,6 +187,9 @@ def lookup_code(
     Returns:
         ProcedureCoding avec :
           - status=PASS et proposed_code renseigné si correspondance exacte trouvée.
+          - status=NEEDS_REVIEW, proposed_code=None et alternatives=candidats
+            flous (codes réels du référentiel) si correspondance approximative
+            (rapidfuzz) trouvée, aucune correspondance exacte.
           - status=NEEDS_REVIEW et proposed_code=None si correspondance partielle (mots-clés).
           - status=NEEDS_REVIEW et proposed_code=None si aucune correspondance.
 
@@ -141,7 +240,26 @@ def lookup_code(
                     ],
                 )
 
-    # ── Étape 2 : correspondance partielle par mots-clés ─────────────────────
+    # ── Étape 2 : correspondance approximative (rapidfuzz, P4-1) ─────────────
+    # Candidats bornés au référentiel local actif, jamais un code inventé ni
+    # sélectionné automatiquement ici — status reste NEEDS_REVIEW, la
+    # sélection finale n'est jamais faite par cette fonction déterministe.
+    fuzzy_candidates = find_fuzzy_candidates(description, section, table)
+    if fuzzy_candidates:
+        return ProcedureCoding(
+            original_description=description,
+            proposed_code=None,
+            rule_applied="fuzzy_candidates_found",
+            status=VerificationStatus.NEEDS_REVIEW,
+            alternatives=[c.code for c in fuzzy_candidates],
+            evidence=[
+                f"Candidat approximatif : {c.label} ({c.system}:{c.code}, "
+                f"similarité={c.similarity_score:.2f})"
+                for c in fuzzy_candidates
+            ],
+        )
+
+    # ── Étape 3 : correspondance partielle par mots-clés ─────────────────────
     keywords_section: dict = table.get("keywords", {})
     for _category, keyword_list in keywords_section.items():
         for kw in keyword_list:
@@ -158,7 +276,7 @@ def lookup_code(
                     ],
                 )
 
-    # ── Étape 3 : aucune correspondance ──────────────────────────────────────
+    # ── Étape 4 : aucune correspondance ──────────────────────────────────────
     return ProcedureCoding(
         original_description=description,
         proposed_code=None,

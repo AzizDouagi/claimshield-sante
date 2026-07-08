@@ -326,6 +326,26 @@ class TestBoundedSignalAssessments:
         assert upgraded.status is VerificationStatus.FAIL
         assert upgraded.human_review_required is True
 
+    def test_adjustment_emits_structured_log(self, caplog):
+        """P3-2 : le point de décision autonome (ajustement de pondération
+        effectivement appliqué) est journalisé pour traçabilité."""
+        identity_coverage = self._moderate_risk_identity_coverage()
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ]
+        )
+        with caplog.at_level("INFO"):
+            with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+                agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("fraud_detection_signal_weight_adjusted" in m and "CLM-0001" in m for m in messages)
+
     def test_downgrade_decreases_risk_score(self):
         identity_coverage = self._moderate_risk_identity_coverage()
         with patch.object(agent, "_invoke_llm_fraud", return_value=None):

@@ -106,7 +106,6 @@ N'implémente pas l'Audit Agent (étape 12, toujours stub).
 """
 from __future__ import annotations
 
-import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
@@ -114,6 +113,7 @@ from typing import Any, Callable, Mapping, Sequence
 import httpx
 from langchain_core.tools import BaseTool
 
+from config.logging import get_logger
 from orchestrator.model_registry import AGENT_REQUIRED_CAPABILITIES, ModelCapability, ModelRegistry
 from orchestrator.orchestrator import (
     AGENT_RESULT_FIELD,
@@ -129,7 +129,7 @@ from schemas.results import AuditEvent, StructuredError
 from services.audit_store import AuditStore, AuditStoreError
 from state.claim_state import ClaimState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 EVENT_AUTHORIZATION = "authorization"
 EVENT_REFUSAL = "refusal"
@@ -436,9 +436,10 @@ class Orchestrator:
                 normalized = self.audit_normalizer(payload)
                 if normalized is None:
                     logger.warning(
-                        "Audit non persisté pour %s/%s : normalisation LLM absente.",
-                        event.case_id,
-                        event.action,
+                        "orchestrator_audit_not_persisted",
+                        case_id=event.case_id,
+                        action=event.action,
+                        reason="normalisation LLM absente",
                     )
                     continue
                 self.audit_store.record_event(
@@ -455,18 +456,18 @@ class Orchestrator:
                 )
             except AuditStoreError as exc:
                 logger.warning(
-                    "Audit append-only refusé pour %s/%s : %s",
-                    event.case_id,
-                    event.action,
-                    exc.structured.message,
+                    "orchestrator_audit_append_only_refused",
+                    case_id=event.case_id,
+                    action=event.action,
+                    reason=exc.structured.message,
                 )
             except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer l'issue agent.
                 logger.warning(
-                    "Audit non persisté pour %s/%s : %s: %s",
-                    event.case_id,
-                    event.action,
-                    type(exc).__name__,
-                    exc,
+                    "orchestrator_audit_not_persisted",
+                    case_id=event.case_id,
+                    action=event.action,
+                    exc_type=type(exc).__name__,
+                    reason=str(exc),
                 )
 
     def _resolve_model(
@@ -514,13 +515,12 @@ class Orchestrator:
         fallback_decision = self.model_check(self.model_registry, request.agent_name, fallback_spec.model_id)
         if not fallback_decision.allowed:
             logger.warning(
-                "Fallback modèle refusé pour l'agent %s : modèle initial %r indisponible "
-                "(%s), candidat %r également refusé (%s) — panne d'origine conservée.",
-                request.agent_name.value,
-                model_id,
-                decision.reason.code,
-                fallback_spec.model_id,
-                fallback_decision.reason.code,
+                "model_fallback_rejected",
+                agent_name=request.agent_name.value,
+                initial_model_id=model_id,
+                initial_reason=decision.reason.code,
+                candidate_model_id=fallback_spec.model_id,
+                candidate_reason=fallback_decision.reason.code,
             )
             fallback_event = _build_audit_event(
                 request,
@@ -541,12 +541,11 @@ class Orchestrator:
             return decision, model_id, None, (fallback_event, refusal_event)
 
         logger.warning(
-            "Fallback modèle appliqué pour l'agent %s : modèle initial %r indisponible "
-            "(%s) → remplacement par %r.",
-            request.agent_name.value,
-            model_id,
-            decision.reason.code,
-            fallback_spec.model_id,
+            "model_fallback_applied",
+            agent_name=request.agent_name.value,
+            initial_model_id=model_id,
+            initial_reason=decision.reason.code,
+            fallback_model_id=fallback_spec.model_id,
         )
         fallback_event = _build_audit_event(
             request,

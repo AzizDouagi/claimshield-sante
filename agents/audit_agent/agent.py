@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agents.audit_agent.prompt import load_audit_prompt
 from agents.audit_agent.schemas import LlmAuditNormalizedEvent
+from config.logging import get_logger
 from config.settings import get_settings
 from llm.factory import get_llm
 from schemas.audit import AuditEventType, RedactionStatus
@@ -28,6 +29,8 @@ from tools.audit_redaction import redact_audit_payload
 
 _STEP_NAME = "audit"
 _AGENT_NAME = "audit_agent"
+
+logger = get_logger(__name__)
 _POLICY_VERSION = "1.0.0"
 
 _REDACTION_RANK: dict[RedactionStatus, int] = {
@@ -211,6 +214,10 @@ class AuditAgent:
         dégradés. Seul un échec de la persistance elle-même (chaîne rompue,
         `AuditStoreError`) reste un événement réellement non persisté.
         """
+        # P0-1/P3-2 : point de décision fail-safe critique — perte évitée
+        # d'un événement d'audit, journalisé pour alerte opérationnelle
+        # (Ollama probablement indisponible).
+        logger.warning("audit_llm_normalization_failed_degraded_fallback", case_id=case_id)
         _, computed_status = _compute_redaction(structured_event)
         reasons = [
             "AUDIT_LLM_NORMALIZATION_FAILED : événement persisté en mode "

@@ -17,7 +17,6 @@ Interdictions strictes :
 from __future__ import annotations
 
 import json
-import logging
 from datetime import UTC, datetime
 from typing import Any, Callable, Mapping
 
@@ -26,6 +25,7 @@ from pydantic import ValidationError
 
 from agents.security_gate_agent.prompt import load_security_gate_prompt
 from agents.security_gate_agent.schemas import InputType, LlmSecurityDecision, SecurityGateInput
+from config.logging import get_logger
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import FindingCode, SecurityDecision, SeverityLevel
@@ -73,7 +73,7 @@ from security.scanners import (
 )
 from state.claim_state import ClaimState, validate_state_update
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _AGENT_NAME = "security_gate_agent"
 
@@ -465,9 +465,10 @@ def _persist_security_audit(
         normalized = audit_normalizer(payload)
         if normalized is None:
             logger.warning(
-                "Audit Security Gate non persisté pour %s/%s : normalisation LLM absente.",
-                result.claim_id,
-                audit_outcome,
+                "security_gate_audit_not_persisted",
+                case_id=result.claim_id,
+                outcome=audit_outcome,
+                reason="normalisation LLM absente",
             )
             return
         audit_store.record_event(
@@ -484,18 +485,18 @@ def _persist_security_audit(
         )
     except AuditStoreError as exc:
         logger.warning(
-            "Audit Security Gate append-only refusé pour %s/%s : %s",
-            result.claim_id,
-            audit_outcome,
-            exc.structured.message,
+            "security_gate_audit_append_only_refused",
+            case_id=result.claim_id,
+            outcome=audit_outcome,
+            reason=exc.structured.message,
         )
     except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer la décision sécurité.
         logger.warning(
-            "Audit Security Gate non persisté pour %s/%s : %s: %s",
-            result.claim_id,
-            audit_outcome,
-            type(exc).__name__,
-            exc,
+            "security_gate_audit_not_persisted",
+            case_id=result.claim_id,
+            outcome=audit_outcome,
+            exc_type=type(exc).__name__,
+            reason=str(exc),
         )
 
 

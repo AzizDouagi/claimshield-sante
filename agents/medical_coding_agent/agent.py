@@ -67,7 +67,18 @@ def _invoke_llm_react(
             response_format=LlmCodingDecision,
         )
         data = {
-            "needs_review": [c.original_description for c in needs_review],
+            "needs_review": [
+                {
+                    "description": c.original_description,
+                    "rule_applied": c.rule_applied,
+                    # P4-1 : candidats bornés au référentiel local (codes
+                    # réels uniquement) — jamais une invitation à inventer un
+                    # code. Vide hors palier fuzzy_candidates_found.
+                    "candidates": c.alternatives,
+                    "evidence": c.evidence,
+                }
+                for c in needs_review
+            ],
             "already_coded": [
                 {"description": c.original_description, "code": c.proposed_code}
                 for c in already_coded
@@ -94,7 +105,16 @@ def _merge_with_llm(
     llm_decision: LlmCodingDecision | None,
     section_by_description: dict[str, str],
 ) -> list[ProcedureCoding]:
-    """Fusionne les codifications déterministes avec les résolutions LLM vérifiées."""
+    """Fusionne les codifications déterministes avec les résolutions LLM vérifiées.
+
+    P4-1 : les items ``rule_applied == "fuzzy_candidates_found"`` suivent un
+    chemin distinct, plus conservateur — même un candidat flou confirmé par
+    le LLM ne fait jamais passer le statut à PASS (contrairement au chemin
+    ``llm_tool_verified`` existant), la correspondance restant approximative
+    par nature. Le code proposé doit en plus être l'un des candidats
+    initialement proposés (``coding.alternatives``), jamais une valeur
+    substituée par le LLM en dehors de la liste bornée.
+    """
     if llm_decision is None:
         return initial_codings
 
@@ -106,6 +126,33 @@ def _merge_with_llm(
         if coding.status == VerificationStatus.NEEDS_REVIEW and coding.original_description in llm_map:
             resolved = llm_map[coding.original_description]
             section = section_by_description.get(coding.original_description, "procedures")
+
+            if coding.rule_applied == "fuzzy_candidates_found":
+                if (
+                    resolved.proposed_code
+                    and resolved.proposed_code in coding.alternatives
+                    and code_exists_in_reference(resolved.proposed_code, section)
+                ):
+                    merged.append(coding.model_copy(update={
+                        "proposed_code": resolved.proposed_code,
+                        "rule_applied": "fuzzy_match_llm_selected",
+                        "evidence": [
+                            *coding.evidence,
+                            "Candidat flou confirmé par LLM parmi les candidats proposés "
+                            "— revue humaine requise, jamais un PASS automatique.",
+                            resolved.rationale,
+                        ],
+                    }))
+                else:
+                    merged.append(coding.model_copy(update={
+                        "rule_applied": "fuzzy_match_no_selection",
+                        "evidence": [
+                            *coding.evidence,
+                            "Aucun candidat flou confirmé par le LLM — revue humaine requise.",
+                        ],
+                    }))
+                continue
+
             if resolved.proposed_code and code_exists_in_reference(resolved.proposed_code, section):
                 merged.append(ProcedureCoding(
                     original_description=coding.original_description,

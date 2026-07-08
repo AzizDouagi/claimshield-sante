@@ -502,6 +502,197 @@ ruleset:
         active: true
         preauth_required: false
 
+      # ── P4-1 : extension du référentiel (Phase 4 du plan de remédiation) ────
+      # Entrées synthétiques supplémentaires, même style/même origine que le
+      # reste du catalogue (voir description du ruleset ci-dessus) — pas un
+      # import de nomenclature réelle sous licence (CCAM notamment, hors
+      # périmètre : proprietary, sans jeu de données disponible dans cet
+      # environnement). Objectif : élargir la couverture par catégorie et
+      # fournir des candidats réalistes au matching flou (rapidfuzz).
+
+      # ── Ophtalmologie (SNOMED-CT) ────────────────────────────────────────────
+
+      - code: "308292007"
+        label: "Consultation ophtalmologique"
+        system: SNOMED-CT
+        category: ophtalmologie
+        synonyms:
+          - "consultation ophtalmologie"
+          - "ophthalmology consultation"
+          - "examen ophtalmologique"
+          - "visite ophtalmologiste"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "274505007"
+        label: "Examen du fond d'œil"
+        system: SNOMED-CT
+        category: ophtalmologie
+        synonyms:
+          - "fundoscopie"
+          - "fundus examination"
+          - "examen du fond de l'oeil"
+          - "fond d'oeil dilaté"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Radiologie / imagerie (SNOMED-CT) ────────────────────────────────────
+
+      - code: "399208008"
+        label: "Radiographie thoracique"
+        system: SNOMED-CT
+        category: radiologie
+        synonyms:
+          - "radio thorax"
+          - "chest X-ray"
+          - "radiographie pulmonaire"
+          - "cliché thoracique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "45036003"
+        label: "Échographie abdominale"
+        system: SNOMED-CT
+        category: radiologie
+        synonyms:
+          - "echographie abdomen"
+          - "abdominal ultrasound"
+          - "échographie de l'abdomen"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Cardiologie (SNOMED-CT) ───────────────────────────────────────────────
+
+      - code: "164847006"
+        label: "Électrocardiogramme 12 dérivations"
+        system: SNOMED-CT
+        category: cardiovasculaire
+        synonyms:
+          - "ECG 12 dérivations"
+          - "12 lead ECG"
+          - "electrocardiogramme"
+          - "ECG standard"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "5827000"
+        label: "Épreuve d'effort cardiaque"
+        system: SNOMED-CT
+        category: cardiovasculaire
+        synonyms:
+          - "test d'effort"
+          - "cardiac stress test"
+          - "épreuve d'effort"
+        exclusions: []
+        active: true
+        preauth_required: true
+
+      # ── Kinésithérapie / suivi (SNOMED-CT) ───────────────────────────────────
+
+      - code: "91251008"
+        label: "Séance de kinésithérapie respiratoire"
+        system: SNOMED-CT
+        category: kinesitherapie
+        synonyms:
+          - "kine respiratoire"
+          - "respiratory physiotherapy"
+          - "séance de kiné respiratoire"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "424619006"
+        label: "Consultation de suivi de grossesse"
+        system: SNOMED-CT
+        category: consultation
+        synonyms:
+          - "consultation prénatale"
+          - "prenatal visit"
+          - "suivi grossesse"
+          - "visite de suivi de grossesse"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "287664005"
+        label: "Pose de plâtre pour fracture"
+        system: SNOMED-CT
+        category: chirurgie
+        synonyms:
+          - "immobilisation platrée"
+          - "cast application"
+          - "pose de plâtre"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      # ── Médicaments supplémentaires (RxNorm) ─────────────────────────────────
+
+      - code: "861007"
+        label: "Metformine 500 mg comprimé oral"
+        system: RxNorm
+        category: antidiabetique
+        synonyms:
+          - "metformin 500 MG oral tablet"
+          - "metformine comprimé"
+          - "glucophage 500 mg générique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "259255"
+        label: "Atorvastatine 20 mg comprimé oral"
+        system: RxNorm
+        category: cardiovasculaire
+        synonyms:
+          - "atorvastatin 20 MG oral tablet"
+          - "atorvastatine comprimé"
+          - "statine 20 mg"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "402873"
+        label: "Oméprazole 20 mg gélule"
+        system: RxNorm
+        category: gastroenterologie
+        synonyms:
+          - "omeprazole 20 MG oral capsule"
+          - "oméprazole gélule"
+          - "IPP 20 mg"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "435"
+        label: "Salbutamol 100 mcg inhalateur"
+        system: RxNorm
+        category: respiratoire
+        synonyms:
+          - "albuterol 100 MCG inhaler"
+          - "salbutamol inhalateur"
+          - "ventoline 100 mcg générique"
+        exclusions: []
+        active: true
+        preauth_required: false
+
+      - code: "274783"
+        label: "Insuline glargine 100 unités/mL injectable"
+        system: RxNorm
+        category: antidiabetique
+        synonyms:
+          - "insulin glargine 100 UNT/ML injectable"
+          - "insuline glargine injectable"
+          - "lantus 100 unités générique"
+        exclusions: []
+        active: true
+        preauth_required: true
+
     # ── Mots-clés de correspondance par catégorie ─────────────────────────────
     keywords:
       dentaire:

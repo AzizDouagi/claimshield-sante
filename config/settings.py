@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     api_host: str = Field("127.0.0.1", alias="API_HOST")
     api_port: int = Field(8000, alias="API_PORT")
     api_reload: bool = Field(True, alias="API_RELOAD")
+    claimshield_api_key: SecretStr = Field(
+        default=SecretStr("claimshield-dev-api-key-change-in-production"),
+        alias="CLAIMSHIELD_API_KEY",
+        description=(
+            "Clé d'authentification requise (en-tête X-API-Key) pour les "
+            "endpoints qui déclenchent une action métier (soumission de "
+            "dossier, décision humaine) — voir api/dependencies.py. Valeur "
+            "de développement par défaut, jamais utilisable en production."
+        ),
+    )
 
     # ── Synthea ───────────────────────────────────────────────────────────────
     synthea_root: Path = Field(_PROJECT_ROOT / "synthea", alias="SYNTHEA_ROOT")

@@ -186,6 +186,22 @@ class TestDegradedFallbackWhenLlmUnavailable:
         assert len(result.events) == 1
         assert store.read_by_case_id("CLM-9001")  # réellement persisté, pas seulement dans le résultat
 
+    def test_degraded_fallback_emits_structured_log(self, monkeypatch, caplog):
+        """P3-2 : le point de décision fail-safe critique (perte d'événement
+        évitée) est journalisé pour alerte opérationnelle."""
+        self._patch_llm_unavailable(monkeypatch)
+        agent = AuditAgent(audit_store=AuditStore())
+        state = {"case_id": "CLM-9006"}
+
+        with caplog.at_level("WARNING"):
+            agent.run(state)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any(
+            "audit_llm_normalization_failed_degraded_fallback" in m and "CLM-9006" in m
+            for m in messages
+        )
+
     def test_status_remains_fail_as_operational_signal(self, monkeypatch):
         self._patch_llm_unavailable(monkeypatch)
         agent = AuditAgent(audit_store=AuditStore())

@@ -245,6 +245,28 @@ class TestBoundedSeverityAssessments:
         assert downgraded.status is VerificationStatus.NEEDS_REVIEW
         assert downgraded.result_payload.signals[0].severity == SeverityLevel.HIGH
 
+    def test_adjustment_emits_structured_log(self, caplog):
+        """P3-2 : le point de décision autonome (ajustement de sévérité
+        effectivement appliqué) est journalisé pour traçabilité."""
+        ocr = self._critical_signal_ocr()
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="MISSING_PRESCRIPTION_REFERENCE",
+                    severity_override="HIGH",
+                    rationale="Contexte atténuant documenté.",
+                )
+            ]
+        )
+        with caplog.at_level("INFO"):
+            with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+                agent.run("CLM-0001", ocr_result=ocr)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any(
+            "clinical_consistency_severity_adjusted" in m and "CLM-0001" in m for m in messages
+        )
+
     def test_adjustment_beyond_one_notch_is_ignored(self):
         """MEDIUM → CRITICAL est un écart de deux crans — hors borne,
         toujours ignoré, jamais partiellement appliqué."""

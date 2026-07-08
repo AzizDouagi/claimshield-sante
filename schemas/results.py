@@ -953,6 +953,19 @@ class ProcedureCoding(StrictModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class FuzzyCodeCandidate(StrictModel):
+    """Candidat de correspondance approximative (rapidfuzz) — toujours issu du
+    référentiel local actif, jamais un code inventé. Transmis au LLM comme
+    choix borné (P4-1) ; ne devient un ``proposed_code`` que si le LLM le
+    sélectionne explicitement et que ``code_exists_in_reference`` le confirme
+    (double contrôle inchangé)."""
+
+    code: str
+    label: str
+    system: str
+    similarity_score: float = Field(ge=0.0, le=1.0)
+
+
 class MedicalCodingResult(StrictModel):
     """Correspondance actes → table de codes locale versionnée."""
 

@@ -1,12 +1,15 @@
 """Tests du Claim Intake Agent.
 
 Utilise les fixtures de datasets/demo/ comme source de vérité.
-Aucun mock — les fichiers sont lus depuis le disque.
+Les fichiers sont lus depuis le disque ; seuls quelques tests ciblés
+espionnent explicitement ``_invoke_llm_intake`` (via ``unittest.mock.Mock``)
+pour prouver l'absence d'appel LLM sur les gardes déterministes.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -111,6 +114,42 @@ def test_dossier_vide(tmp_path):
     empty_dir.mkdir()
 
     result = run(case_id="CLM-9999", source_path=empty_dir, storage=svc)
+    assert result.status == IntakeStatus.BLOCKED
+    assert result.accepted_count == 0
+    assert any(e.code == IntakeReasonCode.EMPTY_CLAIM for e in result.errors)
+
+
+def test_dossier_vide_ne_declenche_aucun_appel_llm(tmp_path, monkeypatch):
+    """Un dossier vide est un cas non ambigu — la Phase A suffit à elle
+    seule, aucun appel LLM n'est nécessaire ni souhaitable (coût réseau
+    inutile vers Ollama). Remplace le mock déterministe autouse par un espion
+    dédié pour vérifier explicitement l'absence totale d'invocation."""
+    llm_spy = Mock()
+    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", llm_spy)
+    svc = _make_storage(tmp_path)
+    empty_dir = tmp_path / "empty_case"
+    empty_dir.mkdir()
+
+    result = run(case_id="CLM-9999", source_path=empty_dir, storage=svc)
+
+    llm_spy.assert_not_called()
+    assert result.status == IntakeStatus.BLOCKED
+    assert any(e.code == IntakeReasonCode.EMPTY_CLAIM for e in result.errors)
+    assert result.llm_metadata is not None
+
+
+def test_repertoire_absent_retourne_blocked_sans_appel_llm(tmp_path, monkeypatch):
+    """source_path absent du disque (jamais déposé) est traité comme un
+    dossier vide : résultat BLOCKED immédiat, jamais une exception non
+    gérée, jamais un appel LLM."""
+    llm_spy = Mock()
+    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", llm_spy)
+    svc = _make_storage(tmp_path)
+    missing_dir = tmp_path / "does_not_exist"
+
+    result = run(case_id="CLM-9999", source_path=missing_dir, storage=svc)
+
+    llm_spy.assert_not_called()
     assert result.status == IntakeStatus.BLOCKED
     assert result.accepted_count == 0
     assert any(e.code == IntakeReasonCode.EMPTY_CLAIM for e in result.errors)

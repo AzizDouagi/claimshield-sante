@@ -222,6 +222,16 @@ class TestAutoApprovalEligibility:
         assert result.result_payload.auto_decision == "AUTO_APPROVED_LOW_RISK"
         assert result.result_payload.auto_decision_criteria != []
 
+    def test_auto_approval_emits_structured_log(self, caplog):
+        """P3-2 : le point de décision autonome est journalisé (case_id en
+        contexte) pour traçabilité opérationnelle."""
+        with caplog.at_level("INFO"):
+            with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+                agent.run("CLM-0001", _clean_state())
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("case_reviewer_auto_approved" in m and "CLM-0001" in m for m in messages)
+
     def test_lock_intact_even_when_auto_decision_is_set(self):
         """Double preuve centrale de P1-4 : l'autonomie est réelle
         (auto_decision posé) ET le verrou structurel reste intact (status/

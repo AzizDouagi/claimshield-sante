@@ -40,6 +40,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agents.case_reviewer_agent.prompt import load_case_reviewer_prompt
 from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
+from config.logging import get_logger
 from config.settings import get_settings
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
@@ -56,6 +57,8 @@ from tools.consistency import detect_result_disagreements
 
 _STEP_NAME = "case_reviewer"
 _AGENT_NAME = "case_reviewer_agent"
+
+logger = get_logger(__name__)
 
 _EXPECTED_UPSTREAM_AGENTS: tuple[str, ...] = (
     "claim_intake",
@@ -561,6 +564,15 @@ def run(case_id: str, state: ClaimState | None = None) -> CaseReviewerResult:
         risks,
         disagreements,
     )
+    if auto_decision == _AUTO_APPROVE_LABEL:
+        # P1-4/P3-2 : point de décision autonome — journalisé pour
+        # traçabilité opérationnelle (échantillonnage d'audit), en plus de
+        # l'alerte déjà ajoutée à state["alerts"] par make_node().
+        logger.info(
+            "case_reviewer_auto_approved",
+            case_id=case_id,
+            criteria_count=len(auto_decision_criteria),
+        )
 
     payload = CaseReviewerResultPayload(
         recommendation=final_recommendation,

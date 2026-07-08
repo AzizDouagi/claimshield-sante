@@ -25,19 +25,19 @@ Trois responsabilités strictement séparées :
 """
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any, Callable, Mapping, Sequence
 
 from pydantic import Field, ValidationError
 
+from config.logging import get_logger
 from human_review.models import HumanDecision, ReviewAction
 from schemas.domain import StrictModel
 from schemas.results import AuditEvent, StructuredError
 from services.audit_store import AuditStore, AuditStoreError
 from state.claim_state import ClaimState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 AuditEventNormalizer = Callable[[Mapping[str, Any]], Any]
 
@@ -274,9 +274,10 @@ def _persist_human_decision_audit_event(
         normalized = audit_normalizer(payload)
         if normalized is None:
             logger.warning(
-                "Audit HITL non persisté pour %s/%s : normalisation LLM absente.",
-                event.case_id,
-                event.outcome,
+                "human_review_audit_not_persisted",
+                case_id=event.case_id,
+                outcome=event.outcome,
+                reason="normalisation LLM absente",
             )
             return
         audit_store.record_event(
@@ -293,18 +294,18 @@ def _persist_human_decision_audit_event(
         )
     except AuditStoreError as exc:
         logger.warning(
-            "Audit HITL append-only refusé pour %s/%s : %s",
-            event.case_id,
-            event.outcome,
-            exc.structured.message,
+            "human_review_audit_append_only_refused",
+            case_id=event.case_id,
+            outcome=event.outcome,
+            reason=exc.structured.message,
         )
     except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer la décision validée.
         logger.warning(
-            "Audit HITL non persisté pour %s/%s : %s: %s",
-            event.case_id,
-            event.outcome,
-            type(exc).__name__,
-            exc,
+            "human_review_audit_not_persisted",
+            case_id=event.case_id,
+            outcome=event.outcome,
+            exc_type=type(exc).__name__,
+            reason=str(exc),
         )
 
 
