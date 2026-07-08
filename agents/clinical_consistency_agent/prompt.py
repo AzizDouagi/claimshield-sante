@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-PROMPT_VERSION = "1.2.0"
+PROMPT_VERSION = "1.3.0"
 _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "clinical_consistency_agent.yaml"
 
 

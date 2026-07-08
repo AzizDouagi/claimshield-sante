@@ -55,14 +55,43 @@ EXPECTED_NOMINAL_ORDER: list[str] = [
     "privacy",
     "document_ocr",
     "fhir_validator",
+    "verification_fan_in",
     "identity_coverage",
     "medical_coding",
     "clinical_consistency",
     "fraud_detection",
+    "consistency_fan_in",
     "case_reviewer",
     "audit",
     "finalize",
 ]
+
+# P2-1 (parallélisation) : document_ocr/fhir_validator d'une part, et
+# clinical_consistency/fraud_detection d'autre part, s'exécutent dans le
+# même superstep — l'un n'est jamais "en aval" de l'autre, tous deux
+# légitimement exécutés même quand l'un des deux bloque le pipeline. Le
+# nœud de convergence associé s'exécute lui aussi toujours (c'est lui qui
+# détecte le blocage et route vers needs_review) — seul ce qui vient
+# strictement après lui est réellement "en aval".
+_PARALLEL_GROUPS_WITH_FAN_IN: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"document_ocr", "fhir_validator"}), "verification_fan_in"),
+    (frozenset({"clinical_consistency", "fraud_detection"}), "consistency_fan_in"),
+)
+
+
+def _downstream_of(blocking_node: str) -> set[str]:
+    """Ensemble des nœuds strictement en aval de ``blocking_node`` dans
+    l'ordre métier. Si ``blocking_node`` appartient à un groupe parallèle,
+    ni son pair ni le nœud de convergence associé ne sont considérés en
+    aval — les deux s'exécutent nécessairement (le second détecte le
+    blocage et route en conséquence) ; seul ce qui suit le nœud de
+    convergence est réellement en aval."""
+    for group, fan_in in _PARALLEL_GROUPS_WITH_FAN_IN:
+        if blocking_node in group:
+            fan_in_index = EXPECTED_NOMINAL_ORDER.index(fan_in)
+            return set(EXPECTED_NOMINAL_ORDER[fan_in_index + 1 :])
+    blocking_index = EXPECTED_NOMINAL_ORDER.index(blocking_node)
+    return set(EXPECTED_NOMINAL_ORDER[blocking_index + 1 :])
 
 _MOCKED_AGENT_NODES: tuple[str, ...] = (
     "claim_intake",
@@ -456,8 +485,7 @@ class TestBlockingPaths:
         app, call_counts = _build_app_for_scenario(monkeypatch, scenario)
         result = app.invoke(_initial_state())
 
-        blocking_index = EXPECTED_NOMINAL_ORDER.index(scenario.blocking_node)
-        downstream = set(EXPECTED_NOMINAL_ORDER[blocking_index + 1:])
+        downstream = _downstream_of(scenario.blocking_node)
 
         completed = set(result.get("completed_steps", []))
         overlap = downstream & completed

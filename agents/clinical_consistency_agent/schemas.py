@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 
 from pydantic import Field, field_validator
-from schemas.domain import StrictModel
+from schemas.domain import SeverityLevel, StrictModel
 from schemas.results import (  # re-export public
     ClinicalConsistencyResult,
     ClinicalEvidence,
@@ -53,8 +53,45 @@ def _reject_llm_leak(value: str, field_name: str) -> str:
     return value
 
 
+class ClinicalSignalAssessment(StrictModel):
+    """Ajustement borné de sévérité LLM sur un signal déjà calculé.
+
+    ``signal_type`` doit référencer un ``ClinicalSignal.signal_type``
+    réellement produit par la Phase A — jamais un signal inventé (aucun
+    mécanisme ne permet de créer un nouveau signal ici, seulement de citer
+    un type connu ; toute référence à un type inconnu est ignorée
+    silencieusement par ``agent.py::_apply_signal_assessments``, même
+    garantie anti-hallucination que ``referenced_evidence_ids``).
+    ``severity_override`` n'est appliqué que s'il s'écarte d'au plus **un
+    cran** de la sévérité déjà calculée par la Phase A sur le lattice
+    ``SeverityLevel`` (CRITICAL > HIGH > MEDIUM > LOW > INFO) — un écart plus
+    large est ignoré (voir ``agent.py::_bounded_severity``). ``rationale``
+    est toujours obligatoire : un ajustement de sévérité sans justification
+    n'est jamais accepté.
+    """
+
+    signal_type: str = Field(..., min_length=1, max_length=100)
+    severity_override: SeverityLevel
+    rationale: str = Field(..., min_length=1, max_length=300)
+
+    @field_validator("signal_type")
+    @classmethod
+    def no_sensitive_signal_type(cls, v: str) -> str:
+        return _reject_llm_leak(v, "signal_type")
+
+    @field_validator("rationale")
+    @classmethod
+    def no_sensitive_rationale(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError(
+                "rationale obligatoire — un ajustement de sévérité sans justification "
+                "n'est jamais accepté."
+            )
+        return _reject_llm_leak(v, "rationale")
+
+
 class LlmClinicalDecision(StrictModel):
-    """Contexte explicatif LLM — jamais d'autorité sur le statut, la
+    """Contexte explicatif LLM — jamais d'autorité directe sur le statut, la
     confiance ou le besoin de revue finaux.
 
     ``referenced_evidence_ids``/``acknowledged_inconsistencies`` ne
@@ -66,11 +103,20 @@ class LlmClinicalDecision(StrictModel):
     sont purement indicatifs : ils n'écrasent jamais ``confidence`` ni
     ``human_review_required`` du résultat final, tous deux dérivés
     exclusivement de la Phase A.
+
+    ``severity_assessments`` (P1-2 — autonomie bornée) est la seule
+    influence indirecte du LLM sur le statut final : pour un signal déjà
+    calculé et déjà attribué à une preuve, il peut proposer un ajustement de
+    sévérité borné à un cran maximum sur le lattice ``SeverityLevel``. Le
+    recalcul du statut (``any(CRITICAL) → FAIL`` sinon ``NEEDS_REVIEW``)
+    reste entièrement déterministe (``agent.py::_apply_signal_assessments``
+    / ``_status_from_signals``) — le LLM ne fixe jamais lui-même un statut.
     """
 
     clinical_context: str = Field(default="", max_length=500)
     referenced_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     acknowledged_inconsistencies: list[str] = Field(default_factory=list, max_length=20)
+    severity_assessments: list[ClinicalSignalAssessment] = Field(default_factory=list, max_length=10)
     llm_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     suggests_human_review: bool = False
     reasons: list[str] = Field(default_factory=list, max_length=10)
@@ -93,5 +139,6 @@ __all__ = [
     "ClinicalInconsistency",
     "ClinicalResultPayload",
     "ClinicalSignal",
+    "ClinicalSignalAssessment",
     "LlmClinicalDecision",
 ]

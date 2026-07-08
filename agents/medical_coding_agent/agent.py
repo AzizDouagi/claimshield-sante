@@ -164,13 +164,21 @@ def run(
     llm_metadata = build_llm_metadata(_AGENT_NAME)
     llm_decision = _invoke_llm_react(needs_review, already_coded)
     if llm_decision is None:
+        # P1-3 : sans LLM, le résultat est exactement celui de la Phase A
+        # seule — jamais un FAIL forcé qui dégraderait activement un
+        # dossier dont la Phase A avait déjà PASS/NEEDS_REVIEW. Absence de
+        # résolution complémentaire des NEEDS_REVIEW, mais aucune
+        # dégradation artificielle des items déjà PASS.
         return MedicalCodingResult(
             case_id=case_id,
-            status=VerificationStatus.FAIL,
+            status=compute_global_status(initial_codings),
             codings=initial_codings,
             table_version=_get_table_version(),
             reasons=[
-                "LLM indisponible ou réponse invalide : codification interrompue en fail-closed."
+                "LLM_UNAVAILABLE_NO_ADDITIONAL_RESOLUTION : LLM indisponible ou "
+                "réponse invalide — résolution complémentaire des items "
+                "NEEDS_REVIEW impossible, résultat de la Phase A déterministe "
+                "seule conservé tel quel (jamais dégradé artificiellement)."
             ],
             llm_metadata=llm_metadata,
         )

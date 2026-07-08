@@ -23,6 +23,7 @@ from agents.fraud_detection_agent.schemas import (
     FraudResultPayload,
     FraudSignal,
     LlmFraudDecision,
+    SignalAssessment,
 )
 from schemas.domain import SeverityLevel, VerificationStatus
 from schemas.results import LlmMetadata, StructuredError
@@ -466,3 +467,88 @@ class TestAccusatoryLanguageRejected:
     def test_error_message_names_the_offending_phrase(self):
         with pytest.raises(ValidationError, match="confirmée"):
             LlmFraudDecision(rationale="Fraude confirmée.")
+
+
+class TestSignalAssessment:
+    """P1-1 — validation pure du schéma d'ajustement borné de pondération."""
+
+    def test_neutral_default_requires_no_rationale(self):
+        assessment = SignalAssessment(signal_type="COVERAGE_INACTIVE_OR_EXPIRED")
+        assert assessment.severity_adjustment == "NEUTRAL"
+        assert assessment.rationale == ""
+
+    @pytest.mark.parametrize("adjustment", ["DOWNGRADE", "UPGRADE"])
+    def test_rationale_required_when_not_neutral(self, adjustment):
+        with pytest.raises(ValidationError, match="rationale obligatoire"):
+            SignalAssessment(signal_type="COVERAGE_INACTIVE_OR_EXPIRED", severity_adjustment=adjustment)
+
+    @pytest.mark.parametrize("adjustment", ["DOWNGRADE", "UPGRADE"])
+    def test_whitespace_only_rationale_rejected(self, adjustment):
+        with pytest.raises(ValidationError, match="rationale obligatoire"):
+            SignalAssessment(
+                signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                severity_adjustment=adjustment,
+                rationale="   ",
+            )
+
+    def test_valid_upgrade_with_rationale(self):
+        assessment = SignalAssessment(
+            signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+            severity_adjustment="UPGRADE",
+            rationale="Contexte aggravant identifié.",
+        )
+        assert assessment.severity_adjustment == "UPGRADE"
+
+    def test_unknown_adjustment_value_rejected(self):
+        with pytest.raises(ValidationError):
+            SignalAssessment(signal_type="X", severity_adjustment="CRITICAL")
+
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            SignalAssessment(signal_type="X", champ_invente="valeur")
+
+    def test_rejects_secret_in_rationale(self):
+        with pytest.raises(ValidationError):
+            SignalAssessment(
+                signal_type="X",
+                severity_adjustment="UPGRADE",
+                rationale="api_key=sk-12345",
+            )
+
+    def test_rejects_accusatory_rationale(self):
+        with pytest.raises(ValidationError):
+            SignalAssessment(
+                signal_type="X",
+                severity_adjustment="UPGRADE",
+                rationale="La fraude est confirmée sur ce dossier.",
+            )
+
+    def test_signal_type_required(self):
+        with pytest.raises(ValidationError):
+            SignalAssessment()
+
+    def test_llm_fraud_decision_accepts_signal_assessments(self):
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ]
+        )
+        assert len(decision.signal_assessments) == 1
+
+    def test_llm_fraud_decision_default_signal_assessments_is_empty(self):
+        decision = LlmFraudDecision()
+        assert decision.signal_assessments == []
+
+    def test_round_trip_json(self):
+        assessment = SignalAssessment(
+            signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+            severity_adjustment="UPGRADE",
+            rationale="Contexte aggravant identifié.",
+        )
+        dumped = assessment.model_dump(mode="json")
+        rebuilt = SignalAssessment.model_validate(dumped)
+        assert rebuilt == assessment

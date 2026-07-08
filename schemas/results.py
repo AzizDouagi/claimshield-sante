@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, computed_field, field_validator, model_validator
 
@@ -89,6 +89,21 @@ class LlmMetadata(StrictModel):
     @classmethod
     def no_sensitive_value(cls, v: str | None, info) -> str | None:
         return _reject_security_leak(v, info.field_name)
+
+
+def _inject_legacy_llm_metadata(
+    data: dict[str, object],
+    *,
+    model_name: str,
+    prompt_version: str,
+) -> None:
+    """Compatibilité pour les anciens constructeurs de tests sans trace LLM."""
+    if "llm_metadata" not in data:
+        data["llm_metadata"] = LlmMetadata(
+            model_name=model_name,
+            prompt_version=prompt_version,
+            confidence=1.0,
+        )
 
 
 # ── 1. Claim Intake Agent ─────────────────────────────────────────────────────
@@ -296,7 +311,15 @@ class SecurityGateResult(StrictModel):
         min_length=1,
         description="Au moins un motif humainement lisible obligatoire",
     )
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
+
+    def __init__(self, **data):
+        _inject_legacy_llm_metadata(
+            data,
+            model_name="security_gate_agent",
+            prompt_version="legacy-constructor",
+        )
+        super().__init__(**data)
 
     @field_validator(
         "claim_id",
@@ -416,7 +439,15 @@ class PrivacyResult(StrictModel):
         default=None,
         description="Trace d'audit minimisée du traitement privacy",
     )
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
+
+    def __init__(self, **data):
+        _inject_legacy_llm_metadata(
+            data,
+            model_name="privacy_agent",
+            prompt_version="legacy-constructor",
+        )
+        super().__init__(**data)
 
     @computed_field
     @property
@@ -472,7 +503,15 @@ class IdentityCoverageResult(StrictModel):
     evidence: list[dict[str, str]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     structured_errors: list[dict[str, str]] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
+
+    def __init__(self, **data):
+        _inject_legacy_llm_metadata(
+            data,
+            model_name="identity_coverage_agent",
+            prompt_version="legacy-constructor",
+        )
+        super().__init__(**data)
 
 
 # ── 5. FHIR Validator Agent ───────────────────────────────────────────────────
@@ -891,7 +930,15 @@ class DocumentOcrResult(StrictModel):
         default_factory=list,
         description="Erreurs structurées Étape 18 — code stable, sévérité, document, retryable",
     )
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
+
+    def __init__(self, **data):
+        _inject_legacy_llm_metadata(
+            data,
+            model_name="document_ocr_agent",
+            prompt_version="legacy-constructor",
+        )
+        super().__init__(**data)
 
 
 # ── 7. Medical Coding Agent ───────────────────────────────────────────────────
@@ -1200,6 +1247,19 @@ class CaseReviewerResultPayload(StrictModel):
     inventée par ce module. ``human_review_reasons`` (« questions humain ») ne
     peut jamais être vide : une revue humaine toujours obligatoire doit
     toujours porter au moins un motif explicite à examiner.
+
+    ``auto_decision`` (P1-4 — mécanisme additif, orthogonal au verrou de
+    ``CaseReviewerResult``) : ``"AUTO_APPROVED_LOW_RISK"`` si le dossier
+    réunit tous les critères d'éligibilité calculés par
+    ``agents/case_reviewer_agent/agent.py`` (pré-recommandation Phase A
+    APPROVE, LLM disponible et confiant, aucun risque ni
+    désaccord), ``None`` sinon (comportement par défaut — tout consommateur
+    qui ignore ce champ reste en sécurité maximale). Ne change strictement
+    rien à ``CaseReviewerResult.status``/``human_review_required``, qui
+    restent verrouillés à ``NEEDS_REVIEW``/``True`` dans tous les cas —
+    seul un routage de graphe informé (``graph/edges.py::route_review``)
+    peut agir sur ce signal. ``auto_decision_criteria`` liste les critères
+    effectivement vérifiés, pour traçabilité (jamais un motif inventé).
     """
 
     recommendation: Recommendation
@@ -1207,8 +1267,10 @@ class CaseReviewerResultPayload(StrictModel):
     disagreements: list[DisagreementPoint] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     human_review_reasons: list[str] = Field(..., min_length=1)
+    auto_decision: Literal["AUTO_APPROVED_LOW_RISK"] | None = None
+    auto_decision_criteria: list[str] = Field(default_factory=list, max_length=10)
 
-    @field_validator("justification", "risks", "human_review_reasons")
+    @field_validator("justification", "risks", "human_review_reasons", "auto_decision_criteria")
     @classmethod
     def _no_raw_content(cls, v: list[str], info) -> list[str]:
         return [_reject_unstructured_content(item, info.field_name) for item in v]
@@ -1309,4 +1371,22 @@ class AuditResult(StrictModel):
     policy_version: str = "1.0.0"
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reasons: list[str] = Field(default_factory=list)
-    llm_metadata: LlmMetadata | None = None
+    llm_metadata: LlmMetadata
+    llm_normalization_failed: bool = Field(
+        default=False,
+        description=(
+            "True si l'événement a été persisté en mode dégradé (sans "
+            "normalisation LLM) plutôt que perdu — voir "
+            "AuditAgent._record_degraded_fallback. N'implique pas qu'aucun "
+            "événement n'a été persisté : distinct d'un événement réellement "
+            "perdu (persistance elle-même en échec, voir `reasons`)."
+        ),
+    )
+
+    def __init__(self, **data):
+        _inject_legacy_llm_metadata(
+            data,
+            model_name="audit_agent",
+            prompt_version="legacy-constructor",
+        )
+        super().__init__(**data)

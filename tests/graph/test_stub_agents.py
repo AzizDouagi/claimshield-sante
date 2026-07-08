@@ -1,18 +1,20 @@
 """Tests des interfaces injectables — agents ClaimShield Santé.
 
 Couvre :
-  - Conformité Protocol (runtime_checkable) — agents injectables et audit stub.
-  - Stub audit : valeur NOT_EVALUATED, jamais de résultat métier inventé.
+  - Conformité Protocol (runtime_checkable) — agents injectables.
   - ``make_node`` : délégation, mise à jour state, erreurs/alertes.
   - Injection déterministe : implémentations de test pilotables pour les 4 agents.
   - ``make_node_<name>`` dans graph/nodes.py : isolation d'exceptions.
   - NODE_REGISTRY : 11 entrées, noms stables.
 
-Les tests exerçant le comportement RÉEL par défaut de clinical_consistency_agent
-et fraud_detection_agent (Phase A déterministe + Phase B LLM) vivent dans
-``tests/agents/test_clinical_consistency_agent.py`` et
-``tests/agents/test_fraud_detection_agent.py`` — ce module ne couvre plus que
-le mécanisme d'injection générique, identique pour les 4 agents.
+Les tests exerçant le comportement RÉEL par défaut de clinical_consistency_agent,
+fraud_detection_agent (Phase A déterministe + Phase B LLM) et audit_agent
+(normalisation LLM + persistance ``AuditStore``) vivent dans
+``tests/agents/test_clinical_consistency_agent.py``,
+``tests/agents/test_fraud_detection_agent.py`` et
+``tests/security/test_input_gate.py``/``tests/orchestrator/test_executor.py``
+(audit branché sur Security Gate et routes sensibles) — ce module ne couvre
+plus que le mécanisme d'injection générique, identique pour les 4 agents.
 """
 from __future__ import annotations
 
@@ -178,38 +180,21 @@ class TestProtocolConformance:
         assert isinstance(_AuditPass(), AuditAgentRunnable)
 
 
-# ── 2. Stub audit par défaut — valeur NON métier ──────────────────────────────
+# ── 2. Implémentation réelle par défaut — normalisation LLM + persistance ────
 
 
-class TestStubDefaults:
-    """Le stub audit ne retourne jamais PASS."""
+class TestRealDefaultAudit:
+    """Étape 14 : ``AuditAgent`` réel — normalisation LLM obligatoire (mockée en
+    test via ``tests/conftest.py::deterministic_agent_llm``), persistance
+    ``AuditStore`` append-only. Comportement complet couvert par
+    ``tests/security/test_input_gate.py``/``tests/orchestrator/test_executor.py``
+    — ce module vérifie seulement que la valeur par défaut n'est plus un stub
+    NOT_EVALUATED muet."""
 
-    def test_audit_stub_returns_not_evaluated(self):
+    def test_audit_default_impl_persists_and_returns_pass(self):
         result = AuditStub().run(_state())
-        assert result.status is VerificationStatus.NOT_EVALUATED
-
-    def test_audit_stub_events_empty_in_result(self):
-        result = AuditStub().run(_state())
-        assert result.events == []
-
-    def test_audit_stub_counts_existing_trail(self):
-        from schemas.results import AuditEvent
-        events = [
-            AuditEvent(event_id="1", case_id="CLM-0001", actor="a", action="x", outcome="ok"),
-            AuditEvent(event_id="2", case_id="CLM-0001", actor="b", action="y", outcome="ok"),
-        ]
-        state = {"case_id": "CLM-0001", "audit_trail": events}
-        result = AuditStub().run(state)
-        assert result.events_count == 2
-
-    def test_stub_reason_contains_stub_marker(self):
-        # AuditResult n'a pas de champ reasons/justification par conception.
-        result = AuditStub().run(_state())
-        assert result.status is VerificationStatus.NOT_EVALUATED
-
-    def test_audit_stub_not_evaluated_is_marker(self):
-        result = AuditStub().run(_state())
-        assert result.status is VerificationStatus.NOT_EVALUATED
+        assert result.status is VerificationStatus.PASS
+        assert result.events_count >= 1
 
     def test_stub_case_id_comes_from_state(self):
         for stub_cls in (AuditStub,):
@@ -271,10 +256,12 @@ class TestMakeNodeDefault:
         updates = node_fn(_state())
         assert "audit_result" in updates
 
-    def test_audit_node_status_not_evaluated(self):
+    def test_audit_node_default_impl_returns_pass(self):
+        """Étape 14 : l'implémentation par défaut est réelle (LLM mocké en
+        test), plus un stub NOT_EVALUATED."""
         node_fn = make_audit_node()
         updates = node_fn(_state())
-        assert updates["audit_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["audit_result"].status is VerificationStatus.PASS
 
 
 # ── 4. make_node — injection d'implémentations déterministes ──────────────────
@@ -363,10 +350,12 @@ class TestGraphNodeStubDefaults:
         assert updates["review_result"].human_review_required is True
         assert updates["review_result"].llm_trace is not None
 
-    def test_node_audit_not_evaluated(self):
+    def test_node_audit_default_impl_returns_pass(self):
+        """Étape 14 : évaluation réelle par défaut via l'orchestrateur — LLM
+        mocké en test, plus NOT_EVALUATED."""
         node_fn = build_node_registry(build_orchestrator())["audit"]
         updates = node_fn(_state())
-        assert updates["audit_result"].status is VerificationStatus.NOT_EVALUATED
+        assert updates["audit_result"].status is VerificationStatus.PASS
 
 
 # ── 6. graph/nodes.py — injection d'implémentation via build_orchestrator ───

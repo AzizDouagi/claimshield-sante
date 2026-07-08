@@ -126,6 +126,7 @@ from orchestrator.orchestrator import (
 from orchestrator.policies import PolicyDecision, build_authorized_tools, evaluate_model_authorization
 from orchestrator.routing import evaluate_call_preconditions
 from schemas.results import AuditEvent, StructuredError
+from services.audit_store import AuditStore, AuditStoreError
 from state.claim_state import ClaimState
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,8 @@ EVENT_CALL = "call"
 EVENT_RETRY = "retry"
 EVENT_FALLBACK = "fallback"
 EVENT_RESULT = "result"
+
+AuditEventNormalizer = Callable[[Mapping[str, Any]], Any]
 
 
 def _build_audit_event(
@@ -172,6 +175,39 @@ def _build_audit_event(
             "final_status": final_status or "IN_PROGRESS",
         },
     )
+
+
+def _audit_normalization_payload(event: AuditEvent) -> dict[str, Any]:
+    """Payload minimal soumis au normalizer Audit Agent.
+
+    Il ne contient que les champs structurés de l'événement orchestrateur,
+    jamais la sortie brute d'un agent, un prompt, un document ou un texte OCR.
+    """
+    return {
+        "case_id": event.case_id,
+        "actor": event.actor,
+        "action": event.action,
+        "outcome": event.outcome,
+        "timestamp": event.timestamp.isoformat(),
+        "details": dict(event.details),
+        "candidate_event_type": _candidate_audit_event_type(event),
+    }
+
+
+def _candidate_audit_event_type(event: AuditEvent) -> str:
+    if event.action == EVENT_RETRY:
+        return "retry"
+    if event.action == EVENT_CALL:
+        return "agent_called"
+    if event.action == EVENT_AUTHORIZATION and event.details.get("policy") == "TOOLS_AUTHORIZED":
+        return "tool_called"
+    if event.action == EVENT_REFUSAL:
+        return "failure"
+    if event.action == EVENT_RESULT and event.details.get("final_status") not in {"", "SUCCESS"}:
+        return "failure"
+    if event.action == EVENT_FALLBACK:
+        return "anomaly"
+    return "agent_called"
 
 AgentRunner = Callable[[ClaimState], dict[str, Any]]
 """Signature d'un exécuteur d'agent injecté — identique à
@@ -253,6 +289,8 @@ class Orchestrator:
     )
     tools_check: Callable[[AgentName], tuple[BaseTool, ...]] = build_authorized_tools
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
+    audit_store: AuditStore | None = None
+    audit_normalizer: AuditEventNormalizer | None = None
 
     def execute_agent(
         self, request: AgentCallRequest, state: ClaimState, *, model_id: str
@@ -284,18 +322,18 @@ class Orchestrator:
             )
         )
         if not precondition_decision.allowed:
-            return AgentCallOutcome.from_request(
+            return self._finalize_outcome(AgentCallOutcome.from_request(
                 request, success=False, error=precondition_decision.reason, audit_events=events
-            )
+            ))
 
         model_decision, effective_model_id, fallback_from, model_events = self._resolve_model(
             request, model_id
         )
         events.extend(model_events)
         if not model_decision.allowed:
-            return AgentCallOutcome.from_request(
+            return self._finalize_outcome(AgentCallOutcome.from_request(
                 request, success=False, error=model_decision.reason, audit_events=events
-            )
+            ))
 
         outcome_metadata = {"model_id": effective_model_id}
         if fallback_from is not None:
@@ -315,7 +353,7 @@ class Orchestrator:
                     final_status="NO_AUTHORIZED_TOOLS",
                 )
             )
-            return AgentCallOutcome.from_request(
+            return self._finalize_outcome(AgentCallOutcome.from_request(
                 request,
                 success=False,
                 error=StructuredError(
@@ -327,7 +365,7 @@ class Orchestrator:
                     field="agent_name",
                 ),
                 audit_events=events,
-            )
+            ))
 
         events.append(
             _build_audit_event(
@@ -353,7 +391,7 @@ class Orchestrator:
                     final_status="AGENT_NOT_REGISTERED",
                 )
             )
-            return AgentCallOutcome.from_request(
+            return self._finalize_outcome(AgentCallOutcome.from_request(
                 request,
                 success=False,
                 error=StructuredError(
@@ -362,17 +400,74 @@ class Orchestrator:
                     field="agent_name",
                 ),
                 audit_events=events,
-            )
+            ))
 
-        return self._call_agent_with_retry(
-            agent_runner,
-            request,
-            state,
-            metadata=outcome_metadata,
-            model_id=effective_model_id,
-            tools=tool_names,
-            prior_events=events,
+        return self._finalize_outcome(
+            self._call_agent_with_retry(
+                agent_runner,
+                request,
+                state,
+                metadata=outcome_metadata,
+                model_id=effective_model_id,
+                tools=tool_names,
+                prior_events=events,
+            )
         )
+
+    def _finalize_outcome(self, outcome: AgentCallOutcome) -> AgentCallOutcome:
+        """Persiste les événements d'audit normalisés sans modifier l'outcome."""
+        self._persist_audit_events(outcome.audit_events)
+        return outcome
+
+    def _persist_audit_events(self, events: Sequence[AuditEvent]) -> None:
+        """Normalise chaque événement via l'Audit Agent puis écrit dans AuditStore.
+
+        ``Orchestrator`` ne connaît pas l'implémentation de l'Audit Agent :
+        il reçoit seulement ``audit_normalizer`` par injection. Sans store ou
+        normalizer, il conserve le comportement historique et expose les
+        événements légers dans ``AgentCallOutcome.audit_events``.
+        """
+        if self.audit_store is None or self.audit_normalizer is None:
+            return
+
+        for event in events:
+            payload = _audit_normalization_payload(event)
+            try:
+                normalized = self.audit_normalizer(payload)
+                if normalized is None:
+                    logger.warning(
+                        "Audit non persisté pour %s/%s : normalisation LLM absente.",
+                        event.case_id,
+                        event.action,
+                    )
+                    continue
+                self.audit_store.record_event(
+                    case_id=event.case_id,
+                    event_type=normalized.event_type,
+                    actor=normalized.actor,
+                    outcome=normalized.outcome,
+                    redaction_status=normalized.redaction_status,
+                    agent_name=normalized.agent_name,
+                    model_name=event.details.get("model_id") or None,
+                    prompt_version=None,
+                    tool_calls=normalized.tool_calls,
+                    evidence_ids=normalized.evidence_ids,
+                )
+            except AuditStoreError as exc:
+                logger.warning(
+                    "Audit append-only refusé pour %s/%s : %s",
+                    event.case_id,
+                    event.action,
+                    exc.structured.message,
+                )
+            except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer l'issue agent.
+                logger.warning(
+                    "Audit non persisté pour %s/%s : %s: %s",
+                    event.case_id,
+                    event.action,
+                    type(exc).__name__,
+                    exc,
+                )
 
     def _resolve_model(
         self, request: AgentCallRequest, model_id: str

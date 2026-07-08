@@ -34,7 +34,9 @@ from schemas.domain import (
     VerificationStatus,
 )
 
-_UPSTREAM_NODES: tuple[str, ...] = ("claim_intake", "security_gate", "privacy", "document_ocr")
+_UPSTREAM_NODES: tuple[str, ...] = (
+    "claim_intake", "security_gate", "privacy", "document_ocr", "fhir_validator",
+)
 
 
 @dataclass
@@ -99,10 +101,25 @@ def _install_agents_reaching_needs_review(monkeypatch, call_counts: dict[str, in
             "alerts": ["[document_ocr] confiance limite — revue requise."],
         }
 
+    def mock_fhir_validator(state: dict) -> dict:
+        # P2-1 : fhir_validator s'exécute désormais en parallèle de
+        # document_ocr (fan-out depuis privacy) — doit être mocké lui aussi,
+        # sinon le vrai agent s'exécute (I/O réel, échoue en test). PASS pour
+        # que route_verification_fan_in consolide bien sur le NEEDS_REVIEW
+        # de document_ocr, sans FAIL supplémentaire.
+        call_counts["fhir_validator"] += 1
+        return {
+            "fhir_result": _StubResult(status=VerificationStatus.PASS),
+            "fhir_input": None,
+            "current_step": "fhir_validator",
+            "completed_steps": ["fhir_validator"],
+        }
+
     monkeypatch.setattr(wf, "node_claim_intake", mock_claim_intake)
     monkeypatch.setattr(wf, "node_security_gate", mock_security_gate)
     monkeypatch.setattr(wf, "node_privacy", mock_privacy)
     monkeypatch.setattr(wf, "node_document_ocr", mock_document_ocr)
+    monkeypatch.setattr(wf, "node_fhir_validator", mock_fhir_validator)
 
 
 def _build_app(monkeypatch) -> tuple:

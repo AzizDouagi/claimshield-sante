@@ -9,6 +9,26 @@ Interdictions strictes :
   - Aucune décision finale : ``human_review_required`` est toujours forcé à True.
   - Aucun arbitrage inventé : le LLM ne voit qu'un résumé minimisé des résultats.
   - Aucun document brut, texte OCR complet, secret ou chemin de fichier.
+
+P1-4 — auto-approbation bornée (mécanisme additif, verrou intact)
+-------------------------------------------------------------------
+``CaseReviewerResult.status``/``human_review_required`` restent verrouillés
+à ``NEEDS_REVIEW``/``True`` dans TOUS les cas — ce module n'y touche jamais.
+Un signal additionnel non verrouillé,
+``CaseReviewerResultPayload.auto_decision``, peut valoir
+``"AUTO_APPROVED_LOW_RISK"`` quand une conjonction stricte de critères est
+réunie (``_auto_decision_eligibility``) : pré-recommandation Phase A APPROVE
+(donc hors-périmètre et désaccord inter-agents déjà exclus, seule condition
+de ``_deterministic_pre_recommendation`` pour retourner APPROVE), LLM
+disponible et recommandant lui aussi APPROVE, LLM ne signalant
+aucune escalade (``escalation_required=False``), confiance LLM au moins
+égale à ``Settings.claimshield_auto_approve_confidence_threshold``, aucun
+risque ni désaccord détecté. Seul ``graph/edges.py::route_review``, informé
+de ce signal, peut router directement vers ``end`` sans passer par
+``needs_review`` — et ce chemin traverse quand même ``audit`` avant
+``finalize`` (voir le ``path_map`` de ``graph/workflow.py``), jamais un
+contournement de l'audit. Un consommateur qui ignore ce champ reste en
+sécurité maximale (comportement inchangé, toujours ``needs_review``).
 """
 from __future__ import annotations
 
@@ -20,6 +40,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agents.case_reviewer_agent.prompt import load_case_reviewer_prompt
 from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
+from config.settings import get_settings
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import Recommendation, VerificationStatus
@@ -297,6 +318,75 @@ def _merge_recommendation(
     return llm_recommendation
 
 
+_AUTO_APPROVE_LABEL = "AUTO_APPROVED_LOW_RISK"
+
+
+def _auto_decision_eligibility(
+    deterministic_recommendation: Recommendation,
+    llm_decision: LlmCaseReviewDecision | None,
+    risks: list[str],
+    disagreements: list[DisagreementPoint],
+) -> tuple[str | None, list[str]]:
+    """P1-4 — critères d'éligibilité à l'auto-approbation bornée.
+
+    Conjonction stricte, calculée entièrement en Python — jamais laissée à
+    la seule appréciation du LLM. Chaque critère répond à l'un des quatre
+    motifs d'escalade attendus (incertitude LLM, confiance basse, désaccord
+    inter-agents, hors périmètre) :
+
+      1. Phase A déterministe conclut déjà APPROVE
+         (``_deterministic_pre_recommendation`` ne retourne APPROVE que si
+         aucun motif bloquant/de revue n'a été collecté — son unique
+         « raison » dans ce cas est un message récapitulatif, jamais un
+         motif d'escalade ; un désaccord détecté par
+         ``detect_result_disagreements`` empêche déjà APPROVE en amont).
+      2. Le LLM est disponible (pas d'incertitude d'indisponibilité).
+      3. Le LLM recommande lui aussi APPROVE.
+      4. Le LLM ne signale explicitement aucune escalade
+         (``escalation_required is False`` — pas d'incertitude explicite).
+      5. La confiance déclarée par le LLM atteint le seuil configuré (pas de
+         confiance basse).
+      6. Aucun risque ni désaccord détecté par la Phase A (redondant avec
+         (1) en pratique, revérifié explicitement par prudence).
+
+    Ne modifie jamais ``status``/``human_review_required`` — l'appelant
+    (``run()``) ne fait que poser ce signal sur
+    ``CaseReviewerResultPayload.auto_decision``, un champ non verrouillé.
+    """
+    criteria: list[str] = []
+
+    if deterministic_recommendation is not Recommendation.APPROVE:
+        return None, []
+    criteria.append("Pré-recommandation déterministe APPROVE.")
+
+    if llm_decision is None:
+        return None, []
+    criteria.append("Synthèse LLM disponible.")
+
+    if llm_decision.recommendation is not Recommendation.APPROVE:
+        return None, []
+    criteria.append("Recommandation LLM APPROVE.")
+
+    if llm_decision.escalation_required:
+        return None, []
+    criteria.append("LLM ne signale aucune escalade requise.")
+
+    threshold = get_settings().claimshield_auto_approve_confidence_threshold
+    if llm_decision.confidence < threshold:
+        return None, []
+    criteria.append(f"Confiance LLM {llm_decision.confidence:.2f} ≥ seuil {threshold:.2f}.")
+
+    if risks:
+        return None, []
+    criteria.append("Aucun risque détecté par la Phase A.")
+
+    if disagreements:
+        return None, []
+    criteria.append("Aucun désaccord inter-agents détecté.")
+
+    return _AUTO_APPROVE_LABEL, criteria
+
+
 def _confidence(snapshot: dict[str, dict[str, object]], recommendation: Recommendation) -> float:
     present_count = sum(1 for data in snapshot.values() if data.get("present"))
     ratio = present_count / len(_EXPECTED_UPSTREAM_AGENTS)
@@ -465,12 +555,21 @@ def run(case_id: str, state: ClaimState | None = None) -> CaseReviewerResult:
     if llm_decision is None:
         confidence = 0.2
 
+    auto_decision, auto_decision_criteria = _auto_decision_eligibility(
+        deterministic_recommendation,
+        llm_decision,
+        risks,
+        disagreements,
+    )
+
     payload = CaseReviewerResultPayload(
         recommendation=final_recommendation,
         justification=justification,
         disagreements=disagreements,
         risks=risks,
         human_review_reasons=human_review_reasons,
+        auto_decision=auto_decision,
+        auto_decision_criteria=auto_decision_criteria,
     )
 
     return CaseReviewerResult(
@@ -550,6 +649,18 @@ def make_node(
                 "errors": ",".join(e.code for e in result.errors),
             },
         )
+        alerts = [
+            f"Revue dossier : {payload.recommendation.value} non finale — "
+            f"{'; '.join(payload.human_review_reasons)}"
+        ]
+        if payload.auto_decision == _AUTO_APPROVE_LABEL:
+            # P1-4 — traçabilité renforcée : rend les dossiers auto-approuvés
+            # trivialement requêtables a posteriori (échantillonnage d'audit),
+            # sans changer le statut/human_review_required (toujours verrouillés).
+            alerts.append(
+                f"{_AUTO_APPROVE_LABEL} : dossier approuvé sans revue humaine — "
+                f"critères : {'; '.join(payload.auto_decision_criteria)}"
+            )
         updates: dict = {
             "review_result": result,
             "final_recommendation": payload.recommendation,
@@ -557,10 +668,7 @@ def make_node(
             "current_step": _STEP_NAME,
             "completed_steps": [_STEP_NAME],
             "audit_trail": [audit],
-            "alerts": [
-                f"Revue dossier : {payload.recommendation.value} non finale — "
-                f"{'; '.join(payload.human_review_reasons)}"
-            ],
+            "alerts": alerts,
         }
         if payload.recommendation is Recommendation.REJECT:
             updates["errors"] = [

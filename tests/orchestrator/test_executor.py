@@ -11,7 +11,11 @@ from orchestrator.executor import Orchestrator, RetryPolicy
 from orchestrator.model_registry import ModelCapability, ModelRegistry, ModelSpec, build_default_registry
 from orchestrator.orchestrator import AgentCallRequest, AgentName
 from orchestrator.policies import PolicyDecision, PolicyEffect
+from agents.audit_agent.schemas import LlmAuditNormalizedEvent
+from schemas.audit import AuditEventType, RedactionStatus
+from schemas.domain import DataClassification
 from schemas.results import SecurityGateResult, StructuredError
+from services.audit_store import AuditStore
 
 
 def _request(agent_name: AgentName, current_step: str, requested_model: str, **overrides) -> AgentCallRequest:
@@ -40,6 +44,31 @@ def _fake_security_gate_runner(state: dict) -> dict:
             claim_id=state["case_id"], decision="ALLOW", reasons=["nominal"]
         )
     }
+
+
+def _audit_normalizer(calls: list[dict]):
+    def _normalize(event: dict) -> LlmAuditNormalizedEvent:
+        calls.append(event)
+        final_status = event["details"].get("final_status") or event["outcome"]
+        outcome = f"{event['action']}:{final_status}"
+        return LlmAuditNormalizedEvent(
+            event_type=AuditEventType(event["candidate_event_type"]),
+            actor=str(event["actor"]),
+            outcome=outcome,
+            summary=f"Evenement orchestrateur normalise : {event['action']}.",
+            redaction_status=RedactionStatus.FULLY_REDACTED,
+            classification=DataClassification.CONFIDENTIAL,
+            anomalies=[] if final_status in {"", "IN_PROGRESS", "SUCCESS"} else [str(final_status)],
+            redactions=["Payload agent non repris."],
+            agent_name=str(event["actor"]),
+            tool_calls=[
+                name for name in str(event["details"].get("tools") or "").split(",") if name
+            ],
+            evidence_ids=[event["action"]],
+            reasons=["Normalisation audit de test."],
+        )
+
+    return _normalize
 
 
 # ── 1. Ordre exact des contrôles — test nominal exigé ─────────────────────────
@@ -733,3 +762,125 @@ class TestAuditEvents:
         audit_trail = audit_trail + list(outcome.audit_events)
         assert all(isinstance(event, AuditEvent) for event in audit_trail)
         assert len(audit_trail) == len(outcome.audit_events)
+
+
+# ── 5. Persistance AuditStore via normalizer Audit Agent ─────────────────────
+
+
+class TestAuditStorePersistence:
+    def test_agent_call_is_normalized_then_persisted_append_only(self):
+        store = AuditStore()
+        normalized_calls: list[dict] = []
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: _fake_security_gate_runner},
+            audit_store=store,
+            audit_normalizer=_audit_normalizer(normalized_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        persisted = store.read_by_case_id("CLM-0001")
+        assert outcome.success is True
+        assert len(persisted) == len(outcome.audit_events) == len(normalized_calls)
+        assert any(call["action"] == "call" for call in normalized_calls)
+        assert store.verify_claim_integrity("CLM-0001").intact is True
+
+    def test_model_failure_is_normalized_and_persisted_as_error(self):
+        store = AuditStore()
+        normalized_calls: list[dict] = []
+
+        def model_down(state):
+            raise ConnectionError("modele indisponible")
+
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: model_down},
+            audit_store=store,
+            audit_normalizer=_audit_normalizer(normalized_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        persisted = store.read_by_case_id("CLM-0001")
+        assert outcome.success is False
+        assert outcome.error.code == "AGENT_EXECUTION_FAILED"
+        assert len(persisted) == len(outcome.audit_events)
+        assert any(event.outcome == "result:AGENT_EXECUTION_FAILED" for event in persisted)
+        assert store.verify_claim_integrity("CLM-0001").intact is True
+
+    def test_invalid_output_is_normalized_and_persisted_as_error(self):
+        store = AuditStore()
+        normalized_calls: list[dict] = []
+
+        def invalid_output(state):
+            return {"security_result": {"claim_id": state["case_id"], "decision": "ALLOW"}}
+
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: invalid_output},
+            audit_store=store,
+            audit_normalizer=_audit_normalizer(normalized_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        persisted = store.read_by_case_id("CLM-0001")
+        assert outcome.success is False
+        assert outcome.error.code == "AGENT_RESULT_INVALID"
+        assert len(persisted) == len(outcome.audit_events)
+        assert any(event.outcome == "result:AGENT_RESULT_INVALID" for event in persisted)
+        assert store.verify_claim_integrity("CLM-0001").intact is True
+
+    def test_retry_is_normalized_and_persisted(self):
+        store = AuditStore()
+        normalized_calls: list[dict] = []
+        calls = {"count": 0}
+
+        def flaky(state):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise ConnectionError("modele temporairement indisponible")
+            return _fake_security_gate_runner(state)
+
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: flaky},
+            retry_policy=RetryPolicy(max_attempts=2),
+            audit_store=store,
+            audit_normalizer=_audit_normalizer(normalized_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        persisted = store.read_by_case_id("CLM-0001")
+        assert outcome.success is True
+        assert calls["count"] == 2
+        assert any(event.event_type is AuditEventType.RETRY for event in persisted)
+        assert any(call["action"] == "retry" for call in normalized_calls)
+        assert len(persisted) == len(outcome.audit_events)
+        assert store.verify_claim_integrity("CLM-0001").intact is True

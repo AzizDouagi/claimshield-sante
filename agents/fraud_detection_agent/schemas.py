@@ -27,8 +27,9 @@ fraude reste toujours signalable, une fraude ne peut jamais être déclarée
 from __future__ import annotations
 
 import re
+from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from schemas.domain import StrictModel
 from schemas.results import (  # re-export public
     FraudDetectionResult,
@@ -95,9 +96,47 @@ def _reject_accusatory_language(value: str, field_name: str) -> str:
     return value
 
 
+class SignalAssessment(StrictModel):
+    """Ajustement borné de pondération LLM sur un signal déjà calculé.
+
+    ``signal_type`` doit référencer un ``FraudSignal.signal_type`` réellement
+    produit par la Phase A — jamais un signal inventé (aucun mécanisme ne
+    permet de créer un nouveau signal ici, seulement de citer un type
+    connu ; toute référence à un type inconnu est ignorée silencieusement
+    par ``agent.py::_apply_signal_assessments``, même garantie
+    anti-hallucination que ``referenced_signal_types``). ``rationale`` est
+    obligatoire dès que ``severity_adjustment`` s'écarte de ``NEUTRAL`` — un
+    ajustement de pondération sans justification n'est jamais accepté.
+    """
+
+    signal_type: str = Field(..., min_length=1, max_length=100)
+    severity_adjustment: Literal["DOWNGRADE", "NEUTRAL", "UPGRADE"] = "NEUTRAL"
+    rationale: str = Field(default="", max_length=300)
+
+    @field_validator("signal_type")
+    @classmethod
+    def no_sensitive_signal_type(cls, v: str) -> str:
+        return _reject_llm_leak(v, "signal_type")
+
+    @field_validator("rationale")
+    @classmethod
+    def no_sensitive_rationale(cls, v: str) -> str:
+        v = _reject_llm_leak(v, "rationale")
+        return _reject_accusatory_language(v, "rationale")
+
+    @model_validator(mode="after")
+    def rationale_required_unless_neutral(self) -> "SignalAssessment":
+        if self.severity_adjustment != "NEUTRAL" and not self.rationale.strip():
+            raise ValueError(
+                "rationale obligatoire dès que severity_adjustment n'est pas NEUTRAL "
+                "— un ajustement de pondération sans justification n'est jamais accepté."
+            )
+        return self
+
+
 class LlmFraudDecision(StrictModel):
-    """Justification explicative LLM — jamais d'autorité sur le score de
-    risque, le statut ou le besoin de revue.
+    """Justification explicative LLM — jamais d'autorité directe sur le
+    score de risque, le statut ou le besoin de revue.
 
     ``referenced_signal_types`` ne permet au LLM que de *citer* des signaux
     déjà calculés par la Phase A (jamais d'en inventer un nouveau — aucun
@@ -106,10 +145,20 @@ class LlmFraudDecision(StrictModel):
     toute référence inconnue. ``llm_risk_perception``/``suggests_human_review``
     sont purement indicatifs : ils n'écrasent jamais ``risk_score`` ni
     ``human_review_required``, tous deux dérivés exclusivement de la Phase A.
+
+    ``signal_assessments`` (P1-1 — autonomie bornée) est la seule influence
+    indirecte du LLM sur le score final : pour chaque signal déjà calculé et
+    déjà attribué à une preuve, il peut proposer de le pondérer moins
+    (DOWNGRADE), normalement (NEUTRAL) ou plus (UPGRADE) qu'un cas typique.
+    Le calcul lui-même (multiplicateur fixe, seuils de statut) reste
+    entièrement déterministe (``agent.py::_apply_signal_assessments`` /
+    ``_determine_status``) — le LLM ne fixe jamais lui-même une valeur
+    numérique de score ni un statut.
     """
 
     rationale: str = Field(default="", max_length=500)
     referenced_signal_types: list[str] = Field(default_factory=list, max_length=20)
+    signal_assessments: list[SignalAssessment] = Field(default_factory=list, max_length=10)
     llm_risk_perception: float | None = Field(default=None, ge=0.0, le=1.0)
     suggests_human_review: bool = False
     reasons: list[str] = Field(default_factory=list, max_length=10)
@@ -139,4 +188,5 @@ __all__ = [
     "FraudResultPayload",
     "FraudSignal",
     "LlmFraudDecision",
+    "SignalAssessment",
 ]

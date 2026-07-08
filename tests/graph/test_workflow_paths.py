@@ -43,13 +43,73 @@ EXPECTED_NOMINAL_ORDER: list[str] = [
     "privacy",
     "document_ocr",
     "fhir_validator",
+    "verification_fan_in",
     "identity_coverage",
     "medical_coding",
     "clinical_consistency",
     "fraud_detection",
+    "consistency_fan_in",
     "case_reviewer",
     "needs_review",
 ]
+
+# P2-1 (parallélisation) : document_ocr/fhir_validator d'une part, et
+# clinical_consistency/fraud_detection d'autre part, s'exécutent dans le
+# même superstep LangGraph — leur ordre d'apparition relatif dans
+# completed_steps n'est pas garanti déterministe. EXPECTED_NOMINAL_ORDER
+# reste la séquence de référence pour la lisibilité et pour
+# test_no_node_outside_expected_order_completes (comparaison d'ensemble),
+# mais la vérification d'ordre proprement dite (test_completed_steps_
+# follows_business_order) doit tolérer une permutation au sein de chaque
+# groupe parallèle plutôt qu'une égalité de liste stricte.
+_PARALLEL_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"document_ocr", "fhir_validator"}),
+    frozenset({"clinical_consistency", "fraud_detection"}),
+)
+
+
+def _sequential_backbone(order: list[str]) -> list[str | frozenset[str]]:
+    """Réduit une séquence attendue en fusionnant chaque groupe parallèle
+    connu en un seul élément (frozenset) — sert de gabarit pour vérifier
+    qu'une séquence observée respecte le même ordre relatif, permutation
+    interne aux groupes parallèles exceptée."""
+    backbone: list[str | frozenset[str]] = []
+    consumed_groups: set[frozenset[str]] = set()
+    for step in order:
+        group = next((g for g in _PARALLEL_GROUPS if step in g), None)
+        if group is None:
+            backbone.append(step)
+        elif group not in consumed_groups:
+            backbone.append(group)
+            consumed_groups.add(group)
+    return backbone
+
+
+def _assert_respects_business_order(completed_steps: list[str], expected: list[str]) -> None:
+    """Vérifie que ``completed_steps`` respecte le même ordre relatif que
+    ``expected``, en tolérant toute permutation interne aux groupes
+    parallèles définis par ``_PARALLEL_GROUPS`` (ex. document_ocr avant ou
+    après fhir_validator, tant que les deux précèdent verification_fan_in)."""
+    backbone = _sequential_backbone(expected)
+    observed: list[str | frozenset[str]] = []
+    consumed_groups: set[frozenset[str]] = set()
+    for step in completed_steps:
+        group = next((g for g in _PARALLEL_GROUPS if step in g), None)
+        if group is None:
+            observed.append(step)
+        elif group not in consumed_groups:
+            observed.append(group)
+            consumed_groups.add(group)
+    assert observed == backbone, (
+        f"Ordre métier non respecté : observé {observed!r}, attendu {backbone!r} "
+        f"(completed_steps brut : {completed_steps!r})"
+    )
+    for group in _PARALLEL_GROUPS:
+        present = group & set(completed_steps)
+        if present:
+            assert present == group, (
+                f"Groupe parallèle incomplet : {present!r} présent, attendu {group!r}"
+            )
 
 # Agents réels remplacés par de faux agents déterministes (jamais de LLM).
 _MOCKED_AGENT_NODES: tuple[str, ...] = (
@@ -249,7 +309,7 @@ class TestNominalPath:
     def test_completed_steps_follows_business_order(self, nominal_app, valid_claim_state):
         result = nominal_app.invoke(valid_claim_state)
 
-        assert result["completed_steps"] == EXPECTED_NOMINAL_ORDER
+        _assert_respects_business_order(result["completed_steps"], EXPECTED_NOMINAL_ORDER)
 
     def test_each_expected_node_runs_exactly_once(
         self, nominal_app, valid_claim_state, call_counts

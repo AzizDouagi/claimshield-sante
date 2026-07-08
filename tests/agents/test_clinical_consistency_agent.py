@@ -21,13 +21,14 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from agents.clinical_consistency_agent import agent
-from agents.clinical_consistency_agent.schemas import LlmClinicalDecision
+from agents.clinical_consistency_agent.schemas import ClinicalSignalAssessment, LlmClinicalDecision
 from agents.privacy_agent.schemas import MedicalView
 from schemas.domain import (
     DataClassification,
     DocumentType,
     ExtractionStatus,
     OcrSource,
+    SeverityLevel,
     VerificationStatus,
 )
 from schemas.results import (
@@ -206,6 +207,156 @@ class TestLlmNeverOverridesStatus:
             result = agent.run("CLM-0001")
         assert "Contexte de test." in result.result_payload.reasons
         assert "motif LLM" in result.result_payload.reasons
+
+
+# ── P1-2 — autorité LLM bornée sur la sévérité des signaux ─────────────────
+
+
+class TestBoundedSeverityAssessments:
+    """Le LLM ne peut jamais fixer lui-même le statut (toujours vrai, voir
+    TestLlmNeverOverridesStatus) mais peut désormais proposer, pour un
+    signal déjà calculé et déjà attribué à une preuve, un ajustement de
+    sévérité borné à un cran maximum sur le lattice SeverityLevel — recalculé
+    déterministiquement, jamais laissé au LLM."""
+
+    def _critical_signal_ocr(self):
+        # Médicament facturé sans numéro d'ordonnance → MISSING_PRESCRIPTION_REFERENCE,
+        # toujours CRITICAL en Phase A → statut FAIL.
+        return _ocr_result(medication_count="1", service_date="2024-01-15")
+
+    def test_downgrade_within_bound_can_flip_fail_to_needs_review(self):
+        ocr = self._critical_signal_ocr()
+        with patch.object(agent, "_invoke_llm_clinical", return_value=None):
+            baseline = agent.run("CLM-0001", ocr_result=ocr)
+        assert baseline.status is VerificationStatus.FAIL
+
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="MISSING_PRESCRIPTION_REFERENCE",
+                    severity_override="HIGH",
+                    rationale="Contexte atténuant documenté.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+            downgraded = agent.run("CLM-0001", ocr_result=ocr)
+
+        assert downgraded.status is VerificationStatus.NEEDS_REVIEW
+        assert downgraded.result_payload.signals[0].severity == SeverityLevel.HIGH
+
+    def test_adjustment_beyond_one_notch_is_ignored(self):
+        """MEDIUM → CRITICAL est un écart de deux crans — hors borne,
+        toujours ignoré, jamais partiellement appliqué."""
+        ocr = _ocr_result(procedure_count="3", service_date="2024-01-15")
+        coding = _coding_result(2)
+        with patch.object(agent, "_invoke_llm_clinical", return_value=None):
+            baseline = agent.run("CLM-0001", ocr_result=ocr, coding_result=coding)
+        assert baseline.status is VerificationStatus.NEEDS_REVIEW
+        assert baseline.result_payload.signals[0].severity == SeverityLevel.MEDIUM
+
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="PROCEDURE_CODING_COUNT_MISMATCH",
+                    severity_override="CRITICAL",
+                    rationale="Tentative de saut de deux crans.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+            result = agent.run("CLM-0001", ocr_result=ocr, coding_result=coding)
+
+        assert result.status is VerificationStatus.NEEDS_REVIEW
+        assert result.result_payload.signals[0].severity == SeverityLevel.MEDIUM
+        assert any("hors borne autorisée" in r for r in result.result_payload.reasons)
+
+    def test_upgrade_within_bound_changes_severity_without_status_flip(self):
+        ocr = _ocr_result(procedure_count="3", service_date="2024-01-15")
+        coding = _coding_result(2)
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="PROCEDURE_CODING_COUNT_MISMATCH",
+                    severity_override="HIGH",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+            result = agent.run("CLM-0001", ocr_result=ocr, coding_result=coding)
+
+        assert result.result_payload.signals[0].severity == SeverityLevel.HIGH
+        assert result.status is VerificationStatus.NEEDS_REVIEW  # HIGH n'est pas CRITICAL
+
+    def test_unknown_signal_type_is_silently_ignored(self):
+        ocr = self._critical_signal_ocr()
+        with patch.object(agent, "_invoke_llm_clinical", return_value=None):
+            baseline = agent.run("CLM-0001", ocr_result=ocr)
+
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="COMPLETELY_INVENTED_SIGNAL",
+                    severity_override="LOW",
+                    rationale="Signal jamais calculé par la Phase A.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+            result = agent.run("CLM-0001", ocr_result=ocr)
+
+        assert result.status == baseline.status
+        assert len(result.result_payload.signals) == len(baseline.result_payload.signals)
+        assert not any(
+            s.signal_type == "COMPLETELY_INVENTED_SIGNAL" for s in result.result_payload.signals
+        )
+
+    def test_evidence_unchanged_after_adjustment(self):
+        """Seule la sévérité change — la preuve attribuée reste strictement
+        identique. Comparaison au sein d'une seule collecte de signaux
+        (``evidence_id`` auto-généré à chaque appel de ``_collect_signals``)."""
+        ocr = self._critical_signal_ocr()
+        signals, _, _, _, _, _, _ = agent._collect_signals(ocr, None)
+        baseline_signal = next(s for s in signals if s.signal_type == "MISSING_PRESCRIPTION_REFERENCE")
+
+        adjusted_signals, notes, changed = agent._apply_signal_assessments(
+            signals,
+            [
+                ClinicalSignalAssessment(
+                    signal_type="MISSING_PRESCRIPTION_REFERENCE",
+                    severity_override="HIGH",
+                    rationale="Contexte atténuant documenté.",
+                )
+            ],
+        )
+        adjusted_signal = next(
+            s for s in adjusted_signals if s.signal_type == "MISSING_PRESCRIPTION_REFERENCE"
+        )
+
+        assert adjusted_signal.evidence == baseline_signal.evidence
+        assert adjusted_signal.severity != baseline_signal.severity
+        assert changed is True
+        assert notes
+
+    def test_adjustment_rationale_appears_in_reasons(self):
+        ocr = self._critical_signal_ocr()
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="MISSING_PRESCRIPTION_REFERENCE",
+                    severity_override="HIGH",
+                    rationale="Contexte atténuant documenté dans les données transmises.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_clinical", return_value=decision):
+            result = agent.run("CLM-0001", ocr_result=ocr)
+
+        assert any(
+            "Contexte atténuant documenté dans les données transmises." in r
+            for r in result.result_payload.reasons
+        )
 
 
 # ── Enveloppe générique — llm_trace, confidence, evidence_ids, revue ───────

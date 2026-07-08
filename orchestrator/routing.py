@@ -22,6 +22,44 @@ redéfinir la correspondance agent → champ résultat en concurrence.
 Réutilise aussi ``PolicyDecision``/``PolicyEffect`` (``orchestrator.policies``)
 comme forme de résultat — même contrat ALLOW/DENY + motif structuré que les
 autres évaluateurs de l'orchestrateur, pas une quatrième forme concurrente.
+
+Ce contrôle N'EST PAS celui exécuté par le pipeline LangGraph de production
+--------------------------------------------------------------------------
+``graph/nodes.py::build_orchestrator()`` construit l'``Orchestrator`` par
+défaut avec ``preconditions_check=_graph_preconditions_check`` (défini dans
+``graph/nodes.py``, pas ici) — une version allégée qui ne revérifie que
+``case_id`` et laisse la topologie du graphe garantir l'ordre d'exécution.
+``evaluate_call_preconditions`` (ce module) est donc le contrat de référence
+pour un futur appelant *hors* LangGraph, pas le contrôle réellement traversé
+en production. Voir la section dédiée du docstring de ``graph/nodes.py`` pour
+la justification complète.
+
+``scripts/run_agent_manual.py`` n'est PAS aujourd'hui un tel appelant : il
+n'utilise ni ``Orchestrator`` ni ``ClaimState`` accumulé — chaque probe
+appelle ``agent.run(...)`` isolément et affiche le résultat sans le fusionner
+(diagnostic complet : ``docs/debug_manual_runner.md``). Le brancher sur ce
+contrôle suppose d'abord de lui faire maintenir un ``ClaimState`` réel — une
+des deux approches déjà documentées dans ce diagnostic, hors périmètre de ce
+module.
+
+Limite connue de ce contrôle riche — décision tranchée en Phase 2 (P2-1,
+parallélisation) : la précondition 3 suppose un **unique prédécesseur
+nominal par agent** (``AGENT_PIPELINE_ORDER`` est une séquence linéaire).
+Cette hypothèse est désormais **fausse** pour 4 agents du graphe de
+production réel : ``document_ocr``/``fhir_validator`` (fanned-out depuis
+``privacy``) et ``clinical_consistency``/``fraud_detection`` (fanned-out
+depuis ``medical_coding``) — voir ``graph/workflow.py``,
+``graph/edges.py::route_privacy_fan_out``/``route_coding_fan_out``. Décision
+retenue : **ne pas adapter** ``AGENT_PIPELINE_ORDER`` à une structure de
+prédécesseurs multiples — cette fonction reste un contrat de référence pour
+un futur appelant hors LangGraph (jamais exercée par le graphe de production,
+qui utilise exclusivement ``graph/nodes.py::_graph_preconditions_check``,
+lequel ne dépend d'aucune notion de prédécesseur unique). Adapter une
+fonction à zéro appelant de production pour un cas qu'elle ne rencontre
+jamais aurait été un investissement sans bénéfice mesurable ; si un appelant
+hors LangGraph voit un jour le jour, cette limite devra être retraitée à ce
+moment, avec la connaissance précise de ses propres besoins de
+parallélisme (potentiellement différents de ceux du graphe de production).
 """
 from __future__ import annotations
 

@@ -584,6 +584,7 @@ class TestNodeFinalize:
 class TestTechnicalNodeRegistry:
     EXPECTED_KEYS = {
         "quarantine", "needs_review", "await_human_review", "failure", "finalize",
+        "verification_fan_in", "consistency_fan_in",
     }
 
     def test_registry_contains_all_expected_keys(self):

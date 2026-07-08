@@ -177,6 +177,31 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Case Reviewer — auto-approbation bornée (P1-4) ───────────────────────
+    claimshield_auto_approve_confidence_threshold: float = Field(
+        0.9,
+        alias="CLAIMSHIELD_AUTO_APPROVE_CONFIDENCE_THRESHOLD",
+        description=(
+            "Seuil minimal de confiance LLM (LlmCaseReviewDecision.confidence) "
+            "requis, en plus des autres critères (pré-recommandation Phase A "
+            "APPROVE sans motif, LLM disponible et non-escaladant), pour que "
+            "case_reviewer_agent pose result_payload.auto_decision="
+            "'AUTO_APPROVED_LOW_RISK'. Défaut volontairement conservateur — "
+            "n'affecte jamais le verrou status=NEEDS_REVIEW/"
+            "human_review_required=True de CaseReviewerResult."
+        ),
+    )
+
+    @field_validator("claimshield_auto_approve_confidence_threshold")
+    @classmethod
+    def _auto_approve_threshold_valide(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                f"claimshield_auto_approve_confidence_threshold doit être entre "
+                f"0.0 et 1.0, reçu : {v}"
+            )
+        return v
+
     # ── Raccourcis calculés (compat. avec l'ancienne API) ────────────────────
     @computed_field  # type: ignore[prop-decorator]
     @property

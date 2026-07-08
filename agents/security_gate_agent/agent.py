@@ -17,7 +17,9 @@ Interdictions strictes :
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
+from typing import Any, Callable, Mapping
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
@@ -28,6 +30,7 @@ from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import FindingCode, SecurityDecision, SeverityLevel
 from schemas.results import SecurityAuditEntry, SecurityFinding, SecurityGateResult
+from services.audit_store import AuditStore, AuditStoreError
 from security.policies import (
     DEFAULT_POLICY,
     POLICY_EXECUTABLE_OR_SCRIPT,
@@ -70,7 +73,11 @@ from security.scanners import (
 )
 from state.claim_state import ClaimState, validate_state_update
 
+logger = logging.getLogger(__name__)
+
 _AGENT_NAME = "security_gate_agent"
+
+AuditEventNormalizer = Callable[[Mapping[str, Any]], Any]
 
 # Sévérité par défaut pour chaque code d'anomalie
 _POLICY_CODE_TO_FINDING: dict[str, tuple[FindingCode, SeverityLevel]] = {
@@ -134,6 +141,9 @@ _DECISION_RANK: dict[SecurityDecision, int] = {
     SecurityDecision.QUARANTINE: 1,
     SecurityDecision.BLOCK: 2,
 }
+
+_AUDIT_TECHNICAL_ERROR = "TECHNICAL_ERROR"
+_AUDIT_FAILURE = "FAILURE"
 
 
 def _add_reason_code(reason_codes: list[FindingCode], code: FindingCode) -> None:
@@ -274,6 +284,9 @@ def _validation_error_result(
     findings: list[SecurityFinding] | None = None,
     reason_codes: list[FindingCode] | None = None,
     blocked_fields: list[str] | None = None,
+    *,
+    audit_store: AuditStore | None = None,
+    audit_normalizer: AuditEventNormalizer | None = None,
 ) -> SecurityGateResult:
     """Produit un blocage minimal quand l'entrée brute ne passe pas Pydantic."""
     now = datetime.now(UTC)
@@ -300,7 +313,7 @@ def _validation_error_result(
         reason_codes=reason_codes,
         file_sha256=None,
     )
-    return SecurityGateResult(
+    result = SecurityGateResult(
         claim_id=claim_id,
         decision=SecurityDecision.BLOCK,
         findings=findings,
@@ -316,6 +329,14 @@ def _validation_error_result(
         blocked_fields=blocked_fields,
         reasons=[finding.description for finding in findings],
     )
+    _persist_security_audit(
+        result,
+        None,
+        audit_store=audit_store,
+        audit_normalizer=audit_normalizer,
+        audit_outcome=_AUDIT_FAILURE,
+    )
+    return result
 
 
 # ── Phase B : décision LLM ────────────────────────────────────────────────────
@@ -366,12 +387,127 @@ def _invoke_llm_security(
         return None
 
 
+def _audit_outcome(
+    result: SecurityGateResult,
+    *,
+    technical_error: bool = False,
+    failure: bool = False,
+) -> str:
+    if technical_error:
+        return _AUDIT_TECHNICAL_ERROR
+    if failure:
+        return _AUDIT_FAILURE
+    return result.decision.value
+
+
+def _safe_audit_evidence(result: SecurityGateResult) -> str:
+    """Preuve minimisée pour l'audit persistant, jamais le contenu dangereux complet."""
+    if result.reason_codes:
+        return ",".join(code.value for code in result.reason_codes[:5])
+    if result.findings:
+        return ",".join(finding.code.value for finding in result.findings[:5])
+    return (result.evidence_summary or "")[:80]
+
+
+def _security_audit_payload(
+    result: SecurityGateResult,
+    gate_input: SecurityGateInput | None,
+    *,
+    audit_outcome: str,
+) -> dict[str, Any]:
+    """Payload envoyé au normalizer Audit Agent.
+
+    Ne reprend jamais ``text_excerpt``, URL complète, chemin brut refusé,
+    document, OCR complet ou arguments d'outil complets. Seuls des codes,
+    compteurs et identifiants minimisés sont exposés.
+    """
+    audit_entry = result.audit_entry
+    reason = result.reasons[0] if result.reasons else result.decision.value
+    affected_agent = (
+        audit_entry.actor
+        if audit_entry is not None
+        else (gate_input.requesting_agent if gate_input is not None else _AGENT_NAME)
+    )
+    return {
+        "case_id": result.claim_id,
+        "event_source": "security_gate",
+        "event_type": "security_decision",
+        "outcome": audit_outcome,
+        "decision": result.decision.value,
+        "reason": reason[:240],
+        "evidence": _safe_audit_evidence(result),
+        "affected_agent": affected_agent or _AGENT_NAME,
+        "policy_applied": result.applied_policy,
+        "policy_version": result.policy_version,
+        "reason_codes": [code.value for code in result.reason_codes],
+        "blocked_fields": list(result.blocked_fields),
+        "input_type": gate_input.input_type.value if gate_input is not None else None,
+        "entry_id": gate_input.entry_id if gate_input is not None else None,
+        "prompt_injection_detected": bool(result.prompt_injection_detected),
+        "findings_count": len(result.findings),
+        "evaluated_at": result.evaluated_at.isoformat(),
+    }
+
+
+def _persist_security_audit(
+    result: SecurityGateResult,
+    gate_input: SecurityGateInput | None,
+    *,
+    audit_store: AuditStore | None,
+    audit_normalizer: AuditEventNormalizer | None,
+    audit_outcome: str,
+) -> None:
+    if audit_store is None or audit_normalizer is None:
+        return
+
+    payload = _security_audit_payload(result, gate_input, audit_outcome=audit_outcome)
+    try:
+        normalized = audit_normalizer(payload)
+        if normalized is None:
+            logger.warning(
+                "Audit Security Gate non persisté pour %s/%s : normalisation LLM absente.",
+                result.claim_id,
+                audit_outcome,
+            )
+            return
+        audit_store.record_event(
+            case_id=result.claim_id,
+            event_type=normalized.event_type,
+            actor=normalized.actor,
+            outcome=normalized.outcome,
+            redaction_status=normalized.redaction_status,
+            agent_name=normalized.agent_name,
+            model_name=None,
+            prompt_version=None,
+            tool_calls=normalized.tool_calls,
+            evidence_ids=normalized.evidence_ids,
+        )
+    except AuditStoreError as exc:
+        logger.warning(
+            "Audit Security Gate append-only refusé pour %s/%s : %s",
+            result.claim_id,
+            audit_outcome,
+            exc.structured.message,
+        )
+    except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer la décision sécurité.
+        logger.warning(
+            "Audit Security Gate non persisté pour %s/%s : %s: %s",
+            result.claim_id,
+            audit_outcome,
+            type(exc).__name__,
+            exc,
+        )
+
+
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
 
 
 def run(
     gate_input: SecurityGateInput,
     policy: SecurityPolicy | None = None,
+    *,
+    audit_store: AuditStore | None = None,
+    audit_normalizer: AuditEventNormalizer | None = None,
 ) -> SecurityGateResult:
     """Exécute le pipeline de sécurité pour un élément du dossier.
 
@@ -550,7 +686,9 @@ def run(
         deterministic_flag=gate_input.deterministic_injection_flag,
     )
 
+    technical_error = False
     if llm_decision is None:
+        technical_error = True
         decision = SecurityDecision.BLOCK
         confidence_score = max(0.6, deterministic_confidence)
         llm_evidence = None
@@ -562,6 +700,7 @@ def run(
         try:
             requested_decision = SecurityDecision(getattr(llm_decision, "decision"))
         except (AttributeError, TypeError, ValueError):
+            technical_error = True
             decision = SecurityDecision.BLOCK
             confidence_score = max(0.6, deterministic_confidence)
             reasons = ["Décision LLM invalide — décision conservatrice BLOCK."]
@@ -604,7 +743,7 @@ def run(
         file_sha256=gate_input.sha256,
     )
 
-    return SecurityGateResult(
+    result = SecurityGateResult(
         claim_id=gate_input.claim_id,
         decision=decision,
         findings=findings,
@@ -621,23 +760,29 @@ def run(
         reasons=reasons,
         llm_metadata=build_llm_metadata(_AGENT_NAME, confidence_score),
     )
+    _persist_security_audit(
+        result,
+        gate_input,
+        audit_store=audit_store,
+        audit_normalizer=audit_normalizer,
+        audit_outcome=_audit_outcome(result, technical_error=technical_error),
+    )
+    return result
 
 
 # ── Nœud LangGraph ────────────────────────────────────────────────────────────
 
 
-def node(state: ClaimState) -> dict:
-    """Nœud LangGraph — construit SecurityGateInput depuis le state et délègue à run().
-
-    Attend dans le state :
-        case_id         : identifiant du dossier
-        security_input  : dict compatible avec SecurityGateInput
-                          (entry_id, input_type requis ; autres champs optionnels)
-    """
-    case_id: str = state.get("case_id", "")  # type: ignore[assignment]
-    raw: dict = state.get("security_input", {}) or {}  # type: ignore[assignment]
-    policy = DEFAULT_POLICY
-
+def evaluate_security_input(
+    *,
+    case_id: str,
+    raw: Mapping[str, Any],
+    policy: SecurityPolicy | None = None,
+    audit_store: AuditStore | None = None,
+    audit_normalizer: AuditEventNormalizer | None = None,
+) -> SecurityGateResult:
+    """Évalue une entrée brute de Security Gate avec audit optionnel."""
+    pol = policy or DEFAULT_POLICY
     try:
         gate_input = SecurityGateInput(
             claim_id=case_id,
@@ -661,7 +806,7 @@ def node(state: ClaimState) -> dict:
         blocked_fields: list[str] = []
         raw_path = raw.get("relative_path", raw.get("write_path"))
         if raw_path:
-            _, path_policy_codes = validate_storage_path(str(raw_path), policy.path)
+            _, path_policy_codes = validate_storage_path(str(raw_path), pol.path)
             _append_policy_findings(
                 findings,
                 reason_codes,
@@ -670,15 +815,46 @@ def node(state: ClaimState) -> dict:
                 source="path_policy",
                 affected_element="relative_path",
             )
-        result = _validation_error_result(
+        return _validation_error_result(
             case_id,
-            policy,
+            pol,
             findings=findings or None,
             reason_codes=reason_codes or None,
             blocked_fields=blocked_fields or None,
+            audit_store=audit_store,
+            audit_normalizer=audit_normalizer,
         )
-    else:
-        result = run(gate_input, policy)
+
+    return run(
+        gate_input,
+        pol,
+        audit_store=audit_store,
+        audit_normalizer=audit_normalizer,
+    )
+
+
+def node(
+    state: ClaimState,
+    *,
+    audit_store: AuditStore | None = None,
+    audit_normalizer: AuditEventNormalizer | None = None,
+) -> dict:
+    """Nœud LangGraph — construit SecurityGateInput depuis le state et délègue à run().
+
+    Attend dans le state :
+        case_id         : identifiant du dossier
+        security_input  : dict compatible avec SecurityGateInput
+                          (entry_id, input_type requis ; autres champs optionnels)
+    """
+    case_id: str = state.get("case_id", "")  # type: ignore[assignment]
+    raw: dict = state.get("security_input", {}) or {}  # type: ignore[assignment]
+    result = evaluate_security_input(
+        case_id=case_id,
+        raw=raw,
+        policy=DEFAULT_POLICY,
+        audit_store=audit_store,
+        audit_normalizer=audit_normalizer,
+    )
 
     updates: dict = {
         "security_result": result,

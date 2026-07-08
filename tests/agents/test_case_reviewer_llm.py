@@ -197,6 +197,139 @@ def test_case_reviewer_llm_ne_peut_pas_approuver_preuves_incompletes():
     assert any("manquants" in reason for reason in result.result_payload.justification)
 
 
+# ── P1-4 — auto-approbation bornée (verrou intact) ──────────────────────────
+
+
+def _confident_approve_decision(*, confidence: float = 0.95, escalation_required: bool = False) -> LlmCaseReviewDecision:
+    kwargs = dict(
+        recommendation=Recommendation.APPROVE,
+        summary="Dossier clair, tous les contrôles concordent.",
+        reasons=["Aucune anomalie détectée."],
+        human_review_reasons=["Validation humaine requise."],
+        confidence=confidence,
+        escalation_required=escalation_required,
+    )
+    if escalation_required:
+        kwargs["escalation_reasons"] = ["Motif d'escalade de test."]
+    return LlmCaseReviewDecision(**kwargs)
+
+
+class TestAutoApprovalEligibility:
+    def test_all_criteria_met_sets_auto_decision(self):
+        with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision == "AUTO_APPROVED_LOW_RISK"
+        assert result.result_payload.auto_decision_criteria != []
+
+    def test_lock_intact_even_when_auto_decision_is_set(self):
+        """Double preuve centrale de P1-4 : l'autonomie est réelle
+        (auto_decision posé) ET le verrou structurel reste intact (status/
+        human_review_required inchangés)."""
+        with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision == "AUTO_APPROVED_LOW_RISK"
+        assert result.status is VerificationStatus.NEEDS_REVIEW
+        assert result.human_review_required is True
+
+
+class TestAutoApprovalRejectedOnAnySingleCriterion:
+    """Chaque critère manquant, isolément, empêche l'auto-approbation —
+    jamais un contournement partiel."""
+
+    def test_deterministic_recommendation_not_approve(self):
+        state = _clean_state()
+        state["fraud_result"] = state["fraud_result"].model_copy(
+            update={"status": VerificationStatus.NEEDS_REVIEW}
+        )
+        with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+            result = agent.run("CLM-0001", state)
+
+        assert result.result_payload.auto_decision is None
+
+    def test_llm_unavailable(self):
+        with patch.object(agent, "_invoke_llm_case_review", return_value=None):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision is None
+
+    def test_llm_recommends_something_other_than_approve(self):
+        decision = _confident_approve_decision()
+        decision = decision.model_copy(update={"recommendation": Recommendation.PENDING})
+        with patch.object(agent, "_invoke_llm_case_review", return_value=decision):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision is None
+
+    def test_llm_signals_escalation_required(self):
+        decision = _confident_approve_decision(escalation_required=True)
+        with patch.object(agent, "_invoke_llm_case_review", return_value=decision):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision is None
+
+    def test_confidence_below_threshold(self):
+        decision = _confident_approve_decision(confidence=0.5)
+        with patch.object(agent, "_invoke_llm_case_review", return_value=decision):
+            result = agent.run("CLM-0001", _clean_state())
+
+        assert result.result_payload.auto_decision is None
+
+    def test_risk_detected(self):
+        state = _clean_state()
+        state["fraud_result"] = FraudDetectionResult(
+            case_id="CLM-0001",
+            status=VerificationStatus.PASS,
+            llm_trace=_llm_metadata(),
+            result_payload=FraudResultPayload(risk_score=0.75),
+        )
+        with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+            result = agent.run("CLM-0001", state)
+
+        assert result.result_payload.auto_decision is None
+
+    def test_disagreement_detected(self):
+        """Défense en profondeur : un désaccord détecté par
+        ``tools.consistency.detect_result_disagreements`` bloque
+        l'auto-approbation. En pratique, un statut suffisamment divergent
+        pour produire un désaccord (PASS vs FAIL/NEEDS_REVIEW) est déjà
+        capturé indépendamment par ``_deterministic_pre_recommendation``
+        (qui scanne les mêmes statuts et conclut REJECT/PENDING avant même
+        d'atteindre le critère « aucun désaccord ») — les deux critères se
+        recouvrent structurellement, jamais un chemin de contournement de
+        l'un par l'autre."""
+        state = _clean_state()
+        state["fhir_result"] = FhirValidatorResult(
+            case_id="CLM-0001",
+            status=VerificationStatus.FAIL,
+            bundle_expected=True,
+            llm_metadata=_llm_metadata(),
+        )
+        with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+            result = agent.run("CLM-0001", state)
+
+        assert result.result_payload.auto_decision is None
+        assert result.result_payload.recommendation is not Recommendation.APPROVE
+
+
+def test_auto_approval_never_applies_to_reject():
+    """auto_decision ne peut structurellement jamais être posé pour un
+    REJECT — l'éligibilité exige deterministic_recommendation is APPROVE."""
+    state = _clean_state()
+    state["fraud_result"] = FraudDetectionResult(
+        case_id="CLM-0001",
+        status=VerificationStatus.FAIL,
+        llm_trace=_llm_metadata(),
+        result_payload=FraudResultPayload(risk_score=0.9),
+    )
+    with patch.object(agent, "_invoke_llm_case_review", return_value=_confident_approve_decision()):
+        result = agent.run("CLM-0001", state)
+
+    assert result.result_payload.recommendation is Recommendation.REJECT
+    assert result.result_payload.auto_decision is None
+
+
 def test_llm_case_review_schema_refuse_controle_revue_humaine():
     with pytest.raises(ValidationError):
         LlmCaseReviewDecision.model_validate({
@@ -205,6 +338,72 @@ def test_llm_case_review_schema_refuse_controle_revue_humaine():
             "reasons": ["Motif."],
             "human_review_required": False,
         })
+
+
+class TestLlmCaseReviewDecisionEscalationFields:
+    """P1-4 — validation pure des nouveaux champs confidence/escalation_*."""
+
+    def test_defaults_are_conservative(self):
+        decision = LlmCaseReviewDecision(
+            recommendation=Recommendation.PENDING, summary="Synthèse.", reasons=["Motif."]
+        )
+        assert decision.confidence == 0.0
+        assert decision.escalation_required is False
+        assert decision.escalation_reasons == []
+
+    def test_escalation_reasons_required_when_escalating(self):
+        with pytest.raises(ValidationError, match="escalation_reasons obligatoire"):
+            LlmCaseReviewDecision(
+                recommendation=Recommendation.PENDING,
+                summary="Synthèse.",
+                reasons=["Motif."],
+                escalation_required=True,
+            )
+
+    def test_escalation_reasons_not_required_when_not_escalating(self):
+        decision = LlmCaseReviewDecision(
+            recommendation=Recommendation.APPROVE,
+            summary="Synthèse.",
+            reasons=["Motif."],
+            escalation_required=False,
+        )
+        assert decision.escalation_reasons == []
+
+    def test_valid_escalation_with_reasons(self):
+        decision = LlmCaseReviewDecision(
+            recommendation=Recommendation.PENDING,
+            summary="Synthèse.",
+            reasons=["Motif."],
+            escalation_required=True,
+            escalation_reasons=["Information manquante."],
+        )
+        assert decision.escalation_required is True
+
+    def test_confidence_bounds(self):
+        with pytest.raises(ValidationError):
+            LlmCaseReviewDecision(
+                recommendation=Recommendation.PENDING,
+                summary="Synthèse.",
+                reasons=["Motif."],
+                confidence=1.5,
+            )
+        with pytest.raises(ValidationError):
+            LlmCaseReviewDecision(
+                recommendation=Recommendation.PENDING,
+                summary="Synthèse.",
+                reasons=["Motif."],
+                confidence=-0.1,
+            )
+
+    def test_escalation_reasons_reject_secret_hint(self):
+        with pytest.raises(ValidationError):
+            LlmCaseReviewDecision(
+                recommendation=Recommendation.PENDING,
+                summary="Synthèse.",
+                reasons=["Motif."],
+                escalation_required=True,
+                escalation_reasons=["password: hunter2"],
+            )
 
 
 def test_case_reviewer_result_refuse_human_review_required_false():

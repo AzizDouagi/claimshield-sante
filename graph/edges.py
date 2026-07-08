@@ -140,6 +140,15 @@ def _route_by_verification_status(raw_status: object) -> Route:
     return RETRY
 
 
+def _fan_out_or(route: Route, targets: list[str]) -> Route | list[str]:
+    """P2-1 — transforme une route ``continue`` en fan-out vers ``targets``
+    (plusieurs nœuds exécutés dans le même superstep LangGraph), laisse
+    toute autre route inchangée. Utilisée par les variantes ``*_fan_out`` des
+    fonctions de routage existantes — jamais une nouvelle logique de
+    décision, seulement une transformation de la forme du retour."""
+    return targets if route == CONTINUE else route
+
+
 # ── Fonctions de routage ──────────────────────────────────────────────────────
 
 
@@ -224,6 +233,25 @@ def route_privacy(state: ClaimState) -> Route:
     return FAILURE  # BLOCK ou valeur inconnue
 
 
+def route_privacy_fan_out(state: ClaimState) -> Route | list[str]:
+    """P2-1 — variante fan-out de ``route_privacy``, utilisée par
+    ``graph/workflow.py`` à la place de ``route_privacy`` pour lancer
+    ``document_ocr`` et ``fhir_validator`` dans le même superstep LangGraph.
+
+    Même décision que ``route_privacy`` (même lecture de
+    ``privacy_result.decision``, jamais recalculée deux fois) — seule la
+    forme du retour change : ALLOW retourne une liste de deux noms de nœuds
+    (fan-out réel, LangGraph attend que les deux terminent avant de
+    poursuivre) au lieu d'un simple ``continue``. Aucune dépendance de
+    données entre les deux : ``document_ocr`` lit ``ocr_input``/
+    ``security_result`` ; ``fhir_validator`` lit ``security_result``/
+    ``fhir_input``/``intake_result`` — ni l'un ni l'autre ne lit le résultat
+    de l'autre (revérifié sur le code réel avant cette implémentation, pas
+    supposé figé depuis le diagnostic initial).
+    """
+    return _fan_out_or(route_privacy(state), ["document_ocr", "fhir_validator"])
+
+
 def route_ocr(state: ClaimState) -> Route:
     """Route après document_ocr_agent selon ``ocr_result.status``."""
     result = state.get("ocr_result")
@@ -280,6 +308,51 @@ def route_coding(state: ClaimState) -> Route:
     if result is None:
         return FAILURE
     return _route_by_verification_status(result.status)
+
+
+def route_coding_fan_out(state: ClaimState) -> Route | list[str]:
+    """P2-1 — variante fan-out de ``route_coding``, utilisée par
+    ``graph/workflow.py`` à la place de ``route_coding`` pour lancer
+    ``clinical_consistency`` et ``fraud_detection`` dans le même superstep
+    LangGraph.
+
+    Même décision que ``route_coding`` — seule la route ``continue`` devient
+    un fan-out vers les deux noms de nœuds ; ``needs_review``/``failure``
+    restent des routes uniques inchangées. Aucune dépendance de données
+    entre les deux : ``clinical_consistency`` lit ``ocr_result``/
+    ``coding_result``/``fhir_result``/``privacy_result`` ; ``fraud_detection``
+    lit ``identity_coverage_result``/``coding_result``/``ocr_result``/
+    ``privacy_result`` — ni l'un ni l'autre ne lit le résultat de l'autre
+    (revérifié sur le code réel avant cette implémentation).
+    """
+    return _fan_out_or(route_coding(state), ["clinical_consistency", "fraud_detection"])
+
+
+# ── route_verification_fan_in câblée par P2-2 — route_result_consistency non ─
+#
+# route_verification_fan_in route désormais le nœud technique
+# "verification_fan_in" (convergence après le fan-out document_ocr/
+# fhir_validator, voir route_privacy_fan_out et graph/technical_nodes.py::
+# node_verification_fan_in), appelée une fois que LangGraph a garanti que
+# les deux branches parallèles ont terminé (superstep synchronisé par le
+# nœud de convergence intermédiaire, jamais par un branchement direct des
+# deux branches vers le nœud suivant — cela laisserait le graphe router sur
+# un état partiel si une branche termine avant l'autre). Ce court-circuit
+# consolide un comportement qui existait déjà avant la parallélisation
+# (route_ocr/route_fhir routaient déjà individuellement vers needs_review).
+#
+# route_result_consistency, en revanche, N'EST PAS câblée au nœud de
+# convergence symétrique "consistency_fan_in" (clinical_consistency/
+# fraud_detection) : ce court-circuit n'existait pas avant la
+# parallélisation et romprait l'invariant déjà audité et testé « aucun
+# agent ne décide seul, case_reviewer reste l'unique synthétiseur des
+# signaux critiques et des désaccords inter-agents » (voir
+# graph/workflow.py, section consistency_fan_in, pour la justification
+# complète et tests/graph/test_workflow_signals_to_review.py::
+# TestCriticalSignalsReachCaseReviewer qui verrouille ce comportement).
+# route_result_consistency reste définie et testée (disponible pour un
+# futur appelant hors graphe), simplement non câblée en production — comme
+# avant P2-2.
 
 
 def route_verification_fan_in(state: ClaimState) -> Route:
@@ -355,6 +428,13 @@ def route_result_consistency(state: ClaimState) -> Route:
 def route_review(state: ClaimState) -> Route:
     """Route après case_reviewer_agent.
 
+    APPROVE + auto_decision="AUTO_APPROVED_LOW_RISK" → end (P1-4 — auto-approbation
+                                                             bornée, voir plus bas ;
+                                                             traverse quand même
+                                                             ``audit`` avant
+                                                             ``finalize``, voir
+                                                             ``path_map`` de
+                                                             ``graph/workflow.py``)
     APPROVE + human_review_required=False → end          (chemin défensif/legacy —
                                                             l'implémentation réelle
                                                             ne produit jamais False)
@@ -363,7 +443,9 @@ def route_review(state: ClaimState) -> Route:
     REJECT  + human_review_required=True  → needs_review (validation HITL requise —
                                                             un rejet reste une décision
                                                             de dossier, jamais finalisé
-                                                            sans humain)
+                                                            sans humain — **jamais**
+                                                            de raccourci auto_decision
+                                                            pour REJECT)
     PENDING                               → needs_review (en attente d'information)
 
     Depuis la migration de ``CaseReviewerResult`` vers l'enveloppe générique
@@ -375,6 +457,20 @@ def route_review(state: ClaimState) -> Route:
     restent accessibles qu'à un objet non validé par le schéma (ex. un mock de
     test type ``SimpleNamespace``), jamais à une vraie instance produite par
     ``case_reviewer_agent``.
+
+    **P1-4 — auto-approbation bornée** : contrairement aux chemins
+    défensifs ci-dessus (jamais atteints par une vraie instance),
+    ``result_payload.auto_decision == "AUTO_APPROVED_LOW_RISK"`` EST un
+    signal réellement produit par ``agents/case_reviewer_agent/agent.py``
+    (critères d'éligibilité stricts — pré-recommandation Phase A APPROVE,
+    LLM disponible/confiant/non-escaladant, aucun risque ni
+    désaccord). Il route directement vers ``end`` **sans jamais contourner
+    l'audit** : le ``path_map`` de ``graph/workflow.py`` mappe déjà ``END``
+    de cette route vers le nœud ``"audit"``, jamais directement la fin du
+    graphe — un dossier auto-approuvé traverse donc toujours ``audit_agent``
+    avant ``finalize``, exactement comme un dossier validé par un humain.
+    Ce raccourci n'existe que pour ``APPROVE`` — jamais pour ``REJECT``, la
+    décision la plus conséquente reste toujours soumise à revue humaine.
     """
     result = state.get("review_result")
     if result is None:
@@ -385,7 +481,12 @@ def route_review(state: ClaimState) -> Route:
     except (ValueError, AttributeError):
         return FAILURE
 
-    if rec in (Recommendation.APPROVE, Recommendation.REJECT):
+    if rec is Recommendation.APPROVE:
+        auto_decision = getattr(result.result_payload, "auto_decision", None)
+        if auto_decision == "AUTO_APPROVED_LOW_RISK":
+            return END
+        return NEEDS_REVIEW if result.human_review_required else END
+    if rec is Recommendation.REJECT:
         return NEEDS_REVIEW if result.human_review_required else END
     if rec is Recommendation.PENDING:
         return NEEDS_REVIEW

@@ -112,7 +112,7 @@ Après ``await_human_review``, ``graph.edges.route_human_review`` route selon
 from __future__ import annotations
 
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
@@ -126,15 +126,14 @@ from graph.edges import (
     RELAUNCH_TARGETS,
     RETRY,
     route_after_audit,
-    route_coding,
-    route_fhir,
+    route_coding_fan_out,
     route_human_review,
     route_identity_coverage,
     route_intake,
-    route_ocr,
-    route_privacy,
+    route_privacy_fan_out,
     route_review,
     route_security,
+    route_verification_fan_in,
 )
 from graph.nodes import (
     AuditAgentRunnable,
@@ -146,10 +145,12 @@ from graph.nodes import (
 )
 from graph.technical_nodes import (
     node_await_human_review,
+    node_consistency_fan_in,
     node_failure,
     node_finalize,
     node_needs_review,
     node_quarantine,
+    node_verification_fan_in,
 )
 from orchestrator.executor import Orchestrator
 from state.claim_state import ClaimState
@@ -321,6 +322,36 @@ def _assert_workflow_topology_is_sound(graph: StateGraph) -> None:
         )
 
 
+def _without_current_step(node_fn: Callable[[ClaimState], dict]) -> Callable[[ClaimState], dict]:
+    """P2-1 (parallélisation) — enveloppe un nœud agent pour retirer
+    ``current_step`` de sa mise à jour, sans toucher à l'agent lui-même
+    (``node_fn`` reste appelé tel quel — les tests unitaires qui invoquent
+    l'agent directement, hors graphe, ne voient jamais cette enveloppe).
+
+    Nécessaire uniquement pour les 4 nœuds fanned-out en parallèle
+    (document_ocr/fhir_validator, clinical_consistency/fraud_detection) :
+    ``current_step`` (``str`` simple, canal LastValue) n'accepte qu'une
+    seule écriture par superstep LangGraph — deux branches parallèles qui
+    écriraient chacune leur propre nom lèveraient ``InvalidUpdateError``.
+    Plutôt que de transformer ``current_step`` en champ à reducer (ce qui
+    lui ferait porter une valeur par défaut '' même avant toute écriture,
+    un changement d'observabilité plus large que nécessaire), le nœud de
+    convergence qui suit immédiatement (``verification_fan_in``/
+    ``consistency_fan_in``) reste la seule source de vérité pour
+    ``current_step`` pendant la traversée de ces deux branches —
+    ``completed_steps`` (append-only) reste néanmoins alimenté normalement
+    par chaque branche, c'est la source de vérité sur ce qui a réellement
+    tourné, y compris en parallèle.
+    """
+    def _wrapped(state: ClaimState) -> dict:
+        updates = dict(node_fn(state))
+        updates.pop("current_step", None)
+        return updates
+
+    _wrapped.__name__ = getattr(node_fn, "__name__", "node_without_current_step")
+    return _wrapped
+
+
 def build_workflow(
     *,
     orchestrator: Orchestrator | None = None,
@@ -332,8 +363,11 @@ def build_workflow(
 ) -> StateGraph:
     """Construit (sans compiler) le StateGraph ClaimShield.
 
-    Câble les 16 nœuds et toutes les arêtes/branches conditionnelles, puis
-    exécute la vérification automatique de topologie
+    Câble les 18 nœuds (11 agents + 7 techniques, dont les deux nœuds de
+    convergence ``verification_fan_in``/``consistency_fan_in`` introduits
+    par la parallélisation — Phase 2 du plan de remédiation) et toutes les
+    arêtes/branches conditionnelles, puis exécute la vérification automatique
+    de topologie
     (``_assert_workflow_topology_is_sound``) avant de retourner le graphe.
     Aucun checkpointer, aucune interruption : ce sont des préoccupations de
     compilation, traitées par ``compile_workflow``.
@@ -432,8 +466,13 @@ def build_workflow(
     graph.add_node("claim_intake", node_fns["claim_intake"])
     graph.add_node("security_gate", node_fns["security_gate"])
     graph.add_node("privacy", node_fns["privacy"])
-    graph.add_node("document_ocr", node_fns["document_ocr"])
-    graph.add_node("fhir_validator", node_fns["fhir_validator"])
+    # P2-1 : document_ocr/fhir_validator sont fanned-out (même superstep) —
+    # _without_current_step évite le conflit d'écriture concurrente sur
+    # current_step (canal LastValue, une seule écriture par superstep) ; le
+    # nœud de convergence verification_fan_in reste la seule source de
+    # vérité pour current_step à la sortie de ces deux branches.
+    graph.add_node("document_ocr", _without_current_step(node_fns["document_ocr"]))
+    graph.add_node("fhir_validator", _without_current_step(node_fns["fhir_validator"]))
     graph.add_node("identity_coverage", node_fns["identity_coverage"])
     graph.add_node("medical_coding", node_fns["medical_coding"])
 
@@ -444,9 +483,13 @@ def build_workflow(
     # Jamais importés en dur : l'implémentation (*_impl, voir build_orchestrator)
     # est déjà résolue dans orchestrator.agent_registry — ce module ne fait que
     # câbler le nœud générique correspondant.
+    #
+    # P2-1 : clinical_consistency/fraud_detection sont fanned-out (même
+    # superstep) — même garantie que document_ocr/fhir_validator ci-dessus,
+    # consistency_fan_in reste la seule source de vérité pour current_step.
 
-    graph.add_node("clinical_consistency", node_fns["clinical_consistency"])
-    graph.add_node("fraud_detection", node_fns["fraud_detection"])
+    graph.add_node("clinical_consistency", _without_current_step(node_fns["clinical_consistency"]))
+    graph.add_node("fraud_detection", _without_current_step(node_fns["fraud_detection"]))
     graph.add_node("case_reviewer", node_fns["case_reviewer"])
     graph.add_node("audit", node_fns["audit"])
 
@@ -457,6 +500,12 @@ def build_workflow(
     graph.add_node("await_human_review", node_await_human_review)
     graph.add_node("failure", node_failure)
     graph.add_node("finalize", node_finalize)
+
+    # Nœuds de convergence — parallélisation (Phase 2) : point de
+    # synchronisation obligatoire après un fan-out, voir
+    # graph/technical_nodes.py pour la justification complète.
+    graph.add_node("verification_fan_in", node_verification_fan_in)
+    graph.add_node("consistency_fan_in", node_consistency_fan_in)
 
     # ── Arête d'entrée ───────────────────────────────────────────────────────
 
@@ -490,34 +539,37 @@ def build_workflow(
         },
     )
 
+    # P2-1 — fan-out : document_ocr et fhir_validator n'ont aucune dépendance
+    # de données réelle entre eux (revérifié sur le code, voir
+    # graph/edges.py::route_privacy_fan_out) — ils s'exécutent dans le même
+    # superstep LangGraph. route_privacy_fan_out retourne soit la liste des
+    # deux noms de nœuds (ALLOW), soit FAILURE (BLOCK) — jamais une route
+    # "continue" isolée, qui n'existe plus ici.
     graph.add_conditional_edges(
         "privacy",
-        route_privacy,
+        route_privacy_fan_out,
         {
-            CONTINUE: "document_ocr",
-            FAILURE:  "failure",
+            "document_ocr":   "document_ocr",
+            "fhir_validator": "fhir_validator",
+            FAILURE:          "failure",
         },
     )
 
-    graph.add_conditional_edges(
-        "document_ocr",
-        route_ocr,
-        {
-            CONTINUE:     "fhir_validator",
-            NEEDS_REVIEW: "needs_review",
-            FAILURE:      "failure",
-            RETRY:        "failure",
-        },
-    )
+    # Chaque branche route inconditionnellement vers le nœud de convergence
+    # — jamais directement vers "identity_coverage"/"needs_review"/"failure"
+    # individuellement, ce qui risquerait de router sur un state partiel si
+    # une branche termine avant l'autre. route_verification_fan_in (appelée
+    # après convergence) consolide les deux statuts.
+    graph.add_edge("document_ocr", "verification_fan_in")
+    graph.add_edge("fhir_validator", "verification_fan_in")
 
     graph.add_conditional_edges(
-        "fhir_validator",
-        route_fhir,
+        "verification_fan_in",
+        route_verification_fan_in,
         {
             CONTINUE:     "identity_coverage",
             NEEDS_REVIEW: "needs_review",
             FAILURE:      "failure",
-            RETRY:        "identity_coverage",  # bundle FHIR absent → non bloquant
         },
     )
 
@@ -532,14 +584,18 @@ def build_workflow(
         },
     )
 
+    # P2-1 — fan-out : clinical_consistency et fraud_detection n'ont aucune
+    # dépendance de données réelle entre eux (revérifié sur le code, voir
+    # graph/edges.py::route_coding_fan_out).
     graph.add_conditional_edges(
         "medical_coding",
-        route_coding,
+        route_coding_fan_out,
         {
-            CONTINUE:     "clinical_consistency",
-            NEEDS_REVIEW: "needs_review",
-            FAILURE:      "failure",
-            RETRY:        "failure",
+            "clinical_consistency": "clinical_consistency",
+            "fraud_detection":      "fraud_detection",
+            NEEDS_REVIEW:           "needs_review",
+            FAILURE:                "failure",
+            RETRY:                  "failure",
         },
     )
 
@@ -578,14 +634,42 @@ def build_workflow(
     # ── Arêtes normales — stubs et nœuds de clôture ──────────────────────────
     #
     # Règle : ces nœuds n'ont PAS de add_conditional_edges.
-    # clinical_consistency et fraud_detection (étape 12) écrivent bien un
-    # statut réel (PASS/NEEDS_REVIEW/FAIL) mais ne routent pas encore le
-    # graphe eux-mêmes — cette synthèse reste le rôle de case_reviewer ; leur
-    # arête de sortie reste donc inconditionnelle.
+    # clinical_consistency et fraud_detection écrivent bien un statut réel
+    # (PASS/NEEDS_REVIEW/FAIL) mais ne routent pas eux-mêmes le graphe —
+    # chacun route inconditionnellement vers le nœud de convergence
+    # "consistency_fan_in" (P2-1, même garantie que verification_fan_in :
+    # jamais de routage individuel qui contournerait l'attente de l'autre
+    # branche), qui route lui-même inconditionnellement vers case_reviewer —
+    # PAS de branchement via route_result_consistency ici (décision révisée
+    # par rapport au plan de remédiation initial, voir ci-dessous) :
+    # case_reviewer reste l'unique synthétiseur des signaux critiques et des
+    # désaccords inter-agents (il appelle déjà lui-même
+    # tools.consistency.detect_result_disagreements), invariant déjà audité
+    # et testé (tests/graph/test_workflow_signals_to_review.py::
+    # TestCriticalSignalsReachCaseReviewer) — un signal FAIL de
+    # clinical_consistency/fraud_detection doit toujours atteindre
+    # case_reviewer, jamais être court-circuité vers needs_review avant lui.
+    # Contrairement à verification_fan_in (document_ocr/fhir_validator
+    # avaient déjà individuellement ce pouvoir de court-circuit avant la
+    # parallélisation — route_verification_fan_in ne fait que consolider un
+    # comportement préexistant), aucun court-circuit n'existait avant
+    # clinical_consistency/fraud_detection : en introduire un nouveau ici
+    # romprait cet invariant. route_result_consistency reste définie et
+    # testée (tools.consistency), disponible pour un futur appelant, mais
+    # non câblée dans le graphe de production — même statut qu'avant P2-2.
 
-    graph.add_edge("clinical_consistency", "fraud_detection")
-    graph.add_edge("fraud_detection", "case_reviewer")
+    graph.add_edge("clinical_consistency", "consistency_fan_in")
+    graph.add_edge("fraud_detection", "consistency_fan_in")
+    graph.add_edge("consistency_fan_in", "case_reviewer")
 
+    # P2-3 (Phase 2 du plan de remédiation) — case_reviewer → await_human_review
+    # → audit → finalize reste entièrement séquentiel, par choix : aucune
+    # parallélisation supplémentaire n'a de sens ici. case_reviewer doit
+    # connaître la synthèse *complète* des deux fan-out précédents avant de
+    # se prononcer (pas une décision partielle) ; audit doit à son tour
+    # connaître la décision *finale* (recommandation + décision humaine
+    # éventuelle) pour journaliser un événement cohérent — paralléliser l'un
+    # ou l'autre reviendrait à leur faire agir sur un état encore incomplet.
     # audit décide finalize (nominal) ou failure (rejet contrôlé) selon la
     # décision humaine enregistrée — voir route_after_audit. Remplace
     # l'ancienne arête inconditionnelle audit → finalize : celle-ci laissait

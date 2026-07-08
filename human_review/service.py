@@ -18,23 +18,28 @@ Trois responsabilités strictement séparées :
      — construisent un événement d'audit minimal (``AuditEvent``, réutilise
      l'interface append-only existante de ``schemas.results``) pour toute
      décision humaine validée, quelle que soit l'action (APPROVE/MODIFY/
-     REJECT/RETRY). Prépare l'intégration complète avec l'étape 14 (audit
-     persistant) sans l'implémenter : ces fonctions construisent
-     l'événement, elles ne l'ajoutent jamais elles-mêmes à
-     ``state["audit_trail"]`` (à l'appelant de le faire, comme pour
-     ``Orchestrator.execute_agent()``).
+     REJECT/RETRY). Si un ``AuditStore`` et un normalizer Audit Agent sont
+     injectés, la décision est aussi normalisée par LLM puis persistée en
+     append-only ; sinon le comportement historique reste inchangé et
+     l'appelant peut ajouter l'événement léger à ``state["audit_trail"]``.
 """
 from __future__ import annotations
 
+import logging
 import uuid
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from pydantic import Field, ValidationError
 
 from human_review.models import HumanDecision, ReviewAction
 from schemas.domain import StrictModel
 from schemas.results import AuditEvent, StructuredError
+from services.audit_store import AuditStore, AuditStoreError
 from state.claim_state import ClaimState
+
+logger = logging.getLogger(__name__)
+
+AuditEventNormalizer = Callable[[Mapping[str, Any]], Any]
 
 # ── Préparation du payload humain ────────────────────────────────────────────
 
@@ -200,7 +205,7 @@ def build_human_decision_audit_event(
 ) -> AuditEvent:
     """Construit un événement d'audit minimal pour une décision humaine.
 
-    Trace exactement cinq éléments, tous déjà validés ou déjà calculés en
+    Trace des éléments minimaux, tous déjà validés ou déjà calculés en
     amont — jamais un nouveau contenu inventé ou recalculé ici :
       - ``action`` (``decision.action``, une des 4 valeurs de ``ReviewAction``) ;
       - ``justification`` (commentaire humain, tronqué à
@@ -227,14 +232,88 @@ def build_human_decision_audit_event(
         timestamp=decision.decided_at,
         details={
             "justification": decision.justification[:_MAX_AUDITED_JUSTIFICATION_LENGTH],
+            "result": decision.action.value,
             "target_node": decision.target_node or "",
             "evidence_ids": ",".join(evidence_ids),
+            "simulated_actor": decision.actor,
         },
     )
 
 
+def _human_audit_normalization_payload(event: AuditEvent) -> dict[str, Any]:
+    """Payload minimal donne au normalizer Audit Agent pour HITL.
+
+    Il contient uniquement la decision validee, la justification tronquee,
+    l'auteur, l'horodatage et les identifiants de preuve. Aucun document brut,
+    OCR complet, prompt complet ou resultat agent brut n'est lu ici.
+    """
+    return {
+        "case_id": event.case_id,
+        "actor": event.actor,
+        "action": "human_decision",
+        "outcome": event.outcome,
+        "result": event.details.get("result", event.outcome),
+        "timestamp": event.timestamp.isoformat(),
+        "details": dict(event.details),
+        "candidate_event_type": "human_decision",
+    }
+
+
+def _persist_human_decision_audit_event(
+    event: AuditEvent,
+    *,
+    audit_store: AuditStore | None,
+    audit_normalizer: AuditEventNormalizer | None,
+) -> None:
+    """Normalise via Audit Agent puis persiste dans AuditStore si injectes."""
+    if audit_store is None or audit_normalizer is None:
+        return
+
+    payload = _human_audit_normalization_payload(event)
+    try:
+        normalized = audit_normalizer(payload)
+        if normalized is None:
+            logger.warning(
+                "Audit HITL non persisté pour %s/%s : normalisation LLM absente.",
+                event.case_id,
+                event.outcome,
+            )
+            return
+        audit_store.record_event(
+            case_id=event.case_id,
+            event_type=normalized.event_type,
+            actor=normalized.actor,
+            outcome=normalized.outcome,
+            redaction_status=normalized.redaction_status,
+            agent_name=normalized.agent_name,
+            model_name=None,
+            prompt_version=None,
+            tool_calls=normalized.tool_calls,
+            evidence_ids=normalized.evidence_ids,
+        )
+    except AuditStoreError as exc:
+        logger.warning(
+            "Audit HITL append-only refusé pour %s/%s : %s",
+            event.case_id,
+            event.outcome,
+            exc.structured.message,
+        )
+    except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer la décision validée.
+        logger.warning(
+            "Audit HITL non persisté pour %s/%s : %s: %s",
+            event.case_id,
+            event.outcome,
+            type(exc).__name__,
+            exc,
+        )
+
+
 def validate_and_audit_human_decision(
-    raw: Mapping[str, Any], *, evidence_ids: Sequence[str] = ()
+    raw: Mapping[str, Any],
+    *,
+    evidence_ids: Sequence[str] = (),
+    audit_store: AuditStore | None = None,
+    audit_normalizer: AuditEventNormalizer | None = None,
 ) -> tuple[HumanDecision, AuditEvent]:
     """Valide une décision humaine brute et construit son événement d'audit.
 
@@ -248,6 +327,11 @@ def validate_and_audit_human_decision(
     """
     decision = validate_human_decision(raw)
     event = build_human_decision_audit_event(decision, evidence_ids=evidence_ids)
+    _persist_human_decision_audit_event(
+        event,
+        audit_store=audit_store,
+        audit_normalizer=audit_normalizer,
+    )
     return decision, event
 
 

@@ -48,6 +48,7 @@ structlog>=24.4.0
 
 # ── Persistance — ORM & migrations (Étape 14) ────────────────────────────────
 sqlalchemy>=2.0
+greenlet>=3.1.0
 aiosqlite>=0.20.0
 asyncpg>=0.30.0
 alembic>=1.14.0

@@ -298,6 +298,47 @@ class TestNoAutomaticFinalDecisionInSchema:
         assert result.status is VerificationStatus.NEEDS_REVIEW
         assert result.human_review_required is True
 
+    def test_auto_decision_never_bypasses_the_lock(self):
+        """P1-4 : même avec ``auto_decision="AUTO_APPROVED_LOW_RISK"``
+        (mécanisme additif), le verrou reste inconditionnel."""
+        result = CaseReviewerResult(
+            case_id="CLM-0001",
+            llm_trace=_llm_trace(),
+            result_payload=_payload(
+                recommendation=Recommendation.APPROVE,
+                auto_decision="AUTO_APPROVED_LOW_RISK",
+                auto_decision_criteria=["Critère de test."],
+            ),
+        )
+        assert result.status is VerificationStatus.NEEDS_REVIEW
+        assert result.human_review_required is True
+
+
+# ── P1-4 — auto_decision (mécanisme additif, non verrouillé) ────────────────
+
+
+class TestAutoDecisionField:
+    def test_defaults_to_none(self):
+        payload = _payload()
+        assert payload.auto_decision is None
+        assert payload.auto_decision_criteria == []
+
+    def test_accepts_the_only_allowed_value(self):
+        payload = _payload(
+            recommendation=Recommendation.APPROVE,
+            auto_decision="AUTO_APPROVED_LOW_RISK",
+        )
+        assert payload.auto_decision == "AUTO_APPROVED_LOW_RISK"
+
+    def test_rejects_any_other_value(self):
+        with pytest.raises(ValidationError):
+            _payload(recommendation=Recommendation.APPROVE, auto_decision="SOMETHING_ELSE")
+
+    def test_auto_decision_criteria_rejects_raw_document_dump(self):
+        raw_dump = "\n\n".join(f"ligne {i}" for i in range(10))
+        with pytest.raises(ValidationError):
+            _payload(auto_decision_criteria=[raw_dump])
+
 
 def test_case_reviewer_result_round_trips_with_nested_models():
     """Round-trip requis par l'orchestrateur (revalidation d'un dict déjà

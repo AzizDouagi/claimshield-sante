@@ -1,9 +1,15 @@
 """Politiques d'autorisation — orchestrator/policies.py.
 
 Politiques pures et testables : aucune E/S, aucun état mutable partagé,
-aucun appel LLM. Trois allowlists indexées par agent (``AgentName``) —
-agents, modèles, outils — chacune évaluée par une fonction pure qui
-retourne une ``PolicyDecision`` (``ALLOW``/``DENY`` + motif structuré).
+aucun appel LLM. Deux allowlists indexées par agent (``AgentName``) —
+modèles, outils — chacune évaluée par une fonction pure qui retourne une
+``PolicyDecision`` (``ALLOW``/``DENY`` + motif structuré). L'identité d'agent
+elle-même n'a pas de contrôle dédié ici : ``Orchestrator.execute_agent``
+(``orchestrator/executor.py``) ne peut être invoqué qu'avec un ``AgentName``
+réellement présent dans son ``agent_registry`` — un troisième contrôle
+« agent autorisé » serait structurellement redondant avec ce typage (voir
+l'historique : ``evaluate_agent_authorization`` existait avant ce
+constat et n'était jamais appelé en production).
 
 ``build_authorized_tools`` et ``get_authorized_tool`` transforment
 l'allowlist d'outils en contrôle d'accès exécutable : seuls les outils
@@ -78,34 +84,6 @@ class PolicyDecision(StrictModel):
     @property
     def allowed(self) -> bool:
         return self.effect is PolicyEffect.ALLOW
-
-
-# ── Allowlist des agents ──────────────────────────────────────────────────────
-# AgentName (orchestrator.orchestrator) est la seule source de vérité pour
-# l'identité des agents — aucune liste concurrente ici.
-
-
-def evaluate_agent_authorization(agent_name: str) -> PolicyDecision:
-    """ALLOW si ``agent_name`` correspond à un ``AgentName`` connu, DENY sinon."""
-    try:
-        resolved = AgentName(agent_name)
-    except ValueError:
-        return PolicyDecision(
-            effect=PolicyEffect.DENY,
-            reason=StructuredError(
-                code="AGENT_UNKNOWN",
-                message=f"Agent inconnu de l'orchestrateur : {agent_name!r}",
-                field="agent_name",
-            ),
-        )
-    return PolicyDecision(
-        effect=PolicyEffect.ALLOW,
-        reason=StructuredError(
-            code="AGENT_KNOWN",
-            message=f"Agent reconnu : {resolved.value!r}",
-            field="agent_name",
-        ),
-    )
 
 
 # ── Allowlist des outils par agent ────────────────────────────────────────────

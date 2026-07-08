@@ -474,6 +474,54 @@ class TestRouteReview:
         assert route_review(state) == FAILURE
 
 
+class TestRouteReviewAutoApproval:
+    """P1-4 — auto-approbation bornée : signal additionnel, jamais un
+    contournement du verrou ``human_review_required`` (toujours True en
+    pratique pour une vraie instance — ces tests le fixent explicitement à
+    True pour prouver que c'est bien ``auto_decision``, pas
+    ``human_review_required``, qui produit le raccourci)."""
+
+    def _state(self, recommendation, *, auto_decision=None, human=True):
+        return {
+            "review_result": SimpleNamespace(
+                result_payload=SimpleNamespace(
+                    recommendation=recommendation, auto_decision=auto_decision
+                ),
+                human_review_required=human,
+            )
+        }
+
+    def test_approve_with_auto_decision_returns_end_even_with_human_required_true(self):
+        state = self._state(Recommendation.APPROVE, auto_decision="AUTO_APPROVED_LOW_RISK", human=True)
+        assert route_review(state) == END
+
+    def test_approve_without_auto_decision_still_requires_review(self):
+        state = self._state(Recommendation.APPROVE, auto_decision=None, human=True)
+        assert route_review(state) == NEEDS_REVIEW
+
+    def test_reject_with_auto_decision_never_short_circuits(self):
+        """``auto_decision`` n'a d'effet que pour APPROVE — jamais pour
+        REJECT, même si un objet source tente de le poser (mock ou bug)."""
+        state = self._state(Recommendation.REJECT, auto_decision="AUTO_APPROVED_LOW_RISK", human=True)
+        assert route_review(state) == NEEDS_REVIEW
+
+    def test_unknown_auto_decision_value_ignored(self):
+        state = self._state(Recommendation.APPROVE, auto_decision="SOMETHING_ELSE", human=True)
+        assert route_review(state) == NEEDS_REVIEW
+
+    def test_missing_auto_decision_attribute_falls_back_to_human_review_required(self):
+        """SimpleNamespace sans l'attribut auto_decision (objets de test
+        legacy) : getattr(..., None) ne doit jamais lever, comportement
+        identique à auto_decision=None explicite."""
+        state = {
+            "review_result": SimpleNamespace(
+                result_payload=SimpleNamespace(recommendation=Recommendation.APPROVE),
+                human_review_required=True,
+            )
+        }
+        assert route_review(state) == NEEDS_REVIEW
+
+
 # ── 11bis. route_human_review — route de relance (« relancer ») ──────────────
 
 

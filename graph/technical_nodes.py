@@ -111,6 +111,33 @@ node_needs_review = _make_technical_node(_TechnicalNodeConfig(
 ))
 """Marque le dossier comme nécessitant une intervention humaine."""
 
+# ── Nœuds de convergence — parallélisation (Phase 2 du plan de remédiation) ──
+#
+# Purs marqueurs de synchronisation, sans alerte ni erreur : leur seul rôle
+# est de servir de point d'arrivée commun à deux branches fanned-out par
+# graph.edges.route_privacy_fan_out / route_coding_fan_out
+# (graph.add_conditional_edges y renvoie une liste de deux noms de nœuds,
+# exécutés dans le même superstep LangGraph). LangGraph n'exécute un nœud de
+# convergence qu'une fois que TOUTES les branches programmées dans le
+# superstep courant ont terminé — router les deux branches directement vers
+# le nœud suivant (sans ce marqueur intermédiaire) risquerait de router sur
+# un state partiel si une branche connaît sa propre route conditionnelle
+# avant que l'autre ait fini. Les fonctions de routage conditionnelles
+# réelles (route_verification_fan_in / route_result_consistency,
+# graph/edges.py) ne s'exécutent qu'après ce marqueur, jamais avant.
+
+node_verification_fan_in = _make_technical_node(_TechnicalNodeConfig(
+    step_name="verification_fan_in",
+))
+"""Convergence après le fan-out document_ocr/fhir_validator — voir
+``graph.edges.route_verification_fan_in`` pour la décision qui suit."""
+
+node_consistency_fan_in = _make_technical_node(_TechnicalNodeConfig(
+    step_name="consistency_fan_in",
+))
+"""Convergence après le fan-out clinical_consistency/fraud_detection — voir
+``graph.edges.route_result_consistency`` pour la décision qui suit."""
+
 # ── Nœud HITL — interruption LangGraph dynamique ─────────────────────────────
 
 ALLOWED_HUMAN_ACTIONS: tuple[str, ...] = tuple(action.value for action in ReviewAction)
@@ -335,4 +362,6 @@ TECHNICAL_NODE_REGISTRY: dict[str, Callable] = {
     "await_human_review": node_await_human_review,
     "failure": node_failure,
     "finalize": node_finalize,
+    "verification_fan_in": node_verification_fan_in,
+    "consistency_fan_in": node_consistency_fan_in,
 }

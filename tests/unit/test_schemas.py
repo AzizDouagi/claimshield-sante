@@ -268,7 +268,7 @@ def test_claim_state_regroupe_les_champs_generaux_en_tete():
 
 
 def test_resultats_agents_acceptent_uniquement_metadata_llm_minimales():
-    """Chaque résultat d'agent peut porter modèle, version de prompt et confiance."""
+    """Chaque résultat d'agent porte modèle, version de prompt et confiance."""
 
     import schemas.results as res
 
@@ -291,18 +291,7 @@ def test_resultats_agents_acceptent_uniquement_metadata_llm_minimales():
         (res.AuditResult, "llm_metadata"),
     ]
     for result_class, trace_field_name in result_classes_with_trace_field:
-        required_trace_classes = {
-            res.ClaimIntakeResult,
-            res.CaseReviewerResult,
-            res.FhirValidatorResult,
-            res.MedicalCodingResult,
-            res.ClinicalConsistencyResult,
-            res.FraudDetectionResult,
-        }
-        expected_annotation = (
-            LlmMetadata if result_class in required_trace_classes else LlmMetadata | None
-        )
-        assert result_class.model_fields[trace_field_name].annotation == expected_annotation
+        assert result_class.model_fields[trace_field_name].annotation == LlmMetadata
 
     gate = res.SecurityGateResult(
         claim_id="CLM-0001",

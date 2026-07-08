@@ -17,7 +17,7 @@ Pipeline :
             résolue, confiance d'extraction faible, doublon exact ou
             quasi-doublon via ``services.duplicate_index``/``tools.statistics``)
             en un score de risque pondéré et un statut PASS/NEEDS_REVIEW/FAIL
-            — jamais le LLM.
+            provisoires — jamais le LLM.
   Phase B — agent ReAct LLM (``create_react_agent``, appel obligatoire à
             chaque exécution) : interprète les doublons détectés, les
             montants atypiques (similarité de montant avec un dossier
@@ -25,13 +25,24 @@ Pipeline :
             seul outil autorisé ``verifier_doublon``
             (``agents/fraud_detection_agent/tools.py``, introspecté par
             ``orchestrator.policies.ALLOWED_TOOLS_PER_AGENT`` — aucun autre
-            outil n'est physiquement joignable). Ne produit qu'une
-            justification explicative : ``LlmFraudDecision`` ne porte aucun
-            champ de statut, de score ni de verdict — garantie structurelle
-            qu'aucune accusation de fraude, aucun blocage définitif et
-            aucune décision sans revue humaine ne peut jamais être introduite
-            par le LLM (``human_review_required`` reste toujours dérivé du
-            seul statut déterministe, jamais du LLM).
+            outil n'est physiquement joignable). Produit une justification
+            explicative et, depuis P1-1, une **autorité réelle mais bornée**
+            sur la pondération : ``LlmFraudDecision.signal_assessments``
+            permet de proposer, pour un signal déjà calculé et déjà attribué
+            à une preuve (jamais un signal inventé), un ajustement
+            DOWNGRADE/NEUTRAL/UPGRADE avec justification obligatoire dès que
+            l'ajustement s'écarte de NEUTRAL — ``agent.py::
+            _apply_signal_assessments`` multiplie alors ``risk_contribution``
+            par un facteur fixe (0.5/1.0/1.5, jamais choisi par le LLM) et
+            ``_determine_status`` recalcule le statut final avec les mêmes
+            seuils fixes. Le LLM ne fixe donc jamais lui-même une valeur
+            numérique de score ni un statut — il ne choisit qu'une catégorie
+            bornée sur un fait déjà établi par la Phase A, jamais un nouveau
+            fait. Garantie structurelle inchangée par ailleurs : aucune
+            accusation de fraude, aucun blocage définitif et aucune décision
+            sans revue humaine ne peut jamais être introduite par le LLM
+            (``human_review_required`` reste toujours dérivé du seul statut
+            recalculé, jamais du LLM directement).
   Phase C — construction de ``FraudDetectionResult`` (validée Pydantic,
             ``extra='forbid'`` à tous les niveaux).
 
@@ -88,7 +99,7 @@ except ModuleNotFoundError:  # pragma: no cover - dépendance optionnelle en tes
         raise RuntimeError("langgraph indisponible")
 
 from agents.fraud_detection_agent.prompt import load_fraud_detection_prompt
-from agents.fraud_detection_agent.schemas import LlmFraudDecision
+from agents.fraud_detection_agent.schemas import LlmFraudDecision, SignalAssessment
 from agents.fraud_detection_agent.tools import _DEFAULT_DUPLICATE_INDEX, verifier_doublon
 from agents.privacy_agent.schemas import FraudView
 
@@ -103,6 +114,15 @@ _LOW_CONFIDENCE_THRESHOLD = 0.5
 
 _EXACT_DUPLICATE_RISK_CONTRIBUTION = 0.5
 _NEAR_DUPLICATE_RISK_CONTRIBUTION = 0.25
+
+# P1-1 : pondération bornée du LLM sur des signaux déjà calculés — jamais un
+# levier d'invention de signal. Constantes Phase A, jamais choisies par le
+# LLM lui-même (il ne propose qu'une catégorie DOWNGRADE/NEUTRAL/UPGRADE).
+_ADJUSTMENT_MULTIPLIER: dict[str, float] = {
+    "DOWNGRADE": 0.5,
+    "NEUTRAL": 1.0,
+    "UPGRADE": 1.5,
+}
 
 
 # ── Interface ──────────────────────────────────────────────────────────────────
@@ -288,6 +308,47 @@ def _determine_status(
     return VerificationStatus.PASS, risk_score
 
 
+def _apply_signal_assessments(
+    signals: list[FraudSignal],
+    assessments: list[SignalAssessment],
+) -> tuple[list[FraudSignal], list[str]]:
+    """P1-1 — applique les ajustements de pondération LLM bornés.
+
+    Pour chaque ``FraudSignal`` déjà calculé par la Phase A, si son
+    ``signal_type`` apparaît dans ``assessments`` (sinon ignoré
+    silencieusement — même garantie anti-hallucination que
+    ``referenced_signal_types``), son ``risk_contribution`` est multiplié
+    par le facteur fixe correspondant (jamais choisi par le LLM lui-même) et
+    plafonné à 1.0. Chaque signal ajusté reste ancré à ses ``evidence``
+    d'origine (jamais mutées, jamais recréées) — seule la pondération
+    numérique change, jamais le fait sous-jacent.
+
+    Retourne la liste des signaux (ajustés ou inchangés, même ordre) et les
+    motifs d'ajustement effectivement appliqués (vide si ``assessments`` est
+    vide ou ne référence que des types NEUTRAL/inconnus).
+    """
+    if not assessments:
+        return signals, []
+
+    assessment_by_type = {a.signal_type: a for a in assessments}
+    adjusted: list[FraudSignal] = []
+    notes: list[str] = []
+    for signal in signals:
+        assessment = assessment_by_type.get(signal.signal_type)
+        if assessment is None or assessment.severity_adjustment == "NEUTRAL":
+            adjusted.append(signal)
+            continue
+        multiplier = _ADJUSTMENT_MULTIPLIER[assessment.severity_adjustment]
+        new_contribution = min(1.0, signal.risk_contribution * multiplier)
+        adjusted.append(signal.model_copy(update={"risk_contribution": new_contribution}))
+        notes.append(
+            f"Pondération du signal {signal.signal_type!r} ajustée par le LLM "
+            f"({assessment.severity_adjustment}, {signal.risk_contribution:.2f} → "
+            f"{new_contribution:.2f}) : {assessment.rationale}"
+        )
+    return adjusted, notes
+
+
 # ── Phase A (suite) : doublons — historique pseudonymisé seulement ──────────
 
 
@@ -457,8 +518,12 @@ def _merge_llm_decision(
     *,
     known_signal_types: set[str],
 ) -> list[str]:
-    """Fusionne la décision LLM dans les motifs — jamais dans le score de
-    risque, le statut ou le besoin de revue, tous déjà figés par la Phase A.
+    """Fusionne la décision LLM dans les motifs narratifs uniquement — ne
+    touche jamais elle-même au score de risque, au statut ou au besoin de
+    revue. L'unique canal d'influence du LLM sur le score
+    (``signal_assessments``) est appliqué séparément, avant cet appel, par
+    ``_apply_signal_assessments``/``_determine_status`` — cette fonction-ci
+    ne fait que fusionner les motifs textuels autour du résultat déjà figé.
 
     Tout signal (``referenced_signal_types``) cité par le LLM mais absent des
     signaux réellement calculés est silencieusement ignoré — jamais une
@@ -562,6 +627,10 @@ def run(
             "status": status.value,
             "risk_score": risk_score,
             "signal_types": sorted(known_signal_types),
+            "signaux_detailles": [
+                {"signal_type": s.signal_type, "risk_contribution": round(s.risk_contribution, 2)}
+                for s in signals
+            ],
             "doublons": {
                 "duplicate_invoice": duplicate_invoice,
                 "has_exact_duplicate": duplicate_signal is not None
@@ -577,14 +646,27 @@ def run(
             "signal_evidence_ids": evidence_ids,
             "instruction": (
                 "Interprète les doublons, les montants atypiques et les signaux "
-                "antifraude déjà calculés. Justification explicative uniquement : tu "
-                "ne peux jamais changer le score de risque ni le statut, jamais "
-                "accuser toi-même de fraude, jamais bloquer définitivement un "
-                "dossier, et jamais décider sans revue humaine. Ne cite que des "
-                "signal_types déjà présents ci-dessus."
+                "antifraude déjà calculés. Tu ne fixes jamais toi-même le score de "
+                "risque ni le statut : ton seul levier est signal_assessments, un "
+                "ajustement borné (DOWNGRADE/NEUTRAL/UPGRADE) sur un signal déjà "
+                "calculé, avec justification obligatoire dès que tu t'écartes de "
+                "NEUTRAL — jamais accuser toi-même de fraude, jamais bloquer "
+                "définitivement un dossier, et jamais décider sans revue humaine. Ne "
+                "cite que des signal_types déjà présents ci-dessus."
             ),
         }
     )
+
+    # P1-1 : ajustement borné de pondération — recalcul déterministe du
+    # statut/score si le LLM a proposé un ajustement sur un signal réel.
+    signals, adjustment_notes = _apply_signal_assessments(
+        signals, llm_decision.signal_assessments if llm_decision is not None else []
+    )
+    if adjustment_notes:
+        status, risk_score = _determine_status(signals, insufficient_evidence=insufficient_evidence)
+        reasons.extend(adjustment_notes)
+        evidence_ids = [evidence.evidence_id for signal in signals for evidence in signal.evidence]
+
     reasons = _merge_llm_decision(llm_decision, reasons, known_signal_types=known_signal_types)
     errors = (
         [

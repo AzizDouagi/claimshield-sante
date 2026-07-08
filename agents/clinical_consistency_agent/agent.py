@@ -13,8 +13,8 @@ Pipeline :
             nombre de codes SNOMED-CT/RxNorm résolus, vérifie la présence
             d'une ordonnance si des médicaments sont facturés, vérifie la
             date de service et la chronologie ordonnance/soin
-            (``tools.date_checks``). Produit les ``ClinicalSignal`` et le
-            statut — jamais le LLM.
+            (``tools.date_checks``). Produit les ``ClinicalSignal`` et un
+            statut provisoire — jamais le LLM.
   Phase B — agent ReAct LLM (``create_react_agent``, appel obligatoire à
             chaque exécution) : analyse la chronologie, l'ordonnance, l'acte,
             la codification et le résumé FHIR minimisé déjà calculés en
@@ -24,11 +24,23 @@ Pipeline :
             aucun autre outil n'est physiquement joignable) et, si
             disponible, la vue médicale minimisée (``MedicalView`` —
             pseudonymisée par ``privacy_agent``, jamais de donnée brute).
-            Ne produit qu'un contexte explicatif : ``LlmClinicalDecision`` ne
-            porte aucun champ de statut, de diagnostic ni de recommandation —
-            garantie structurelle qu'aucune décision médicale, décision
-            finale ou affirmation non prouvée par les signaux Phase A ne peut
-            jamais être introduite par le LLM.
+            Produit un contexte explicatif et, depuis P1-2, une **autorité
+            réelle mais bornée** sur la sévérité : ``LlmClinicalDecision.
+            severity_assessments`` permet de proposer, pour un signal déjà
+            calculé et déjà attribué à une preuve (jamais un signal
+            inventé), un ajustement de sévérité borné à un cran maximum sur
+            le lattice ``SeverityLevel`` (CRITICAL > HIGH > MEDIUM > LOW >
+            INFO), avec justification obligatoire — ``agent.py::
+            _apply_signal_assessments`` applique l'ajustement seulement s'il
+            reste dans la borne, ``_status_from_signals`` recalcule alors le
+            statut final avec la même règle fixe (``any(CRITICAL) → FAIL``
+            sinon ``NEEDS_REVIEW``). Le LLM ne fixe donc jamais lui-même un
+            statut, un diagnostic ni une recommandation — il ne choisit
+            qu'une sévérité bornée sur un fait déjà établi par la Phase A,
+            jamais un nouveau fait. Garantie structurelle inchangée par
+            ailleurs : aucune décision médicale, décision finale ou
+            affirmation non prouvée par les signaux Phase A ne peut jamais
+            être introduite par le LLM.
   Phase C — construction de ``ClinicalConsistencyResult`` (validée Pydantic,
             ``extra='forbid'`` à tous les niveaux).
 
@@ -79,12 +91,22 @@ except ModuleNotFoundError:  # pragma: no cover - dépendance optionnelle en tes
         raise RuntimeError("langgraph indisponible")
 
 from agents.clinical_consistency_agent.prompt import load_clinical_consistency_prompt
-from agents.clinical_consistency_agent.schemas import LlmClinicalDecision
+from agents.clinical_consistency_agent.schemas import ClinicalSignalAssessment, LlmClinicalDecision
 from agents.clinical_consistency_agent.tools import verifier_chronologie
 from agents.privacy_agent.schemas import MedicalView
 
 _STEP_NAME = "clinical_consistency"
 _AGENT_NAME = "clinical_consistency_agent"
+
+# P1-2 : lattice de sévérité — le LLM ne peut jamais proposer un écart de
+# plus d'un cran par rapport à la sévérité déjà calculée par la Phase A.
+_SEVERITY_ORDER: tuple[SeverityLevel, ...] = (
+    SeverityLevel.CRITICAL,
+    SeverityLevel.HIGH,
+    SeverityLevel.MEDIUM,
+    SeverityLevel.LOW,
+    SeverityLevel.INFO,
+)
 
 
 # ── Interface ──────────────────────────────────────────────────────────────────
@@ -315,18 +337,90 @@ def _collect_signals(
         )
     )
 
-    reasons: list[str] = []
-    if not signals:
-        status = VerificationStatus.PASS
-        reasons.append("Aucune incohérence clinique détectée entre les documents et la codification.")
-    elif any(s.severity == SeverityLevel.CRITICAL for s in signals):
-        status = VerificationStatus.FAIL
-        reasons.append("Incohérence clinique critique détectée — voir signaux.")
-    else:
-        status = VerificationStatus.NEEDS_REVIEW
-        reasons.append("Incohérence(s) clinique(s) mineure(s) détectée(s) — revue recommandée.")
+    status, reasons = _status_from_signals(signals)
 
     return signals, inconsistencies, procedure_count, medication_count, prescription_required, status, reasons
+
+
+def _status_from_signals(signals: list[ClinicalSignal]) -> tuple[VerificationStatus, list[str]]:
+    """Dérive le statut global à partir des signaux (sévérités effectives —
+    Phase A seule, ou déjà ajustées par ``_apply_signal_assessments``).
+    Factorisée pour être réutilisée par ``_collect_signals`` (Phase A) et par
+    le recalcul post-ajustement LLM dans ``run()`` (P1-2) — un seul et même
+    calcul de statut, jamais deux implémentations divergentes."""
+    if not signals:
+        return VerificationStatus.PASS, [
+            "Aucune incohérence clinique détectée entre les documents et la codification."
+        ]
+    if any(s.severity == SeverityLevel.CRITICAL for s in signals):
+        return VerificationStatus.FAIL, ["Incohérence clinique critique détectée — voir signaux."]
+    return VerificationStatus.NEEDS_REVIEW, [
+        "Incohérence(s) clinique(s) mineure(s) détectée(s) — revue recommandée."
+    ]
+
+
+def _bounded_severity(current: SeverityLevel, requested: SeverityLevel) -> SeverityLevel | None:
+    """Retourne ``requested`` si son écart avec ``current`` est au plus d'un
+    cran sur le lattice ``SeverityLevel`` (CRITICAL > HIGH > MEDIUM > LOW >
+    INFO), sinon ``None`` — un ajustement hors borne est toujours ignoré,
+    jamais partiellement appliqué."""
+    current_index = _SEVERITY_ORDER.index(current)
+    requested_index = _SEVERITY_ORDER.index(requested)
+    if abs(current_index - requested_index) <= 1:
+        return requested
+    return None
+
+
+def _apply_signal_assessments(
+    signals: list[ClinicalSignal],
+    assessments: list[ClinicalSignalAssessment],
+) -> tuple[list[ClinicalSignal], list[str], bool]:
+    """P1-2 — applique les ajustements de sévérité LLM bornés.
+
+    Pour chaque ``ClinicalSignal`` déjà calculé par la Phase A, si son
+    ``signal_type`` apparaît dans ``assessments`` (sinon ignoré
+    silencieusement — même garantie anti-hallucination que
+    ``referenced_evidence_ids``), sa sévérité n'est remplacée que si l'écart
+    proposé reste borné à un cran (``_bounded_severity``). Chaque signal
+    ajusté reste ancré à ses ``evidence`` d'origine (jamais mutées, jamais
+    recréées) — seule la sévérité change, jamais le fait sous-jacent.
+
+    Retourne la liste des signaux (ajustés ou inchangés, même ordre), les
+    motifs (ajustements appliqués ou explicitement rejetés hors borne) et un
+    booléen indiquant si au moins une sévérité a réellement changé (pour ne
+    déclencher un recalcul de statut que si nécessaire).
+    """
+    if not assessments:
+        return signals, [], False
+
+    assessment_by_type = {a.signal_type: a for a in assessments}
+    adjusted: list[ClinicalSignal] = []
+    notes: list[str] = []
+    changed = False
+    for signal in signals:
+        assessment = assessment_by_type.get(signal.signal_type)
+        if assessment is None:
+            adjusted.append(signal)
+            continue
+        bounded = _bounded_severity(signal.severity, assessment.severity_override)
+        if bounded is None:
+            notes.append(
+                f"Ajustement de sévérité hors borne autorisée pour le signal "
+                f"{signal.signal_type!r} (proposé {assessment.severity_override.value}, "
+                f"actuel {signal.severity.value}, écart maximal autorisé : un cran) — ignoré."
+            )
+            adjusted.append(signal)
+            continue
+        if bounded == signal.severity:
+            adjusted.append(signal)
+            continue
+        adjusted.append(signal.model_copy(update={"severity": bounded}))
+        changed = True
+        notes.append(
+            f"Sévérité du signal {signal.signal_type!r} ajustée par le LLM "
+            f"({signal.severity.value} → {bounded.value}) : {assessment.rationale}"
+        )
+    return adjusted, notes, changed
 
 
 # ── Phase B : LLM ─────────────────────────────────────────────────────────────
@@ -423,8 +517,13 @@ def _merge_llm_decision(
     known_evidence_ids: set[str],
     known_inconsistency_types: set[str],
 ) -> list[str]:
-    """Fusionne la décision LLM dans les motifs — jamais dans le statut, la
-    confiance ou le besoin de revue, tous déjà figés par la Phase A.
+    """Fusionne la décision LLM dans les motifs narratifs uniquement — ne
+    touche jamais elle-même au statut, à la confiance ou au besoin de revue.
+    L'unique canal d'influence du LLM sur le statut
+    (``severity_assessments``) est appliqué séparément, avant cet appel, par
+    ``_apply_signal_assessments``/``_status_from_signals`` — cette
+    fonction-ci ne fait que fusionner les motifs textuels autour du résultat
+    déjà figé.
 
     Toute preuve (``referenced_evidence_ids``) ou incohérence
     (``acknowledged_inconsistencies``) citée par le LLM mais absente des
@@ -546,15 +645,29 @@ def run(
             "inconsistency_types": inconsistency_types,
             "instruction": (
                 "Analyse la chronologie, l'ordonnance, l'acte, la codification et le "
-                "résumé FHIR minimisé fournis. Contexte explicatif uniquement : tu ne "
-                "peux jamais changer le statut déterministe, poser un diagnostic, "
-                "recommander un traitement, prendre une décision finale, inventer un "
-                "document, ni affirmer quoi que ce soit qui ne soit pas déjà appuyé par "
-                "les signaux fournis. Ne cite que des evidence_ids et des "
-                "inconsistency_types déjà présents ci-dessus."
+                "résumé FHIR minimisé fournis. Tu ne fixes jamais toi-même le statut : "
+                "ton seul levier est severity_assessments, un ajustement de sévérité "
+                "borné à un cran maximum (échelle CRITICAL > HIGH > MEDIUM > LOW > INFO) "
+                "sur un signal déjà calculé, avec justification obligatoire. Jamais de "
+                "diagnostic, de traitement recommandé, de décision finale, de document "
+                "inventé, ni d'affirmation qui ne soit pas déjà appuyée par les signaux "
+                "fournis. Ne cite que des evidence_ids, des inconsistency_types et des "
+                "signal_type déjà présents ci-dessus."
             ),
         }
     )
+
+    # P1-2 : ajustement borné de sévérité — recalcul déterministe du statut
+    # si le LLM a proposé un ajustement effectif (dans la borne) sur un
+    # signal réel.
+    signals, adjustment_notes, severity_changed = _apply_signal_assessments(
+        signals, llm_decision.severity_assessments if llm_decision is not None else []
+    )
+    if severity_changed:
+        status, status_reasons = _status_from_signals(signals)
+        reasons.extend(status_reasons)
+    reasons.extend(adjustment_notes)
+
     reasons = _merge_llm_decision(
         llm_decision,
         reasons,

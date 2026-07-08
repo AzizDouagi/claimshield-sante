@@ -21,7 +21,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from agents.fraud_detection_agent import agent
-from agents.fraud_detection_agent.schemas import LlmFraudDecision
+from agents.fraud_detection_agent.schemas import LlmFraudDecision, SignalAssessment
 from agents.privacy_agent.schemas import FraudView
 from schemas.domain import DataClassification, DocumentType, ExtractionStatus, OcrSource, VerificationStatus
 from schemas.results import (
@@ -286,6 +286,172 @@ class TestLlmNeverOverridesRisk:
             result = agent.run("CLM-0001")
         assert "Justification de test." in result.result_payload.reasons
         assert "motif LLM" in result.result_payload.reasons
+
+
+# ── P1-1 — autorité LLM bornée sur la pondération des signaux ──────────────
+
+
+class TestBoundedSignalAssessments:
+    """Le LLM ne peut jamais fixer lui-même score/statut (toujours vrai,
+    voir TestLlmNeverOverridesRisk) mais peut désormais proposer, pour un
+    signal déjà calculé et déjà attribué à une preuve, un ajustement borné
+    (DOWNGRADE/NEUTRAL/UPGRADE) — recalculé déterministiquement, jamais
+    laissé au LLM."""
+
+    def _moderate_risk_identity_coverage(self):
+        return _identity_coverage(
+            identity_status=VerificationStatus.NEEDS_REVIEW,
+            coverage_status=VerificationStatus.FAIL,
+        )
+
+    def test_upgrade_increases_risk_score_and_can_change_status(self):
+        identity_coverage = self._moderate_risk_identity_coverage()
+        with patch.object(agent, "_invoke_llm_fraud", return_value=None):
+            baseline = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+        assert baseline.status is VerificationStatus.NEEDS_REVIEW
+
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            upgraded = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert upgraded.result_payload.risk_score > baseline.result_payload.risk_score
+        assert upgraded.status is VerificationStatus.FAIL
+        assert upgraded.human_review_required is True
+
+    def test_downgrade_decreases_risk_score(self):
+        identity_coverage = self._moderate_risk_identity_coverage()
+        with patch.object(agent, "_invoke_llm_fraud", return_value=None):
+            baseline = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="DOWNGRADE",
+                    rationale="Contexte atténuant identifié.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            downgraded = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert downgraded.result_payload.risk_score < baseline.result_payload.risk_score
+
+    def test_neutral_adjustment_has_no_effect(self):
+        identity_coverage = self._moderate_risk_identity_coverage()
+        with patch.object(agent, "_invoke_llm_fraud", return_value=None):
+            baseline = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(signal_type="COVERAGE_INACTIVE_OR_EXPIRED", severity_adjustment="NEUTRAL")
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            neutral = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert neutral.result_payload.risk_score == baseline.result_payload.risk_score
+        assert neutral.status == baseline.status
+
+    def test_unknown_signal_type_is_silently_ignored(self):
+        """Une référence à un signal_type jamais calculé par la Phase A —
+        garantie anti-hallucination : aucun nouveau signal ne peut être créé
+        via signal_assessments, seule une pondération de signal réel peut
+        changer."""
+        identity_coverage = self._moderate_risk_identity_coverage()
+        with patch.object(agent, "_invoke_llm_fraud", return_value=None):
+            baseline = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COMPLETELY_INVENTED_SIGNAL",
+                    severity_adjustment="UPGRADE",
+                    rationale="Signal jamais calculé par la Phase A.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            result = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert result.result_payload.risk_score == baseline.result_payload.risk_score
+        assert len(result.result_payload.signals) == len(baseline.result_payload.signals)
+        assert not any(
+            s.signal_type == "COMPLETELY_INVENTED_SIGNAL" for s in result.result_payload.signals
+        )
+
+    def test_adjustment_never_creates_a_new_signal(self):
+        identity_coverage = self._moderate_risk_identity_coverage()
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            result = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert len(result.result_payload.signals) == 2  # inchangé : IDENTITY_AMBIGUOUS + COVERAGE_*
+
+    def test_evidence_unchanged_after_adjustment(self):
+        """Seule la pondération numérique change — la preuve attribuée
+        (evidence_id, source, field, valeur) reste strictement identique.
+
+        Compare au sein d'une seule collecte de signaux (``evidence_id`` est
+        auto-généré à chaque appel de ``_collect_signals`` — comparer deux
+        appels séparés de ``agent.run()`` donnerait à tort des evidence_id
+        différents, sans rapport avec l'ajustement testé ici)."""
+        identity_coverage = self._moderate_risk_identity_coverage()
+        signals, _ = agent._collect_signals(identity_coverage, None, None)
+        baseline_signal = next(s for s in signals if s.signal_type == "COVERAGE_INACTIVE_OR_EXPIRED")
+
+        adjusted_signals, notes = agent._apply_signal_assessments(
+            signals,
+            [
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié.",
+                )
+            ],
+        )
+        adjusted_signal = next(
+            s for s in adjusted_signals if s.signal_type == "COVERAGE_INACTIVE_OR_EXPIRED"
+        )
+
+        assert adjusted_signal.evidence == baseline_signal.evidence
+        assert adjusted_signal.risk_contribution != baseline_signal.risk_contribution
+        assert notes  # motif d'ajustement produit
+
+    def test_adjustment_rationale_appears_in_reasons(self):
+        identity_coverage = self._moderate_risk_identity_coverage()
+        decision = LlmFraudDecision(
+            signal_assessments=[
+                SignalAssessment(
+                    signal_type="COVERAGE_INACTIVE_OR_EXPIRED",
+                    severity_adjustment="UPGRADE",
+                    rationale="Contexte aggravant identifié dans les données transmises.",
+                )
+            ]
+        )
+        with patch.object(agent, "_invoke_llm_fraud", return_value=decision):
+            result = agent.run("CLM-0001", identity_coverage_result=identity_coverage)
+
+        assert any(
+            "Contexte aggravant identifié dans les données transmises." in r
+            for r in result.result_payload.reasons
+        )
 
 
 # ── Enveloppe générique — llm_trace, confidence, evidence_ids, revue ───────

@@ -26,8 +26,12 @@ from human_review.service import (
     validate_and_audit_human_decision,
     validate_human_decision,
 )
+from agents.audit_agent.schemas import LlmAuditNormalizedEvent
+from schemas.audit import AuditEventType, RedactionStatus
 from schemas.domain import DocumentType, ExtractionStatus, OcrSource, VerificationStatus
+from schemas.domain import DataClassification
 from schemas.results import AuditEvent, DocumentOcrResult
+from services.audit_store import AuditStore
 
 
 # ── build_human_review_payload ───────────────────────────────────────────────
@@ -254,6 +258,30 @@ def _decision(action: str, *, target_node: str | None = None) -> HumanDecision:
     return HumanDecision(**fields)
 
 
+def _human_audit_normalizer(calls: list[dict]):
+    def _normalize(event: dict) -> LlmAuditNormalizedEvent:
+        calls.append(event)
+        return LlmAuditNormalizedEvent(
+            event_type=AuditEventType.HUMAN_DECISION,
+            actor=str(event["actor"]),
+            outcome=f"human_decision:{event['result']}",
+            summary=f"Decision humaine {event['result']} journalisee.",
+            redaction_status=RedactionStatus.PARTIALLY_REDACTED,
+            classification=DataClassification.CONFIDENTIAL,
+            anomalies=[],
+            redactions=["Aucun document brut ni OCR complet repris."],
+            agent_name="human_review_service",
+            evidence_ids=[
+                value
+                for value in str(event["details"].get("evidence_ids", "")).split(",")
+                if value
+            ],
+            reasons=["Decision humaine validee et auditée."],
+        )
+
+    return _normalize
+
+
 @pytest.mark.parametrize(
     ("action", "target_node"),
     [("APPROVE", None), ("MODIFY", None), ("REJECT", None), ("RETRY", "document_ocr")],
@@ -348,6 +376,53 @@ def test_validate_and_audit_human_decision_raises_before_building_audit_on_inval
         validate_and_audit_human_decision(
             {"case_id": "CLM-0001", "actor": "r1", "action": "RETRY", "justification": "Motif."}
         )
+
+
+def test_validate_and_audit_human_decision_without_justification_does_not_persist_audit():
+    store = AuditStore()
+    normalizer_calls: list[dict] = []
+
+    with pytest.raises(HumanDecisionValidationError):
+        validate_and_audit_human_decision(
+            {"case_id": "CLM-0001", "actor": "reviewer@example.com", "action": "APPROVE"},
+            evidence_ids=["review_result"],
+            audit_store=store,
+            audit_normalizer=_human_audit_normalizer(normalizer_calls),
+        )
+
+    assert normalizer_calls == []
+    assert store.read_by_case_id("CLM-0001") == ()
+
+
+def test_validate_and_audit_human_decision_valid_decision_is_persisted_append_only():
+    store = AuditStore()
+    normalizer_calls: list[dict] = []
+
+    decision, event = validate_and_audit_human_decision(
+        {
+            "case_id": "CLM-0001",
+            "actor": "reviewer@example.com",
+            "action": "APPROVE",
+            "justification": "Dossier conforme après revue.",
+        },
+        evidence_ids=["review_result", "case_reviewer_result"],
+        audit_store=store,
+        audit_normalizer=_human_audit_normalizer(normalizer_calls),
+    )
+
+    persisted = store.read_by_case_id("CLM-0001")
+    assert decision.action is ReviewAction.APPROVE
+    assert event.details["result"] == "APPROVE"
+    assert event.details["simulated_actor"] == "reviewer@example.com"
+    assert len(normalizer_calls) == 1
+    assert normalizer_calls[0]["details"]["justification"] == "Dossier conforme après revue."
+    assert "full_text" not in str(normalizer_calls[0])
+    assert len(persisted) == 1
+    assert persisted[0].event_type is AuditEventType.HUMAN_DECISION
+    assert persisted[0].actor == "reviewer@example.com"
+    assert persisted[0].outcome == "human_decision:APPROVE"
+    assert persisted[0].evidence_ids == ["review_result", "case_reviewer_result"]
+    assert store.verify_claim_integrity("CLM-0001").intact is True
 
 
 def test_audit_event_never_leaks_full_ocr_text_or_secret():

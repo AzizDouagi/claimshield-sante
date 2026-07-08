@@ -51,6 +51,7 @@ def mock_llm(request):
 @pytest.fixture(autouse=True)
 def deterministic_agent_llm(monkeypatch) -> None:
     """Donne aux tests hérités une réponse LLM stable et alignée sur la Phase A."""
+    from agents.audit_agent.schemas import LlmAuditNormalizedEvent
     from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
     from agents.claim_intake_agent.schemas import LlmIntakeDecision
     from agents.clinical_consistency_agent.schemas import LlmClinicalDecision
@@ -61,7 +62,8 @@ def deterministic_agent_llm(monkeypatch) -> None:
     from agents.medical_coding_agent.schemas import LlmCodingDecision
     from agents.privacy_agent.schemas import LlmPrivacyDecision
     from agents.security_gate_agent.schemas import LlmSecurityDecision
-    from schemas.domain import Recommendation
+    from schemas.audit import AuditEventType, RedactionStatus
+    from schemas.domain import DataClassification, Recommendation
 
     def intake_decision(**kwargs):
         status = str(kwargs["global_status"]).upper()
@@ -142,6 +144,29 @@ def deterministic_agent_llm(monkeypatch) -> None:
             human_review_reasons=["Validation humaine obligatoire en test."],
         )
 
+    def audit_decision(event):
+        event_type_value = (
+            event.get("event_type") or event.get("candidate_event_type") or "agent_called"
+        )
+        try:
+            event_type = AuditEventType(event_type_value)
+        except ValueError:
+            event_type = AuditEventType.AGENT_CALLED
+        actor = str(
+            event.get("affected_agent")
+            or event.get("actor")
+            or event.get("agent_name")
+            or "system"
+        )
+        return LlmAuditNormalizedEvent(
+            event_type=event_type,
+            actor=actor,
+            outcome=str(event.get("outcome") or "OK"),
+            summary="Résumé d'audit de test aligné sur l'événement structuré.",
+            redaction_status=RedactionStatus.FULLY_REDACTED,
+            classification=DataClassification.SYNTHETIC_TEST_DATA,
+        )
+
     monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", intake_decision)
     monkeypatch.setattr("agents.security_gate_agent.agent._invoke_llm_security", security_decision)
     monkeypatch.setattr("agents.fhir_validator_agent.agent._invoke_llm_fhir", fhir_decision)
@@ -155,4 +180,5 @@ def deterministic_agent_llm(monkeypatch) -> None:
     monkeypatch.setattr("agents.clinical_consistency_agent.agent._invoke_llm_clinical", clinical_decision)
     monkeypatch.setattr("agents.fraud_detection_agent.agent._invoke_llm_fraud", fraud_decision)
     monkeypatch.setattr("agents.case_reviewer_agent.agent._invoke_llm_case_review", case_review_decision)
+    monkeypatch.setattr("agents.audit_agent.agent._invoke_llm_audit", audit_decision)
     yield

@@ -37,6 +37,7 @@ from agents.clinical_consistency_agent.schemas import (
     ClinicalInconsistency,
     ClinicalResultPayload,
     ClinicalSignal,
+    ClinicalSignalAssessment,
     LlmClinicalDecision,
 )
 from schemas.domain import SeverityLevel, VerificationStatus
@@ -601,3 +602,76 @@ def test_llm_decision_has_no_treatment_or_document_field():
     recommandation de traitement ou un document inventé."""
     forbidden_fields = {"treatment", "recommended_treatment", "document", "documents", "diagnosis"}
     assert forbidden_fields.isdisjoint(LlmClinicalDecision.model_fields.keys())
+
+
+class TestClinicalSignalAssessment:
+    """P1-2 — validation pure du schéma d'ajustement borné de sévérité."""
+
+    def test_rationale_always_required(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(signal_type="X", severity_override=SeverityLevel.HIGH)
+
+    def test_whitespace_only_rationale_rejected(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(
+                signal_type="X", severity_override=SeverityLevel.HIGH, rationale="   "
+            )
+
+    def test_valid_assessment(self):
+        assessment = ClinicalSignalAssessment(
+            signal_type="MISSING_PRESCRIPTION_REFERENCE",
+            severity_override=SeverityLevel.HIGH,
+            rationale="Contexte atténuant documenté.",
+        )
+        assert assessment.severity_override == SeverityLevel.HIGH
+
+    def test_signal_type_required(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(severity_override=SeverityLevel.HIGH, rationale="motif")
+
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(
+                signal_type="X",
+                severity_override=SeverityLevel.HIGH,
+                rationale="motif",
+                champ_invente="valeur",
+            )
+
+    def test_rejects_secret_in_rationale(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(
+                signal_type="X", severity_override=SeverityLevel.HIGH, rationale="api_key=sk-12345"
+            )
+
+    def test_rejects_absolute_path_in_rationale(self):
+        with pytest.raises(ValidationError):
+            ClinicalSignalAssessment(
+                signal_type="X", severity_override=SeverityLevel.HIGH, rationale="/etc/passwd"
+            )
+
+    def test_llm_clinical_decision_accepts_severity_assessments(self):
+        decision = LlmClinicalDecision(
+            severity_assessments=[
+                ClinicalSignalAssessment(
+                    signal_type="MISSING_PRESCRIPTION_REFERENCE",
+                    severity_override=SeverityLevel.HIGH,
+                    rationale="Contexte atténuant documenté.",
+                )
+            ]
+        )
+        assert len(decision.severity_assessments) == 1
+
+    def test_llm_clinical_decision_default_severity_assessments_is_empty(self):
+        decision = LlmClinicalDecision()
+        assert decision.severity_assessments == []
+
+    def test_round_trip_json(self):
+        assessment = ClinicalSignalAssessment(
+            signal_type="MISSING_PRESCRIPTION_REFERENCE",
+            severity_override=SeverityLevel.HIGH,
+            rationale="Contexte atténuant documenté.",
+        )
+        dumped = assessment.model_dump(mode="json")
+        rebuilt = ClinicalSignalAssessment.model_validate(dumped)
+        assert rebuilt == assessment

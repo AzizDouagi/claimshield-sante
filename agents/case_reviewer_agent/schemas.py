@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from schemas.domain import Recommendation, StrictModel
 from schemas.results import CaseReviewerResult, DisagreementPoint
@@ -123,6 +123,17 @@ class LlmCaseReviewDecision(StrictModel):
     ``agent.py::_merge_llm_decision``). Aucun champ ici n'a d'autorité sur
     ``status``/``human_review_required``, verrouillés dans
     ``CaseReviewerResult``.
+
+    ``confidence``/``escalation_required``/``escalation_reasons`` (P1-4)
+    alimentent — en complément de critères Phase A tout aussi nécessaires —
+    l'éligibilité à l'auto-approbation bornée
+    (``CaseReviewerResultPayload.auto_decision``, calculée par
+    ``agent.py::run()``, jamais par ce schéma lui-même) : ``confidence``
+    doit atteindre ``Settings.claimshield_auto_approve_confidence_threshold``,
+    et ``escalation_required`` doit être ``False``. Ces trois champs
+    n'écrasent jamais ``status``/``human_review_required`` — l'auto-décision
+    reste un signal additionnel non verrouillé, jamais une réouverture du
+    verrou de schéma.
     """
 
     recommendation: Recommendation
@@ -132,6 +143,9 @@ class LlmCaseReviewDecision(StrictModel):
     acknowledged_risks: list[str] = Field(default_factory=list, max_length=20)
     acknowledged_disagreements: list[str] = Field(default_factory=list, max_length=20)
     human_review_reasons: list[str] = Field(default_factory=list, max_length=10)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    escalation_required: bool = False
+    escalation_reasons: list[str] = Field(default_factory=list, max_length=10)
 
     @field_validator("summary")
     @classmethod
@@ -139,7 +153,7 @@ class LlmCaseReviewDecision(StrictModel):
         v = _reject_llm_leak(v, "summary")
         return _reject_prohibited_assertions(v, "summary")
 
-    @field_validator("reasons", "human_review_reasons", "acknowledged_risks")
+    @field_validator("reasons", "human_review_reasons", "acknowledged_risks", "escalation_reasons")
     @classmethod
     def no_sensitive_reasons(cls, v: list[str], info) -> list[str]:
         checked = [_reject_llm_leak(str(item), info.field_name) for item in v]
@@ -149,6 +163,15 @@ class LlmCaseReviewDecision(StrictModel):
     @classmethod
     def no_sensitive_ids(cls, v: list[str], info) -> list[str]:
         return [_reject_llm_leak(str(item), info.field_name) for item in v]
+
+    @model_validator(mode="after")
+    def escalation_reasons_required_if_escalating(self) -> "LlmCaseReviewDecision":
+        if self.escalation_required and not self.escalation_reasons:
+            raise ValueError(
+                "escalation_reasons obligatoire dès que escalation_required est True "
+                "— une escalade sans motif n'est jamais acceptée."
+            )
+        return self
 
 
 __all__ = [

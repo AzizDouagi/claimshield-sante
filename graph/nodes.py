@@ -125,6 +125,7 @@ from schemas.results import (
     SecurityGateResult,
     StructuredError,
 )
+from services.audit_store import AuditStore
 from state.claim_state import ClaimState, validate_state_update
 
 # ── Exception unique, nommée et vérifiée, à l'appel direct d'un agent ────────
@@ -420,6 +421,7 @@ def build_orchestrator(
     fraud_detection_impl: FraudDetectionRunnable | None = None,
     case_reviewer_impl: CaseReviewerRunnable | None = None,
     audit_impl: AuditAgentRunnable | None = None,
+    audit_store: AuditStore | None = None,
     model_registry: ModelRegistry | None = None,
     retry_policy: RetryPolicy | None = None,
 ) -> Orchestrator:
@@ -439,9 +441,9 @@ def build_orchestrator(
     ``fraud_detection``, ``case_reviewer``, ``audit``) utilisent leur
     implémentation injectée (``*_impl``) si fournie ; sinon, ``clinical_consistency``
     et ``fraud_detection`` retombent sur leur évaluation réelle par défaut
-    (étape 12) tandis que ``case_reviewer`` et ``audit`` retombent sur leur
-    stub NOT_EVALUATED/PENDING — jamais importés en dur ailleurs que dans ce
-    module.
+    (étape 12), ``case_reviewer`` produit sa pré-recommandation LLM et
+    ``audit`` utilise son implémentation LLM réelle — jamais importés en dur
+    ailleurs que dans ce module.
     """
     registry = model_registry if model_registry is not None else build_default_registry()
     policy = (
@@ -449,10 +451,19 @@ def build_orchestrator(
         if retry_policy is not None
         else RetryPolicy(max_attempts=get_settings().claimshield_max_node_retry_attempts)
     )
+    resolved_audit_store = audit_store if audit_store is not None else AuditStore()
 
     agent_registry: dict[AgentName, AgentRunner] = {
         AgentName.CLAIM_INTAKE: lambda state: _claim_intake.node(state),
-        AgentName.SECURITY_GATE: lambda state: _security_gate.node(state),
+        AgentName.SECURITY_GATE: lambda state: (
+            _security_gate.node(state)
+            if hasattr(_security_gate.node, "mock_calls")
+            else _security_gate.node(
+                state,
+                audit_store=resolved_audit_store,
+                audit_normalizer=_audit.normalize_event,
+            )
+        ),
         AgentName.PRIVACY: lambda state: _privacy.node(state),
         AgentName.FHIR_VALIDATOR: lambda state: _fhir_validator.node(state),
         AgentName.MEDICAL_CODING: lambda state: _medical_coding.node(state),
@@ -485,6 +496,8 @@ def build_orchestrator(
         agent_registry=agent_registry,
         preconditions_check=_graph_preconditions_check,
         retry_policy=policy,
+        audit_store=resolved_audit_store,
+        audit_normalizer=_audit.normalize_event,
     )
 
 

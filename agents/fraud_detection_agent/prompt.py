@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "1.2.0"
 _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "fraud_detection_agent.yaml"
 
 

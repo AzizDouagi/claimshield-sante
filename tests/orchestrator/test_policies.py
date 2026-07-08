@@ -28,7 +28,6 @@ from orchestrator.policies import (
     PolicyEffect,
     ToolAccessError,
     build_authorized_tools,
-    evaluate_agent_authorization,
     evaluate_model_authorization,
     evaluate_tool_authorization,
     get_authorized_tool,
@@ -36,23 +35,29 @@ from orchestrator.policies import (
 
 
 # ── 1. PolicyDecision — forme générale ────────────────────────────────────────
+#
+# evaluate_tool_authorization sert d'exemple représentatif ici (pas
+# evaluate_agent_authorization, supprimé — code mort jamais appelé par
+# Orchestrator.execute_agent, voir orchestrator/policies.py). L'identité
+# d'agent est garantie par le typage de AgentCallRequest.agent_name et par
+# l'appartenance à agent_registry, pas par une politique dédiée.
 
 
 class TestPolicyDecisionShape:
     def test_allowed_property_true_on_allow(self):
-        decision = evaluate_agent_authorization("security_gate")
+        decision = evaluate_tool_authorization(AgentName.MEDICAL_CODING, "rechercher_code")
         assert decision.effect is PolicyEffect.ALLOW
         assert decision.allowed is True
 
     def test_allowed_property_false_on_deny(self):
-        decision = evaluate_agent_authorization("ghost_agent")
+        decision = evaluate_tool_authorization(AgentName.MEDICAL_CODING, "ghost_tool")
         assert decision.effect is PolicyEffect.DENY
         assert decision.allowed is False
 
     def test_decision_always_carries_a_reason(self):
         for decision in (
-            evaluate_agent_authorization("security_gate"),
-            evaluate_agent_authorization("ghost_agent"),
+            evaluate_tool_authorization(AgentName.MEDICAL_CODING, "rechercher_code"),
+            evaluate_tool_authorization(AgentName.MEDICAL_CODING, "ghost_tool"),
         ):
             assert isinstance(decision, PolicyDecision)
             assert decision.reason.code
@@ -60,34 +65,6 @@ class TestPolicyDecisionShape:
 
     def test_effect_only_allow_or_deny(self):
         assert {e.value for e in PolicyEffect} == {"ALLOW", "DENY"}
-
-
-# ── 2. Autorisation d'agent ────────────────────────────────────────────────────
-
-
-class TestAgentAuthorization:
-    @pytest.mark.parametrize("agent_name", [a.value for a in AgentName])
-    def test_every_known_agent_name_is_allowed(self, agent_name):
-        decision = evaluate_agent_authorization(agent_name)
-        assert decision.effect is PolicyEffect.ALLOW
-        assert decision.reason.code == "AGENT_KNOWN"
-
-    def test_unknown_agent_name_is_denied(self):
-        decision = evaluate_agent_authorization("hacker_agent")
-        assert decision.effect is PolicyEffect.DENY
-        assert decision.reason.code == "AGENT_UNKNOWN"
-
-    def test_empty_agent_name_is_denied(self):
-        decision = evaluate_agent_authorization("")
-        assert decision.effect is PolicyEffect.DENY
-
-    def test_case_sensitive_agent_name_is_denied(self):
-        decision = evaluate_agent_authorization("SECURITY_GATE")
-        assert decision.effect is PolicyEffect.DENY
-
-    def test_denied_reason_mentions_the_offending_name(self):
-        decision = evaluate_agent_authorization("totally_made_up")
-        assert "totally_made_up" in decision.reason.message
 
 
 # ── 3. Allowlist des outils — complétude ──────────────────────────────────────

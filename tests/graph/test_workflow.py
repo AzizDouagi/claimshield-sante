@@ -60,6 +60,17 @@ class _StubResult:
     decision: Any = None
     status: Any = None
 
+
+@dataclass
+class _StubSubStatus:
+    status: Any = None
+
+
+@dataclass
+class _StubIdentityCoverageResult:
+    identity: Any = None
+    coverage: Any = None
+
 # ── Constantes attendues ──────────────────────────────────────────────────────
 
 _AGENT_NODES = {
@@ -69,20 +80,31 @@ _AGENT_NODES = {
 }
 _TECHNICAL_NODES = {
     "quarantine", "needs_review", "await_human_review", "failure", "finalize",
+    "verification_fan_in", "consistency_fan_in",
 }
 _ALL_NODES = _AGENT_NODES | _TECHNICAL_NODES | {"__start__"}
 
 # Nœuds ayant des arêtes conditionnelles (jamais d'arête normale en plus).
+# P2-1 : document_ocr/fhir_validator et clinical_consistency/fraud_detection
+# routent désormais inconditionnellement vers leur nœud de convergence — la
+# décision conditionnelle est prise après convergence
+# (verification_fan_in/consistency_fan_in), jamais par les agents eux-mêmes.
 _CONDITIONAL_SOURCES = {
     "claim_intake", "security_gate", "privacy",
-    "document_ocr", "fhir_validator", "identity_coverage", "medical_coding",
+    "verification_fan_in", "identity_coverage", "medical_coding",
     "case_reviewer", "await_human_review", "audit",
 }
 # Arêtes normales attendues (source, destination).
+# consistency_fan_in → case_reviewer reste inconditionnelle (contrairement à
+# verification_fan_in) : voir graph/workflow.py pour la justification —
+# case_reviewer doit rester l'unique synthétiseur des signaux critiques.
 _EXPECTED_UNCONDITIONAL = {
     ("__start__", "claim_intake"),
-    ("clinical_consistency", "fraud_detection"),
-    ("fraud_detection", "case_reviewer"),
+    ("document_ocr", "verification_fan_in"),
+    ("fhir_validator", "verification_fan_in"),
+    ("clinical_consistency", "consistency_fan_in"),
+    ("fraud_detection", "consistency_fan_in"),
+    ("consistency_fan_in", "case_reviewer"),
     ("finalize", "__end__"),
     ("quarantine", "__end__"),
     ("needs_review", "await_human_review"),
@@ -182,13 +204,42 @@ class TestWorkflowTopology:
         app = self._app()
         assert ("__start__", "claim_intake") in app.builder.edges
 
-    def test_clinical_consistency_to_fraud_unconditional(self):
+    def test_clinical_consistency_to_consistency_fan_in_unconditional(self):
+        """P2-1 : clinical_consistency route inconditionnellement vers le
+        nœud de convergence (jamais directement vers case_reviewer) —
+        fraud_detection converge au même endroit, la décision conditionnelle
+        n'est prise qu'après que les deux branches ont terminé."""
         app = self._app()
-        assert ("clinical_consistency", "fraud_detection") in app.builder.edges
+        assert ("clinical_consistency", "consistency_fan_in") in app.builder.edges
 
-    def test_fraud_to_case_reviewer_unconditional(self):
+    def test_fraud_to_consistency_fan_in_unconditional(self):
         app = self._app()
-        assert ("fraud_detection", "case_reviewer") in app.builder.edges
+        assert ("fraud_detection", "consistency_fan_in") in app.builder.edges
+
+    def test_consistency_fan_in_has_no_conditional_edges(self):
+        """Contrairement à verification_fan_in, consistency_fan_in ne décide
+        pas — il route toujours inconditionnellement vers case_reviewer,
+        seul synthétiseur des signaux critiques et désaccords inter-agents
+        (voir graph/workflow.py pour la justification)."""
+        app = self._app()
+        assert "consistency_fan_in" not in app.builder.branches
+
+    def test_document_ocr_to_verification_fan_in_unconditional(self):
+        """P2-1 : document_ocr route inconditionnellement vers le nœud de
+        convergence (jamais directement vers identity_coverage/needs_review/
+        failure) — fhir_validator converge au même endroit, la décision
+        conditionnelle n'est prise qu'après que les deux branches ont
+        terminé (voir route_verification_fan_in)."""
+        app = self._app()
+        assert ("document_ocr", "verification_fan_in") in app.builder.edges
+
+    def test_fhir_validator_to_verification_fan_in_unconditional(self):
+        app = self._app()
+        assert ("fhir_validator", "verification_fan_in") in app.builder.edges
+
+    def test_verification_fan_in_has_conditional_edges(self):
+        app = self._app()
+        assert "verification_fan_in" in app.builder.branches
 
     def test_audit_has_conditional_edges(self):
         """audit décide finalize (nominal) ou failure (rejet contrôlé) selon
@@ -234,13 +285,17 @@ class TestWorkflowTopology:
         app = self._app()
         assert "privacy" in app.builder.branches
 
-    def test_document_ocr_has_conditional_edges(self):
+    def test_document_ocr_has_no_conditional_edges(self):
+        """P2-1 : document_ocr ne décide plus lui-même de la route — il
+        route toujours inconditionnellement vers verification_fan_in, qui
+        porte seul la décision conditionnelle (voir
+        test_document_ocr_to_verification_fan_in_unconditional)."""
         app = self._app()
-        assert "document_ocr" in app.builder.branches
+        assert "document_ocr" not in app.builder.branches
 
-    def test_fhir_validator_has_conditional_edges(self):
+    def test_fhir_validator_has_no_conditional_edges(self):
         app = self._app()
-        assert "fhir_validator" in app.builder.branches
+        assert "fhir_validator" not in app.builder.branches
 
     def test_identity_coverage_has_conditional_edges(self):
         app = self._app()
@@ -525,17 +580,31 @@ def _make_short_needs_review_agents(monkeypatch) -> None:
             "alerts": ["[document_ocr] confiance limite — revue requise."],
         }
 
+    def mock_fhir_validator(state: dict) -> dict:
+        # P2-1 : fhir_validator s'exécute désormais en parallèle de
+        # document_ocr (fan-out depuis privacy) — doit être mocké lui aussi.
+        # PASS pour que route_verification_fan_in consolide sur le
+        # NEEDS_REVIEW de document_ocr, sans FAIL supplémentaire.
+        return {
+            "fhir_result": _StubResult(status=VerificationStatus.PASS),
+            "fhir_input": None,
+            "current_step": "fhir_validator",
+            "completed_steps": ["fhir_validator"],
+        }
+
     monkeypatch.setattr(wf, "node_claim_intake", mock_claim_intake)
     monkeypatch.setattr(wf, "node_security_gate", mock_security_gate)
     monkeypatch.setattr(wf, "node_privacy", mock_privacy)
     monkeypatch.setattr(wf, "node_document_ocr", mock_document_ocr)
+    monkeypatch.setattr(wf, "node_fhir_validator", mock_fhir_validator)
 
 
 class TestWorkflowHumanReview:
     """Vérifie le nœud await_human_review dans le pipeline complet.
 
-    Chemin : claim_intake → security_gate → privacy → document_ocr
-    (NEEDS_REVIEW) → needs_review → await_human_review.
+    Chemin : claim_intake → security_gate → privacy → {document_ocr
+    (NEEDS_REVIEW), fhir_validator (PASS)} → verification_fan_in →
+    needs_review → await_human_review.
     """
 
     def test_pipeline_interrupts_at_await_human_review(self, monkeypatch):
@@ -608,9 +677,17 @@ class TestWorkflowRelaunchRoute:
     def test_successful_correction_resumes_at_requested_node(self, monkeypatch):
         """RETRY(target_node=document_ocr) relance bien document_ocr
         (2e appel observé) et le pipeline progresse au-delà de needs_review —
-        ici jusqu'à fhir_validator, mocké pour échouer, ce qui prouve que la
-        relance a repris l'exécution normale du graphe plutôt que de rester
-        bloquée sur l'interruption.
+        ici jusqu'à identity_coverage, mocké pour échouer, ce qui prouve que
+        la relance a repris l'exécution normale du graphe plutôt que de
+        rester bloquée sur l'interruption.
+
+        P2-1 : fhir_validator s'exécute désormais en parallèle de
+        document_ocr (fan-out depuis privacy) — il ne peut donc plus être le
+        point d'échec « après relance » (il ne tourne qu'une fois, dans le
+        même superstep que le premier passage de document_ocr, jamais
+        re-déclenché par une relance ciblant document_ocr seul). Le point
+        d'échec après relance est déplacé à identity_coverage, toujours
+        séquentiel après le nœud de convergence verification_fan_in.
         """
         from langgraph.types import Command
 
@@ -659,11 +736,26 @@ class TestWorkflowRelaunchRoute:
             }
 
         def mock_fhir_validator(state: dict) -> dict:
+            # PASS et invariant au nombre d'appels : ne tourne qu'une fois,
+            # dans le même superstep que le premier passage de document_ocr
+            # (fan-out depuis privacy) — jamais re-déclenché par la relance
+            # ciblant document_ocr seul.
             return {
-                "fhir_result": _StubResult(status=VerificationStatus.FAIL),
+                "fhir_result": _StubResult(status=VerificationStatus.PASS),
                 "fhir_input": None,
                 "current_step": "fhir_validator",
                 "completed_steps": ["fhir_validator"],
+            }
+
+        def mock_identity_coverage(state: dict) -> dict:
+            return {
+                "identity_coverage_result": _StubIdentityCoverageResult(
+                    identity=_StubSubStatus(status=VerificationStatus.FAIL),
+                    coverage=_StubSubStatus(status=VerificationStatus.PASS),
+                ),
+                "identity_coverage_input": None,
+                "current_step": "identity_coverage",
+                "completed_steps": ["identity_coverage"],
             }
 
         monkeypatch.setattr(wf, "node_claim_intake", mock_claim_intake)
@@ -671,6 +763,7 @@ class TestWorkflowRelaunchRoute:
         monkeypatch.setattr(wf, "node_privacy", mock_privacy)
         monkeypatch.setattr(wf, "node_document_ocr", mock_document_ocr)
         monkeypatch.setattr(wf, "node_fhir_validator", mock_fhir_validator)
+        monkeypatch.setattr(wf, "node_identity_coverage", mock_identity_coverage)
 
         saver = InMemorySaver()
         app = compile_workflow(saver, interrupt_before=[])
@@ -923,10 +1016,23 @@ class TestWorkflowRelaunchRoute:
                 "alerts": ["[document_ocr] confiance limite — revue requise."],
             }
 
+        def mock_fhir_validator(state: dict) -> dict:
+            # P2-1 : s'exécute en parallèle de document_ocr — PASS pour que
+            # route_verification_fan_in consolide sur le NEEDS_REVIEW de
+            # document_ocr, sans FAIL supplémentaire qui court-circuiterait
+            # vers failure avant même la première interruption.
+            return {
+                "fhir_result": _StubResult(status=VerificationStatus.PASS),
+                "fhir_input": None,
+                "current_step": "fhir_validator",
+                "completed_steps": ["fhir_validator"],
+            }
+
         monkeypatch.setattr(wf, "node_claim_intake", mock_claim_intake)
         monkeypatch.setattr(wf, "node_security_gate", mock_security_gate)
         monkeypatch.setattr(wf, "node_privacy", mock_privacy)
         monkeypatch.setattr(wf, "node_document_ocr", mock_document_ocr)
+        monkeypatch.setattr(wf, "node_fhir_validator", mock_fhir_validator)
 
         saver = InMemorySaver()
         app = compile_workflow(saver, interrupt_before=[], max_correction_attempts=1)
