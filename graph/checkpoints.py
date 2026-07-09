@@ -117,11 +117,20 @@ def get_checkpointer(
         return InMemorySaver()
 
     if backend_name is CheckpointBackend.SQLITE:
+        import sqlite3
+
         from langgraph.checkpoint.sqlite import SqliteSaver
 
+        # Construction directe (pas `SqliteSaver.from_conn_string`, qui est un
+        # context manager fermant la connexion à la sortie du `with` — ici le
+        # checkpointer doit rester ouvert pour toute la durée de vie du
+        # process, exactement comme `InMemorySaver`). `check_same_thread=False`
+        # : même précaution que `from_conn_string` (connexion partagée entre
+        # threads/requêtes, cf. commentaire dans la lib langgraph).
         db_path = Path(resolved_settings.langgraph_checkpoint_db)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        return SqliteSaver.from_conn_string(str(db_path))
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        return SqliteSaver(conn)
 
     if backend_name is CheckpointBackend.POSTGRES:
         postgres_url = resolved_settings.langgraph_checkpoint_postgres_url

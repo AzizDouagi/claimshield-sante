@@ -46,6 +46,44 @@ def _fake_security_gate_runner(state: dict) -> dict:
     }
 
 
+def _audit_batch_normalizer(batch_calls: list[list[dict]], *, results: list | None = None):
+    """Double déterministe d'``audit_batch_normalizer`` : normalise chaque
+    événement du lot avec la même logique que ``_audit_normalizer``, mais en
+    un seul appel pour tout le lot. ``batch_calls`` accumule, à chaque
+    invocation, la liste complète des événements reçus dans CE lot — permet
+    de vérifier qu'un seul appel est fait par nœud (au lieu d'un par
+    événement). ``results`` (optionnel), si fourni, remplace la sortie
+    normalisée réellement retournée — utilisé pour simuler un lot
+    délibérément désaligné (trop court/trop long)."""
+
+    def _normalize_one(event: dict) -> LlmAuditNormalizedEvent:
+        final_status = event["details"].get("final_status") or event["outcome"]
+        outcome = f"{event['action']}:{final_status}"
+        return LlmAuditNormalizedEvent(
+            event_type=AuditEventType(event["candidate_event_type"]),
+            actor=str(event["actor"]),
+            outcome=outcome,
+            summary=f"Evenement orchestrateur normalise (lot) : {event['action']}.",
+            redaction_status=RedactionStatus.FULLY_REDACTED,
+            classification=DataClassification.CONFIDENTIAL,
+            anomalies=[] if final_status in {"", "IN_PROGRESS", "SUCCESS"} else [str(final_status)],
+            redactions=["Payload agent non repris."],
+            agent_name=str(event["actor"]),
+            tool_calls=[name for name in str(event["details"].get("tools") or "").split(",") if name],
+            evidence_ids=[event["action"]],
+            reasons=["Normalisation audit de test (lot)."],
+        )
+
+    def _normalize_batch(events):
+        batch = list(events)
+        batch_calls.append(batch)
+        if results is not None:
+            return results
+        return [_normalize_one(event) for event in batch]
+
+    return _normalize_batch
+
+
 def _audit_normalizer(calls: list[dict]):
     def _normalize(event: dict) -> LlmAuditNormalizedEvent:
         calls.append(event)
@@ -884,3 +922,131 @@ class TestAuditStorePersistence:
         assert any(call["action"] == "retry" for call in normalized_calls)
         assert len(persisted) == len(outcome.audit_events)
         assert store.verify_claim_integrity("CLM-0001").intact is True
+
+
+class TestAuditStoreBatchPersistence:
+    """Normalisation d'audit batchée (option C d'AZIZ) — un seul appel LLM
+    pour tous les événements d'un nœud, au lieu d'un appel par événement.
+    Complète ``TestAuditStorePersistence`` (chemin single-event), qui reste
+    inchangée pour la non-régression."""
+
+    def test_batch_normalizer_is_called_once_for_all_events_of_the_node(self):
+        store = AuditStore()
+        batch_calls: list[list[dict]] = []
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: _fake_security_gate_runner},
+            audit_store=store,
+            audit_batch_normalizer=_audit_batch_normalizer(batch_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        persisted = store.read_by_case_id("CLM-0001")
+        assert outcome.success is True
+        assert len(batch_calls) == 1  # un seul appel, quel que soit le nombre d'événements
+        assert len(batch_calls[0]) == len(outcome.audit_events)
+        assert len(persisted) == len(outcome.audit_events)
+        assert store.verify_claim_integrity("CLM-0001").intact is True
+
+    def test_batch_normalizer_has_priority_over_single_event_normalizer(self):
+        store = AuditStore()
+        batch_calls: list[list[dict]] = []
+        single_calls: list[dict] = []
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: _fake_security_gate_runner},
+            audit_store=store,
+            audit_normalizer=_audit_normalizer(single_calls),
+            audit_batch_normalizer=_audit_batch_normalizer(batch_calls),
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        orchestrator.execute_agent(request, state, model_id="primary")
+
+        assert batch_calls  # le chemin batché a bien été exercé
+        assert single_calls == []  # audit_normalizer n'est jamais appelé quand le batch est fourni
+
+    def test_truncated_batch_response_never_persists_missing_events_but_logs_each_gap(self, caplog):
+        """Correctif demandé par AZIZ : pas de ``zip(events, normalized_list)``
+        direct — une réponse plus courte que le nombre d'événements ne doit
+        jamais tronquer silencieusement la persistance. Chaque événement
+        sans normalisation correspondante doit être individuellement
+        journalisé et jamais persisté ; les événements normalisés en tête de
+        liste restent bien persistés, dans l'ordre."""
+        store = AuditStore()
+        batch_calls: list[list[dict]] = []
+
+        def short_batch_normalizer(events):
+            events_list = list(events)
+            batch_calls.append(events_list)
+            single = _audit_batch_normalizer([])
+            full = single(events_list)
+            # Réponse volontairement tronquée : un seul élément normalisé,
+            # quel que soit le nombre réel d'événements du nœud.
+            return full[:1]
+
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: _fake_security_gate_runner},
+            audit_store=store,
+            audit_batch_normalizer=short_batch_normalizer,
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        with caplog.at_level("WARNING"):
+            outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        total_events = len(outcome.audit_events)
+        assert total_events > 1  # précondition du test : plusieurs événements à ce nœud
+        persisted = store.read_by_case_id("CLM-0001")
+        assert len(persisted) == 1  # seul le premier événement (normalisé) est persisté
+
+        gap_logs = [r for r in caplog.records if "orchestrator_audit_not_persisted" in r.getMessage()]
+        assert len(gap_logs) == total_events - 1  # un log explicite par événement manquant, jamais un trou muet
+
+    def test_batch_normalizer_exception_falls_back_to_no_persistence_with_explicit_log(self, caplog):
+        store = AuditStore()
+
+        def failing_batch_normalizer(events):
+            raise RuntimeError("Ollama indisponible")
+
+        orchestrator = Orchestrator(
+            model_registry=_two_model_registry(),
+            agent_registry={AgentName.SECURITY_GATE: _fake_security_gate_runner},
+            audit_store=store,
+            audit_batch_normalizer=failing_batch_normalizer,
+        )
+        request = _request(AgentName.SECURITY_GATE, "claim_intake", "SecurityGateResult")
+        state = {
+            "case_id": "CLM-0001",
+            "current_step": "claim_intake",
+            "intake_result": object(),
+        }
+
+        with caplog.at_level("WARNING"):
+            outcome = orchestrator.execute_agent(request, state, model_id="primary")
+
+        # L'exécution de l'agent n'est jamais affectée par une panne d'audit.
+        assert outcome.success is True
+        assert len(store.read_by_case_id("CLM-0001")) == 0  # rien persisté, jamais un événement fabriqué
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("orchestrator_audit_batch_normalizer_failed" in m for m in messages)
+        not_persisted_count = sum(1 for m in messages if "orchestrator_audit_not_persisted" in m)
+        assert not_persisted_count == len(outcome.audit_events)

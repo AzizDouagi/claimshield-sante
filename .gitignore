@@ -23,6 +23,7 @@ lib64/
 .env
 .env.*
 !.env.example
+!.env.docker.example
 .venv
 env/
 venv/
@@ -43,6 +44,10 @@ CLAUDE.md
 logs/
 *.log
 .coverage
+
+# Chainlit — config/traductions régénérées automatiquement au premier lancement
+.chainlit/
+.files/
 
 # OS
 .DS_Store
@@ -76,6 +81,7 @@ service-account.json
 storage/incoming/*
 storage/quarantine/*
 storage/temporary/*
+storage/ui_uploads/*
 storage/inbox/
 storage/rejected/
 storage/processed/
@@ -84,6 +90,7 @@ storage/artifacts/
 !storage/incoming/.gitkeep
 !storage/quarantine/.gitkeep
 !storage/temporary/.gitkeep
+!storage/ui_uploads/.gitkeep
 
 # Backups datasets (données runtime, pas de code)
 datasets/fixtures/backups/

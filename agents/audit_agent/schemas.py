@@ -80,4 +80,35 @@ class LlmAuditNormalizedEvent(StrictModel):
         return cleaned
 
 
-__all__ = ["LlmAuditNormalizedEvent"]
+class LlmAuditNormalizedEventItem(StrictModel):
+    """Un élément du lot batché — association explicite index -> normalisation.
+
+    ``index`` doit toujours correspondre à la position de l'événement
+    d'origine dans le tableau envoyé au LLM. Un LLM structuré n'a aucune
+    garantie de préserver l'ordre d'entrée ni de traiter tous les éléments
+    — la réassociation ne se fait donc jamais sur la position dans la
+    réponse, uniquement sur cet index explicite (voir
+    ``agents.audit_agent.agent._invoke_llm_audit_batch``).
+    """
+
+    index: int = Field(..., ge=0)
+    normalized: LlmAuditNormalizedEvent
+
+
+class LlmAuditNormalizedEventBatch(StrictModel):
+    """Sortie structurée du LLM pour un lot d'événements d'audit normalisés.
+
+    ``max_length=25`` : cap défensif — un nœud produit typiquement 3 à 9
+    événements d'audit ; au-delà, la normalisation batchée n'est pas
+    tentée (repli direct sur le mode individuel, voir
+    ``agents.audit_agent.agent._invoke_llm_audit_batch``).
+    """
+
+    events: list[LlmAuditNormalizedEventItem] = Field(..., min_length=1, max_length=25)
+
+
+__all__ = [
+    "LlmAuditNormalizedEvent",
+    "LlmAuditNormalizedEventBatch",
+    "LlmAuditNormalizedEventItem",
+]

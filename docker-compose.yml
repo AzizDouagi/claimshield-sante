@@ -1,0 +1,51 @@
+services:
+  api:
+    build: .
+    image: claimshield-sante:latest
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.docker
+    environment:
+      # Ollama reste sur l'hôte, jamais embarqué dans un conteneur (décision
+      # projet) — host.docker.internal résolu nativement par Docker Desktop
+      # (Mac/Windows), extra_hosts ci-dessous requis sur Linux.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # sqlite (pas memory) : les dossiers en attente de revue humaine
+      # doivent survivre à un redémarrage de conteneur — voir CLAUDE.md.
+      LANGGRAPH_CHECKPOINT_BACKEND: sqlite
+      LANGGRAPH_CHECKPOINT_DB: /app/storage/checkpoints.db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./storage:/app/storage
+      - ./datasets/fixtures:/app/datasets/fixtures:ro
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ui:
+    build: .
+    image: claimshield-sante:latest
+    command: ["chainlit", "run", "ui/app.py", "--host", "0.0.0.0", "--port", "8000", "--headless"]
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env.docker
+    environment:
+      # Réseau interne docker-compose — jamais localhost, jamais l'API hôte.
+      CLAIMSHIELD_API_BASE_URL: http://api:8000
+      CLAIMSHIELD_UI_UPLOAD_DIR: /app/storage/ui_uploads
+    volumes:
+      # Volume IDENTIQUE à celui du service api : un source_path écrit par
+      # l'UI doit se résoudre au même endroit côté conteneur api (voir
+      # ui/uploads.py).
+      - ./storage:/app/storage
+    depends_on:
+      api:
+        condition: service_healthy

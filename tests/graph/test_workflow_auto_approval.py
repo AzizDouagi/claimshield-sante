@@ -18,55 +18,15 @@ l'autouse ``tests.conftest.deterministic_agent_llm``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 import pytest
 
 import graph.workflow as wf
 from graph.workflow import compile_workflow
 from schemas.domain import IntakeStatus, PrivacyDecision, Recommendation, SecurityDecision, VerificationStatus
-from schemas.results import CaseReviewerResult, CaseReviewerResultPayload, LlmMetadata
-
-
-@dataclass
-class _StubResult:
-    decision: Any = None
-    status: Any = None
-
-
-@dataclass
-class _StubSubStatus:
-    status: Any = None
-
-
-@dataclass
-class _StubIdentityCoverageResult:
-    identity: _StubSubStatus
-    coverage: _StubSubStatus
-
-
-class _CaseReviewer:
-    """Faux agent injecté — recommandation APPROVE, ``auto_decision``
-    configurable pour exercer les deux chemins (avec/sans court-circuit)."""
-
-    def __init__(self, *, auto_decision: str | None) -> None:
-        self._auto_decision = auto_decision
-
-    def run(self, state: dict) -> CaseReviewerResult:
-        return CaseReviewerResult(
-            case_id=str(state.get("case_id", "UNKNOWN")),
-            llm_trace=LlmMetadata(model_name="test-llm", prompt_version="test"),
-            result_payload=CaseReviewerResultPayload(
-                recommendation=Recommendation.APPROVE,
-                justification=["Toutes les vérifications ont réussi."],
-                human_review_reasons=["Validation humaine obligatoire avant toute décision finale."],
-                auto_decision=self._auto_decision,
-                auto_decision_criteria=(
-                    ["Critères P1-4 réunis (scénario de test)."] if self._auto_decision else []
-                ),
-            ),
-        )
+from tests.support.stubs import CaseReviewerApproveStub as _CaseReviewer
+from tests.support.stubs import StubIdentityCoverageResult as _StubIdentityCoverageResult
+from tests.support.stubs import StubResult as _StubResult
+from tests.support.stubs import StubSubStatus as _StubSubStatus
 
 
 @pytest.fixture

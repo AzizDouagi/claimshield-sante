@@ -68,33 +68,51 @@ def _build_status_response(case_id: str, values: dict[str, Any], next_nodes: tup
     )
 
 
-def create_app(checkpointer: Any | None = None) -> FastAPI:
+def create_app(checkpointer: Any | None = None, *, compiled_graph: Any | None = None) -> FastAPI:
     """Construit l'application FastAPI, graphe compilé une seule fois.
 
     ``checkpointer`` injectable (tests : ``InMemorySaver`` dédié par test) ;
     ``None`` construit le backend configuré par l'environnement
     (``CheckpointerFactory.from_settings()`` — ``memory`` par défaut).
+
+    ``compiled_graph`` (mot-clé uniquement) permet de fournir un graphe déjà
+    compilé (ex. via ``graph.workflow.compile_workflow(..., case_reviewer_impl=...)``
+    dans les tests qui ont besoin d'un agent injecté) — dans ce cas il est
+    utilisé tel quel et ``checkpointer``/``CheckpointerFactory`` ne sont
+    jamais consultés. Fournir les deux à la fois est une erreur d'appelant
+    (ambiguïté sur la source de vérité), refusée explicitement. Même principe
+    que ``compile_workflow(graph=None, ...)`` : un paramètre optionnel qui
+    court-circuite la construction interne quand l'appelant fournit déjà
+    l'artefact construit.
     """
+    if compiled_graph is not None and checkpointer is not None:
+        raise ValueError(
+            "create_app() : fournir soit 'checkpointer' soit 'compiled_graph', jamais les deux."
+        )
+
     configure_logging()
 
-    resolved_checkpointer = (
-        checkpointer if checkpointer is not None else CheckpointerFactory.from_settings().build()
-    )
-    # interrupt_before=[] : désactive l'interruption statique par défaut
-    # (DEFAULT_INTERRUPT_BEFORE=["needs_review"], une pause technique sans
-    # payload avant le nœud "needs_review") au profit exclusif de
-    # l'interruption dynamique réelle sur "await_human_review"
-    # (langgraph.types.interrupt(), payload de revue exploitable par le
-    # client API — voir _build_status_response/pending_review). Même
-    # convention que l'ensemble de tests/graph/test_workflow*.py.
-    compiled_graph = compile_workflow(resolved_checkpointer, interrupt_before=[])
+    if compiled_graph is not None:
+        resolved_graph = compiled_graph
+    else:
+        resolved_checkpointer = (
+            checkpointer if checkpointer is not None else CheckpointerFactory.from_settings().build()
+        )
+        # interrupt_before=[] : désactive l'interruption statique par défaut
+        # (DEFAULT_INTERRUPT_BEFORE=["needs_review"], une pause technique sans
+        # payload avant le nœud "needs_review") au profit exclusif de
+        # l'interruption dynamique réelle sur "await_human_review"
+        # (langgraph.types.interrupt(), payload de revue exploitable par le
+        # client API — voir _build_status_response/pending_review). Même
+        # convention que l'ensemble de tests/graph/test_workflow*.py.
+        resolved_graph = compile_workflow(resolved_checkpointer, interrupt_before=[])
 
     app = FastAPI(
         title="ClaimShield Santé API",
         description="API minimale exposant le pipeline multi-agents de traitement des réclamations.",
         version="0.1.0",
     )
-    app.state.compiled_graph = compiled_graph
+    app.state.compiled_graph = resolved_graph
 
     @app.get("/healthz", response_model=HealthResponse)
     def healthz() -> HealthResponse:
@@ -124,6 +142,10 @@ def create_app(checkpointer: Any | None = None) -> FastAPI:
                     "source_path": payload.source_path,
                     "required_documents": payload.required_documents,
                     "uploaded_files": [f.model_dump(mode="json") for f in payload.uploaded_files],
+                },
+                "privacy_input": {
+                    "case_id": payload.case_id,
+                    "role": payload.role.value,
                 },
             }
             app.state.compiled_graph.invoke(initial_state, config=config)

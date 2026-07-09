@@ -42,6 +42,11 @@ class Settings(BaseSettings):
             "de développement par défaut, jamais utilisable en production."
         ),
     )
+    claimshield_api_base_url: str = Field(
+        "http://localhost:8000",
+        alias="CLAIMSHIELD_API_BASE_URL",
+        description="URL de base de l'API utilisée par l'UI Chainlit (ui/api_client.py).",
+    )
 
     # ── Synthea ───────────────────────────────────────────────────────────────
     synthea_root: Path = Field(_PROJECT_ROOT / "synthea", alias="SYNTHEA_ROOT")
@@ -75,6 +80,11 @@ class Settings(BaseSettings):
     )
     claimshield_temp_dir: Path = Field(
         _PROJECT_ROOT / "storage" / "temp", alias="CLAIMSHIELD_TEMP_DIR"
+    )
+    claimshield_ui_upload_dir: Path = Field(
+        _PROJECT_ROOT / "storage" / "ui_uploads",
+        alias="CLAIMSHIELD_UI_UPLOAD_DIR",
+        description="Répertoire où l'UI Chainlit écrit les fichiers uploadés avant soumission à l'API.",
     )
 
     # ── Base de données ───────────────────────────────────────────────────────

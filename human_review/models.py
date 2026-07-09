@@ -7,12 +7,13 @@ Distinct de ``state.claim_state.HumanDecision`` (``TypedDict`` interne au
 désormais littéralement les mêmes noms d'action
 (``APPROVE``/``MODIFY``/``REJECT``/``RETRY``) — mais restent deux contrats
 distincts. Ce module définit la version **Pydantic stricte**
-(``extra="forbid"``, justification obligatoire pour toute décision,
-validée par ``human_review.service``) ; le ``TypedDict`` du graphe reste une
-validation maison (``graph.technical_nodes._validate_human_decision``,
-justification/``comment`` optionnel). Le câblage complet des deux (un seul
-mécanisme de validation, prévu pour l'étape 14) est hors périmètre de ce
-fichier.
+(``extra="forbid"``, justification obligatoire pour toute décision) : c'est
+la **seule** validation réellement appliquée en production, via
+``human_review.service.validate_and_audit_human_decision`` — déjà câblée
+dans ``graph.technical_nodes.node_await_human_review``, qui lui délègue
+entièrement sa validation. Le ``TypedDict`` de ``state.claim_state`` n'est
+qu'une projection typée du dict déjà validé par ce module (voir son propre
+docstring) — il ne porte aucune validation indépendante.
 """
 from __future__ import annotations
 

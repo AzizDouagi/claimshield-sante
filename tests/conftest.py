@@ -180,5 +180,9 @@ def deterministic_agent_llm(monkeypatch) -> None:
     monkeypatch.setattr("agents.clinical_consistency_agent.agent._invoke_llm_clinical", clinical_decision)
     monkeypatch.setattr("agents.fraud_detection_agent.agent._invoke_llm_fraud", fraud_decision)
     monkeypatch.setattr("agents.case_reviewer_agent.agent._invoke_llm_case_review", case_review_decision)
+    def audit_batch_decision(events):
+        return [audit_decision(e) for e in events]
+
     monkeypatch.setattr("agents.audit_agent.agent._invoke_llm_audit", audit_decision)
+    monkeypatch.setattr("agents.audit_agent.agent._invoke_llm_audit_batch", audit_batch_decision)
     yield

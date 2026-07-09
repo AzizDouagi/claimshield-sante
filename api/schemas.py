@@ -13,7 +13,7 @@ from pydantic import Field
 from agents.claim_intake_agent.schemas import UploadedFileInfo
 from human_review.models import ReviewAction
 from human_review.service import HumanReviewPayload
-from schemas.domain import StrictModel
+from schemas.domain import ReaderRole, StrictModel
 
 
 class ClaimSubmissionRequest(StrictModel):
@@ -24,12 +24,24 @@ class ClaimSubmissionRequest(StrictModel):
     ``scripts/import_synthea_claimshield_cases.py``/les fixtures de test) :
     cette API ne gère pas l'upload multipart de fichiers, hors périmètre
     d'une exposition minimale du graphe (voir ``api/main.py``).
+
+    ``role`` pilote la politique RBAC DENY-by-default appliquée par
+    ``privacy_agent`` pour cette soumission (voir
+    ``security.access_policies.ROLE_POLICIES`` — un seul rôle par
+    soumission, ``privacy_agent`` ne produit qu'une seule vue minimisée par
+    exécution). Défaut ``ADMINISTRATIVE_MANAGER`` (allowlist la plus large)
+    si l'appelant ne précise rien — jamais un rôle implicite caché, toujours
+    tracé dans ``privacy_result.audit_entry``.
     """
 
     case_id: str = Field(..., pattern=r"^CLM-\d{4,}$")
     source_path: str = Field(..., min_length=1, description="Répertoire du dossier, côté serveur")
     required_documents: list[str] = Field(default_factory=list)
     uploaded_files: list[UploadedFileInfo] = Field(default_factory=list)
+    role: ReaderRole = Field(
+        default=ReaderRole.ADMINISTRATIVE_MANAGER,
+        description="Rôle RBAC pour la vue minimisée produite par privacy_agent.",
+    )
 
 
 class HumanDecisionRequest(StrictModel):

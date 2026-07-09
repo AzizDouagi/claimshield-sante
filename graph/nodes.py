@@ -107,6 +107,12 @@ from agents.medical_coding_agent import agent as _medical_coding
 from agents.privacy_agent import agent as _privacy
 from agents.security_gate_agent import agent as _security_gate
 from config.settings import get_settings
+from graph.input_builders import (
+    build_coding_input,
+    build_fhir_input,
+    build_identity_coverage_input,
+    build_ocr_input,
+)
 from orchestrator.executor import AgentRunner, Orchestrator, RetryPolicy
 from orchestrator.model_registry import ModelRegistry, build_default_registry
 from orchestrator.orchestrator import AgentCallOutcome, AgentCallRequest, AgentName, without_computed_fields
@@ -167,6 +173,26 @@ class _AgentConfig:
     result_key: str          # clé du résultat dans ClaimState
     result_model: type
     input_key: str | None = None  # clé d'entrée consommée (remise à None)
+    input_builder: Callable[[ClaimState], dict | None] | None = None
+    """Construit ``state[input_key]`` depuis les résultats déjà présents dans
+    le state (voir ``graph/input_builders.py``) quand l'appelant ne l'a pas
+    déjà fourni. Jamais appelé si ``state.get(input_key)`` est déjà renseigné
+    (idempotent — ex. relance HITL RETRY). Le dict produit n'est injecté que
+    dans une copie superficielle locale du state transmise à l'agent, jamais
+    dans l'objet ``state`` reçu par le nœud — indispensable car plusieurs
+    agents (``document_ocr``/``fhir_validator``) s'exécutent dans le même
+    superstep LangGraph (fan-out P2-1) et ne doivent jamais se voir
+    mutuellement leurs mutations."""
+    extra_state_factory: Callable[[], dict] | None = None
+    """Clés de state additionnelles, constantes (indépendantes du dossier),
+    requises par certains agents en plus de leur ``input_key`` — ex.
+    ``document_ocr_agent.node()`` lit ``state["storage_root"]`` séparément
+    de ``ocr_input`` pour résoudre les chemins de fichiers (voir
+    ``agents/document_ocr_agent/agent.py``, ``verify_file_integrity``).
+    Toujours appliqué (contrairement à ``input_builder``, qui ne s'exécute
+    que si l'entrée est absente) — même garantie de non-mutation : injecté
+    uniquement dans la copie locale du state, jamais dans l'objet ``state``
+    original."""
 
 
 # ── Helpers internes ───────────────────────────────────────────────────────────
@@ -308,13 +334,30 @@ def _build_node(orchestrator: Orchestrator, config: _AgentConfig) -> Callable[[C
     directement."""
 
     def _node(state: ClaimState) -> dict:
+        extra: dict = {}
+        if config.extra_state_factory is not None:
+            extra.update(config.extra_state_factory())
+        if (
+            config.input_key is not None
+            and config.input_builder is not None
+            and state.get(config.input_key) is None
+        ):
+            built = config.input_builder(state)
+            if built is not None:
+                extra[config.input_key] = built
+
+        call_state = state
+        if extra:
+            call_state = dict(state)
+            call_state.update(extra)
+
         try:
-            request = _build_request(state, config)
+            request = _build_request(call_state, config)
         except ValidationError as exc:
-            return _exception_fallback(state, config, exc)
+            return _exception_fallback(call_state, config, exc)
 
         model_id = get_settings().claimshield_llm_model
-        outcome = orchestrator.execute_agent(request, state, model_id=model_id)
+        outcome = orchestrator.execute_agent(request, call_state, model_id=model_id)
         return _translate_outcome(config, outcome)
 
     _node.__name__ = f"node_{config.agent_name}"
@@ -356,6 +399,7 @@ _AGENT_CONFIGS: dict[str, _AgentConfig] = {
         result_key="fhir_result",
         result_model=FhirValidatorResult,
         input_key="fhir_input",
+        input_builder=build_fhir_input,
     ),
     "medical_coding": _AgentConfig(
         agent_name="medical_coding",
@@ -364,6 +408,7 @@ _AGENT_CONFIGS: dict[str, _AgentConfig] = {
         result_key="coding_result",
         result_model=MedicalCodingResult,
         input_key="coding_input",
+        input_builder=build_coding_input,
     ),
     "document_ocr": _AgentConfig(
         agent_name="document_ocr",
@@ -372,6 +417,8 @@ _AGENT_CONFIGS: dict[str, _AgentConfig] = {
         result_key="ocr_result",
         result_model=DocumentOcrResult,
         input_key="ocr_input",
+        input_builder=build_ocr_input,
+        extra_state_factory=lambda: {"storage_root": str(get_settings().storage_dir)},
     ),
     "identity_coverage": _AgentConfig(
         agent_name="identity_coverage",
@@ -380,6 +427,7 @@ _AGENT_CONFIGS: dict[str, _AgentConfig] = {
         result_key="identity_coverage_result",
         result_model=IdentityCoverageResult,
         input_key="identity_coverage_input",
+        input_builder=build_identity_coverage_input,
     ),
     "clinical_consistency": _AgentConfig(
         agent_name="clinical_consistency",
@@ -498,6 +546,7 @@ def build_orchestrator(
         retry_policy=policy,
         audit_store=resolved_audit_store,
         audit_normalizer=_audit.normalize_event,
+        audit_batch_normalizer=_audit.normalize_events_batch,
     )
 
 

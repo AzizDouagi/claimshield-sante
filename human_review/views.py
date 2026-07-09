@@ -1,9 +1,11 @@
 """Vue formulaire HITL — représentation prête à afficher, avant décision.
 
-Framework-agnostique : n'importe ni FastAPI ni Chainlit (aucun des deux
-n'est requis pour ce module — Chainlit n'est d'ailleurs pas une dépendance
-du projet). Prépare des modèles Pydantic sérialisables en JSON,
-consommables tels quels :
+Framework-agnostique : n'importe ni FastAPI ni Chainlit — ce module reste
+utilisable indépendamment même si l'un des deux devient indisponible,
+malgré Chainlit désormais dépendance du projet (voir ``ui/``, qui
+consomme ``render_for_chainlit_actions()`` sans jamais faire dépendre ce
+module-ci du paquet ``chainlit`` lui-même). Prépare des modèles Pydantic
+sérialisables en JSON, consommables tels quels :
   - par une route FastAPI (``response_model=HumanReviewFormView`` ou
     ``JSONResponse(form.model_dump(mode="json"))``) ;
   - par un composant Chainlit (``render_for_chainlit_actions()`` produit une
@@ -167,9 +169,9 @@ def render_for_fastapi(form: HumanReviewFormView) -> dict[str, Any]:
 
 def render_for_chainlit_actions(form: HumanReviewFormView) -> list[dict[str, str]]:
     """Représentation des actions au format attendu par ``chainlit.Action``
-    (``name``/``value``/``label``) — Chainlit n'est pas une dépendance du
-    projet (absent de ``requirements.txt``) : cette fonction ne l'importe
-    jamais, elle ne fait que produire une structure de dicts compatible.
+    (``name``/``value``/``label``) — consommée par ``ui/forms.py``. Cette
+    fonction n'importe jamais ``chainlit`` elle-même, elle ne fait que
+    produire une structure de dicts compatible.
     """
     return [
         {"name": action.value, "value": action.value, "label": _ACTION_LABELS[action]}

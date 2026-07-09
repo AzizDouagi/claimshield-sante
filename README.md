@@ -116,6 +116,56 @@ python scripts/import_synthea_claimshield_cases.py --validate-only
 
 ---
 
+## Lancer l'API et l'interface Chainlit
+
+L'API expose le graphe compilé (`POST /claims`, `GET /claims/{case_id}`,
+`POST /claims/{case_id}/human-decision`, `GET /healthz`). L'UI Chainlit
+(`ui/`) est un client HTTP séparé de cette API — les deux se lancent
+indépendamment (ports différents), l'UI a besoin de l'API déjà démarrée.
+
+```bash
+# 1. Démarrer l'API (nécessite Ollama lancé séparément — gemma4:latest)
+uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
+
+# 2. Dans un autre terminal, démarrer l'UI Chainlit
+CLAIMSHIELD_API_BASE_URL=http://127.0.0.1:8000 chainlit run ui/app.py -w
+```
+
+L'UI s'ouvre sur `http://localhost:8000` par défaut (Chainlit — port distinct
+de l'API si les deux tournent en local, ajuster avec `--port`). Voir
+`CLAIMSHIELD_API_BASE_URL`/`CLAIMSHIELD_API_KEY`/`CLAIMSHIELD_UI_UPLOAD_DIR`
+dans `.env.example`.
+
+---
+
+## Déploiement Docker
+
+Deux services (`api`, `ui`), même image. **Ollama reste sur l'hôte** —
+aucun Ollama n'est embarqué dans un conteneur ; il doit déjà tourner
+(`gemma4:latest` tiré) avant de démarrer les conteneurs.
+
+```bash
+# 1. Copier et adapter la config Docker (chemins /app/..., secrets à changer)
+cp .env.docker.example .env.docker
+
+# 2. Construire et démarrer
+docker compose up --build
+```
+
+- API : `http://localhost:8000` (healthcheck sur `/healthz`)
+- UI Chainlit : `http://localhost:8001`
+- Persistance : backend de checkpoint `sqlite` (fichier `storage/checkpoints.db`,
+  volume partagé avec l'hôte) — les dossiers en attente de revue humaine
+  survivent à un redémarrage de conteneur (`docker compose restart api`),
+  vérifié manuellement.
+- Fixtures de démo (`datasets/fixtures/`) montées en lecture seule dans le
+  conteneur `api`.
+- `api` et `ui` partagent le **même** volume `./storage` — un dossier soumis
+  via l'UI (upload) doit être lisible par le conteneur `api` (voir
+  `ui/uploads.py`).
+
+---
+
 ## Structure du projet
 
 ```

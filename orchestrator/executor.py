@@ -139,6 +139,12 @@ EVENT_FALLBACK = "fallback"
 EVENT_RESULT = "result"
 
 AuditEventNormalizer = Callable[[Mapping[str, Any]], Any]
+AuditEventBatchNormalizer = Callable[[Sequence[Mapping[str, Any]]], Sequence[Any]]
+"""Normalise plusieurs événements d'audit en un seul appel (option C d'AZIZ —
+batching de la normalisation LLM par nœud, voir docstring de
+``Orchestrator._persist_audit_events``). Distincte d'``AuditEventNormalizer``
+(un seul événement) — les deux peuvent coexister, le chemin batché est
+prioritaire s'il est fourni."""
 
 
 def _build_audit_event(
@@ -291,6 +297,7 @@ class Orchestrator:
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
     audit_store: AuditStore | None = None
     audit_normalizer: AuditEventNormalizer | None = None
+    audit_batch_normalizer: AuditEventBatchNormalizer | None = None
 
     def execute_agent(
         self, request: AgentCallRequest, state: ClaimState, *, model_id: str
@@ -420,14 +427,39 @@ class Orchestrator:
         return outcome
 
     def _persist_audit_events(self, events: Sequence[AuditEvent]) -> None:
-        """Normalise chaque événement via l'Audit Agent puis écrit dans AuditStore.
+        """Normalise puis écrit les événements d'audit du nœud dans AuditStore.
 
         ``Orchestrator`` ne connaît pas l'implémentation de l'Audit Agent :
-        il reçoit seulement ``audit_normalizer`` par injection. Sans store ou
-        normalizer, il conserve le comportement historique et expose les
-        événements légers dans ``AgentCallOutcome.audit_events``.
+        il reçoit seulement ``audit_batch_normalizer``/``audit_normalizer``
+        par injection. Sans store, ou sans aucun des deux normalizers, il
+        conserve le comportement historique et expose les événements légers
+        dans ``AgentCallOutcome.audit_events`` sans les persister.
+
+        Deux chemins mutuellement exclusifs — ``audit_batch_normalizer`` est
+        prioritaire s'il est fourni (``audit_normalizer`` n'est alors jamais
+        appelé) :
+
+        - **Batché** (option C d'AZIZ) : un seul appel normalise tous les
+          événements du nœud à la fois (voir ``_persist_audit_events_batched``)
+          — réduit le nombre d'appels LLM par nœud de N à 1, gain *attendu, à
+          confirmer par une mesure réelle avec Ollama*.
+        - **Single-event** (historique, conservé verbatim) : un appel LLM
+          par événement.
+
+        Dans les deux cas, un événement dont la normalisation a échoué
+        (``None``) n'est **jamais** passé à ``AuditStore.record_event`` — pas
+        de persistance non normalisée, pas de crash de l'exécution de
+        l'agent, pas de trou silencieux non journalisé (log
+        ``orchestrator_audit_not_persisted``).
         """
-        if self.audit_store is None or self.audit_normalizer is None:
+        if self.audit_store is None:
+            return
+
+        if self.audit_batch_normalizer is not None:
+            self._persist_audit_events_batched(events)
+            return
+
+        if self.audit_normalizer is None:
             return
 
         for event in events:
@@ -442,6 +474,97 @@ class Orchestrator:
                         reason="normalisation LLM absente",
                     )
                     continue
+                self.audit_store.record_event(
+                    case_id=event.case_id,
+                    event_type=normalized.event_type,
+                    actor=normalized.actor,
+                    outcome=normalized.outcome,
+                    redaction_status=normalized.redaction_status,
+                    agent_name=normalized.agent_name,
+                    model_name=event.details.get("model_id") or None,
+                    prompt_version=None,
+                    tool_calls=normalized.tool_calls,
+                    evidence_ids=normalized.evidence_ids,
+                )
+            except AuditStoreError as exc:
+                logger.warning(
+                    "orchestrator_audit_append_only_refused",
+                    case_id=event.case_id,
+                    action=event.action,
+                    reason=exc.structured.message,
+                )
+            except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer l'issue agent.
+                logger.warning(
+                    "orchestrator_audit_not_persisted",
+                    case_id=event.case_id,
+                    action=event.action,
+                    exc_type=type(exc).__name__,
+                    reason=str(exc),
+                )
+
+    def _persist_audit_events_batched(self, events: Sequence[AuditEvent]) -> None:
+        """Normalise ``events`` en un seul appel puis persiste séquentiellement.
+
+        La réponse de ``audit_batch_normalizer`` est explicitement réalignée
+        sur exactement ``len(events)`` éléments avant toute itération —
+        **jamais** un ``zip(events, normalized_list)`` direct, qui
+        tronquerait silencieusement si la liste retournée est plus courte
+        (les événements en fin de nœud seraient perdus sans log). À la
+        place : une liste ``aligned`` de longueur exactement ``len(events)``
+        est construite — les éléments manquants (liste trop courte) sont
+        comblés par ``None``, les éléments en trop (liste trop longue, déjà
+        anormal côté normalizer) sont journalisés puis ignorés — puis
+        itération **par index** sur ``range(len(events))`` : chaque
+        ``aligned[i] is None`` est journalisé individuellement
+        (``orchestrator_audit_not_persisted``) et jamais persisté, aucun
+        événement n'est donc jamais perdu silencieusement à cause d'une
+        désynchronisation de longueur.
+
+        Une exception levée par ``audit_batch_normalizer`` lui-même (le lot
+        entier, pas un événement précis) est traitée comme un lot totalement
+        non normalisé — chaque événement est alors individuellement
+        journalisé et non persisté, jamais un crash de l'exécution de
+        l'agent.
+        """
+        if self.audit_store is None or self.audit_batch_normalizer is None or not events:
+            return
+
+        events_list = list(events)
+        try:
+            raw = list(self.audit_batch_normalizer(
+                [_audit_normalization_payload(event) for event in events_list]
+            ))
+        except Exception as exc:  # noqa: BLE001 - l'audit ne doit pas masquer l'issue agent.
+            logger.warning(
+                "orchestrator_audit_batch_normalizer_failed",
+                case_id=events_list[0].case_id,
+                exc_type=type(exc).__name__,
+                reason=str(exc),
+            )
+            raw = []
+
+        if len(raw) > len(events_list):
+            logger.warning(
+                "orchestrator_audit_batch_extra_items",
+                expected=len(events_list),
+                received=len(raw),
+            )
+            raw = raw[: len(events_list)]
+
+        aligned: list[Any | None] = raw + [None] * (len(events_list) - len(raw))
+
+        for i in range(len(events_list)):
+            event = events_list[i]
+            normalized = aligned[i]
+            if normalized is None:
+                logger.warning(
+                    "orchestrator_audit_not_persisted",
+                    case_id=event.case_id,
+                    action=event.action,
+                    reason="normalisation LLM absente (lot)",
+                )
+                continue
+            try:
                 self.audit_store.record_event(
                     case_id=event.case_id,
                     event_type=normalized.event_type,

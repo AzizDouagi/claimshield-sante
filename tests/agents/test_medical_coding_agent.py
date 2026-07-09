@@ -5,6 +5,40 @@ from agents.medical_coding_agent.schemas import LlmCodingDecision, LlmResolvedCo
 from agents.medical_coding_agent.tools import rechercher_code
 
 
+class TestEmptyCodingInputNeverBlocksPipeline:
+    """``graph/input_builders.py::build_coding_input`` peuple toujours
+    ``procedures=[]``/``medications=[]`` (limitation MVP assumée, aucune
+    extraction acte/médicament fiable) — ce résultat ne doit jamais faire
+    planter le pipeline ni produire un FAIL qui interromprait
+    ``route_coding_fan_out`` vers ``clinical_consistency``/``fraud_detection``.
+    ``NEEDS_REVIEW`` reste un résultat légitime (rien à coder → revue
+    humaine), seul un crash ou un ``FAIL`` serait un défaut."""
+
+    def test_run_with_empty_lists_never_raises_and_never_fails(self):
+        result = run(case_id="CLM-0001", procedures=[], medications=[])
+
+        assert isinstance(result, MedicalCodingResult)
+        assert result.status != VerificationStatus.FAIL
+        assert result.codings == []
+
+    def test_run_with_none_lists_behaves_like_empty_lists(self):
+        result = run(case_id="CLM-0001", procedures=None, medications=None)
+
+        assert isinstance(result, MedicalCodingResult)
+        assert result.status != VerificationStatus.FAIL
+
+    def test_node_with_empty_coding_input_never_raises(self):
+        state = {
+            "case_id": "CLM-0001",
+            "coding_input": {"case_id": "CLM-0001", "procedures": [], "medications": []},
+        }
+
+        updates = node(state)
+
+        assert updates["coding_result"].status != VerificationStatus.FAIL
+        assert updates["coding_input"] is None
+
+
 def test_medical_coding_run_passes_on_exact_matches():
     result = run(
         case_id="CLM-0001",

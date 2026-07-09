@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from graph.nodes import (
     _AGENT_CONFIGS,
     _AgentConfig,
+    _build_node,
     _build_request,
     _exception_fallback,
     _graph_preconditions_check,
@@ -371,6 +372,95 @@ class TestTranslateOutcome:
         )
         updates = _translate_outcome(self.CFG, outcome)
         assert updates["audit_trail"] == [event]
+
+
+# ── 4bis. Mécanisme générique _AgentConfig.input_builder ─────────────────────
+
+
+class _SpyOrchestrator:
+    """Orchestrateur factice — capture le ``state`` réellement transmis à
+    ``execute_agent`` (jamais l'agent lui-même, non pertinent ici) et
+    refuse systématiquement, pour isoler strictement le comportement de
+    ``_node`` avant l'appel de l'orchestrateur."""
+
+    def __init__(self) -> None:
+        self.received_states: list[dict] = []
+
+    def execute_agent(self, request, state, *, model_id):
+        self.received_states.append(state)
+        return AgentCallOutcome.from_request(
+            request,
+            success=False,
+            error=StructuredError(code="STOP", message="orchestrateur factice", field=None),
+        )
+
+
+def _input_builder_test_config(input_builder) -> _AgentConfig:
+    return _AgentConfig(
+        agent_name="fake_agent",
+        agent_enum=AgentName.MEDICAL_CODING,
+        step_name="fake_step",
+        result_key="coding_result",
+        result_model=MedicalCodingResult,
+        input_key="coding_input",
+        input_builder=input_builder,
+    )
+
+
+class TestInputBuilderMechanism:
+    """``_AgentConfig.input_builder`` — construit ``state[input_key]`` avant
+    l'appel de l'agent, jamais en mutant l'objet ``state`` reçu par le
+    nœud : ``document_ocr``/``fhir_validator`` s'exécutent dans le même
+    superstep LangGraph (fan-out P2-1, voir ``graph/workflow.py``) — une
+    mutation en place serait un effet de bord partagé entre branches
+    parallèles."""
+
+    def test_builder_result_visible_to_agent_but_not_in_original_state(self):
+        built = {"case_id": "CLM-0001", "procedures": [], "medications": []}
+        spy = _SpyOrchestrator()
+        node_fn = _build_node(spy, _input_builder_test_config(lambda s: dict(built)))
+
+        original_state = {"case_id": "CLM-0001", "current_step": "identity_coverage"}
+        node_fn(original_state)
+
+        assert spy.received_states[0]["coding_input"] == built
+        assert original_state.get("coding_input") is None
+        assert "coding_input" not in original_state
+        assert spy.received_states[0] is not original_state
+
+    def test_builder_not_invoked_when_input_already_present(self):
+        calls: list[int] = []
+
+        def _builder(state):
+            calls.append(1)
+            return {"should": "never happen"}
+
+        spy = _SpyOrchestrator()
+        node_fn = _build_node(spy, _input_builder_test_config(_builder))
+
+        state = {"case_id": "CLM-0001", "coding_input": {"already": "there"}}
+        node_fn(state)
+
+        assert calls == []
+        assert spy.received_states[0] is state
+
+    def test_builder_returning_none_falls_back_to_original_state(self):
+        spy = _SpyOrchestrator()
+        node_fn = _build_node(spy, _input_builder_test_config(lambda s: None))
+
+        original_state = {"case_id": "CLM-0001"}
+        node_fn(original_state)
+
+        assert spy.received_states[0] is original_state
+
+    def test_no_builder_configured_behaves_exactly_as_before(self):
+        spy = _SpyOrchestrator()
+        node_fn = _build_node(spy, _input_builder_test_config(None))
+
+        original_state = {"case_id": "CLM-0001"}
+        node_fn(original_state)
+
+        assert spy.received_states[0] is original_state
 
 
 # ── 5. Nœuds réels — délégation, isolation, invalidité (via l'orchestrateur) ─

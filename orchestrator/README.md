@@ -148,6 +148,51 @@ L'orchestrateur ne les ajoute jamais lui-même à `ClaimState` (il ne mute
 jamais le state) : à l'appelant de les ajouter (append) à
 `state["audit_trail"]`, exactement comme le ferait un nœud LangGraph.
 
+### Normalisation d'audit batchée (option C d'AZIZ)
+
+Chaque `AuditEvent` doit être normalisé par LLM (`agents.audit_agent`) avant
+persistance dans `AuditStore` — c'est la garantie de conformité de l'étape
+14, non négociable. Historiquement, `_persist_audit_events` normalisait **un
+événement à la fois** (3 à 9 appels LLM par nœud, en plus de l'appel de
+décision propre à l'agent) — un mesure réelle avec Ollama a montré que ce
+coût dominait très largement le temps d'exécution d'un nœud.
+
+`Orchestrator` accepte désormais un second injectable,
+`audit_batch_normalizer` (type `AuditEventBatchNormalizer`,
+`Sequence[Mapping] -> Sequence[Any]`), **prioritaire** sur `audit_normalizer`
+s'il est fourni (`audit_normalizer` n'est alors jamais appelé) : un seul
+appel normalise tous les événements d'audit produits par le nœud en une
+fois (`agents.audit_agent.agent.normalize_events_batch`, câblé par défaut
+dans `graph.nodes.build_orchestrator()`). Le gain attendu — un seul appel de
+normalisation au lieu de N — reste **à confirmer par une mesure réelle avec
+Ollama**, jamais un chiffre garanti avant benchmark.
+
+Garanties conservées à l'identique par rapport au chemin single-event
+(`_persist_audit_events`, toujours utilisé si aucun `audit_batch_normalizer`
+n'est fourni — non-régression par construction) :
+
+- **Jamais de persistance non normalisée.** La réponse du normalizer est
+  explicitement réalignée sur exactement `len(events)` éléments avant toute
+  itération (jamais un `zip(events, normalized_list)` direct, qui
+  tronquerait silencieusement une réponse trop courte) — un événement sans
+  normalisation correspondante (réponse trop courte, ou normalisation
+  individuellement `None`) est journalisé (`orchestrator_audit_not_persisted`)
+  et jamais passé à `AuditStore.record_event`, jamais un crash de
+  l'exécution de l'agent.
+- **Réassociation par index explicite, jamais par position.** Le lot envoyé
+  au LLM (`agents.audit_agent.agent._invoke_llm_audit_batch`) porte un index
+  par événement ; la réponse structurée (`LlmAuditNormalizedEventBatch`)
+  doit recopier cet index — un index absent, dupliqué (les deux occurrences
+  sont invalidées, jamais un « premier gagnant ») ou hors bornes déclenche
+  un repli individuel ciblé (`_invoke_llm_audit`, chemin single-event
+  inchangé) pour les seuls événements concernés.
+- **Aucun mélange entre événements**, même partageant `case_id`/`actor` —
+  chaque normalisation ne reflète que son événement d'origine (voir
+  `tests/audit/test_agent.py::TestInvokeLlmAuditBatchNeverMixesSameCaseIdOrActor`).
+- **Rédaction et plancher appliqués par élément**, jamais partagés entre
+  événements du même lot (`tools.audit_redaction.redact_audit_payload`,
+  inchangée).
+
 ## Exemple minimal d'invocation
 
 Aucune donnée réelle, aucun secret, aucun contenu médical — uniquement des

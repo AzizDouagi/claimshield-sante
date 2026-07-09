@@ -102,3 +102,42 @@ def test_thread_id_obligatoire_et_stable_pour_reprise():
 
     with pytest.raises(ValueError, match="thread_id obligatoire"):
         make_thread_config("")
+
+
+class TestSqliteBackend:
+    """Backend `sqlite` — jamais exercé contre un vrai graphe compilé avant
+    l'item E (packaging Docker) : `SqliteSaver.from_conn_string` est un
+    context manager qui ferme la connexion à la sortie du `with` ;
+    `get_checkpointer` construit désormais `SqliteSaver` directement à
+    partir d'une connexion `sqlite3` ouverte pour la durée du process."""
+
+    def test_get_checkpointer_sqlite_returns_usable_saver(self, tmp_path):
+        from graph.checkpoints import get_checkpointer
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from config.settings import Settings
+
+        settings = Settings(LANGGRAPH_CHECKPOINT_DB=tmp_path / "checkpoints.db")
+        checkpointer = get_checkpointer(backend="sqlite", settings=settings)
+
+        assert isinstance(checkpointer, SqliteSaver)
+        assert (tmp_path / "checkpoints.db").exists()
+
+    def test_state_persists_across_fresh_checkpointer_same_file(self, tmp_path):
+        """Simule un redémarrage de conteneur : un nouveau `get_checkpointer()`
+        pointé sur le même fichier retrouve l'état déjà persisté."""
+        from graph.checkpoints import get_checkpointer
+        from config.settings import Settings
+
+        db_path = tmp_path / "checkpoints.db"
+        settings = Settings(LANGGRAPH_CHECKPOINT_DB=db_path)
+
+        from langgraph.checkpoint.base import empty_checkpoint
+
+        checkpointer_1 = get_checkpointer(backend="sqlite", settings=settings)
+        config = make_thread_config("CLM-9999")
+        checkpointer_1.put(config, empty_checkpoint(), {"source": "test", "step": 0, "parents": {}}, {})
+
+        checkpointer_2 = get_checkpointer(backend="sqlite", settings=settings)
+        tuple_read = checkpointer_2.get_tuple(config)
+
+        assert tuple_read is not None

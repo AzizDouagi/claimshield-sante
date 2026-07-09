@@ -14,8 +14,8 @@ from typing import Callable, Protocol, runtime_checkable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agents.audit_agent.prompt import load_audit_prompt
-from agents.audit_agent.schemas import LlmAuditNormalizedEvent
+from agents.audit_agent.prompt import load_audit_batch_prompt, load_audit_prompt
+from agents.audit_agent.schemas import LlmAuditNormalizedEvent, LlmAuditNormalizedEventBatch
 from config.logging import get_logger
 from config.settings import get_settings
 from llm.factory import get_llm
@@ -38,6 +38,12 @@ _REDACTION_RANK: dict[RedactionStatus, int] = {
     RedactionStatus.PARTIALLY_REDACTED: 1,
     RedactionStatus.FULLY_REDACTED: 2,
 }
+
+_MAX_BATCH_SIZE = 25
+"""Cap défensif de ``_invoke_llm_audit_batch`` — même valeur que
+``LlmAuditNormalizedEventBatch.events`` (``max_length``). Au-delà, pas de
+tentative batch : repli direct sur le mode individuel (un nœud produit
+typiquement 3 à 9 événements d'audit, jamais plus de quelques dizaines)."""
 
 _RESULT_KEYS: tuple[str, ...] = (
     "intake_result",
@@ -126,6 +132,100 @@ def _invoke_llm_audit(event: dict) -> LlmAuditNormalizedEvent | None:
 def normalize_event(event: dict) -> LlmAuditNormalizedEvent | None:
     """Point public injectable pour normaliser un événement d'audit."""
     return _invoke_llm_audit(event)
+
+
+def _invoke_llm_audit_batch(events: list[dict]) -> list[LlmAuditNormalizedEvent | None]:
+    """Normalise plusieurs événements en un seul appel LLM (option C d'AZIZ).
+
+    Réduit le nombre d'appels LLM par nœud de N (un par événement d'audit)
+    à 1 — but strictement de performance, jamais un affaiblissement de la
+    garantie de conformité étape 14 : chaque événement du lot est rédigé
+    individuellement (``_compute_redaction``, inchangée) avant l'appel, et
+    toute normalisation absente/invalide (index manquant, dupliqué, hors
+    bornes, ou échec total du lot) déclenche un repli sur ``_invoke_llm_audit``
+    (chemin single-event, inchangé) pour les événements concernés.
+
+    Contrat de sortie : ``len(output) == len(events)`` toujours ;
+    ``output[i] is None`` seulement si la normalisation (batch **et** repli
+    individuel) a échoué pour l'événement à cet index précis — dans ce cas
+    l'appelant (``Orchestrator._persist_audit_events``) ne doit jamais
+    persister cet événement.
+    """
+    if not events:
+        return []
+
+    if len(events) > _MAX_BATCH_SIZE:
+        return [_invoke_llm_audit(event) for event in events]
+
+    redacted_pairs = [_compute_redaction(event) for event in events]
+
+    try:
+        prompt = load_audit_batch_prompt()
+        llm = get_llm()
+        structured = llm.with_structured_output(
+            LlmAuditNormalizedEventBatch,
+            method="json_schema",
+        )
+        payload = {
+            "prompt_version": prompt.version,
+            "events": [
+                {"index": i, "event": redacted_event}
+                for i, (redacted_event, _computed_status) in enumerate(redacted_pairs)
+            ],
+            "allowed_event_types": [event_type.value for event_type in AuditEventType],
+            "allowed_redaction_statuses": [status.value for status in RedactionStatus],
+            "allowed_classifications": [
+                classification.value for classification in DataClassification
+            ],
+        }
+        result = structured.invoke([
+            SystemMessage(content=prompt.system_prompt),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False, default=str)),
+        ])
+        if isinstance(result, dict):
+            result = LlmAuditNormalizedEventBatch(**result)
+        if not isinstance(result, LlmAuditNormalizedEventBatch):
+            return [_invoke_llm_audit(event) for event in events]
+    except Exception:
+        # Repli total — comportement identique à aujourd'hui, jamais un crash.
+        return [_invoke_llm_audit(event) for event in events]
+
+    output: list[LlmAuditNormalizedEvent | None] = [None] * len(events)
+    seen_indices: set[int] = set()
+    duplicate_indices: set[int] = set()
+    for item in result.events:
+        if item.index < 0 or item.index >= len(events):
+            # Index hors bornes : écarté, l'événement d'origine (si son
+            # propre index est par ailleurs valide) reste marqué manquant.
+            continue
+        if item.index in seen_indices:
+            duplicate_indices.add(item.index)
+            continue
+        seen_indices.add(item.index)
+        output[item.index] = item.normalized
+
+    for duplicate_index in duplicate_indices:
+        # Un index dupliqué invalide les deux occurrences — aucune n'est
+        # retenue sans confirmation individuelle (jamais un "premier gagnant").
+        output[duplicate_index] = None
+
+    missing_indices = [i for i in range(len(events)) if output[i] is None]
+    for i in missing_indices:
+        output[i] = _invoke_llm_audit(events[i])
+
+    for i, normalized in enumerate(output):
+        if normalized is None:
+            continue
+        _, computed_status = redacted_pairs[i]
+        if _REDACTION_RANK[computed_status] > _REDACTION_RANK[normalized.redaction_status]:
+            output[i] = normalized.model_copy(update={"redaction_status": computed_status})
+
+    return output
+
+
+def normalize_events_batch(events: list[dict]) -> list[LlmAuditNormalizedEvent | None]:
+    """Point public injectable pour normaliser un lot d'événements d'audit."""
+    return _invoke_llm_audit_batch(events)
 
 
 # ── Implémentation réelle ────────────────────────────────────────────────────
