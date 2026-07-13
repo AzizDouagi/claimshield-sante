@@ -812,3 +812,43 @@ class ClaimSubmission(StrictModel):
     prescriptions: list[Prescription] = Field(default_factory=list)
     extracted: ExtractedData | None = None
     rules: DeterministicRules | None = None
+
+
+# ── Enums V2 (plan de refonte, Phase V2-1) ─────────────────────────────────────
+#
+# Ajout strictement additif — voir §0 du plan de refonte V2
+# (/Users/azizdouagi/.claude/plans/tu-es-claude-code-cheeky-origami.md) :
+# schemas/domain.py est un point d'intégration autorisé pour de nouveaux
+# enums V2, à condition de ne jamais modifier un enum existant. Consommés
+# par schemas/v2_results.py (aucun autre fichier V1 ne les importe).
+
+
+class ClaimDecisionV2(str, Enum):
+    """Décision finale autonome du pipeline V2 — remplace Recommendation (V1,
+    APPROVE/REJECT/PENDING) pour les dossiers traités par
+    `agents/autonomous_decision_agent`. Six issues, aucune revue humaine
+    obligatoire pour y parvenir (voir `services/override_store.py` pour la
+    correction asynchrone post-décision)."""
+
+    APPROVE = "APPROVE"
+    PARTIAL_APPROVE = "PARTIAL_APPROVE"
+    REJECT = "REJECT"
+    REQUEST_MORE_INFO = "REQUEST_MORE_INFO"
+    QUARANTINE = "QUARANTINE"
+    TECHNICAL_FAILURE = "TECHNICAL_FAILURE"
+
+
+class IntakeSafetyStatus(str, Enum):
+    """Statut de sortie de `agents/intake_safety_agent` (V2) — fusion des
+    statuts de `ClaimIntakeResult`/`SecurityGateResult` (V1) en une seule
+    décision d'admission. `BLOCKED` est toujours terminal (jamais assoupli
+    par le LLM — voir agent.py), `QUARANTINED` route vers l'audit puis la
+    fin du pipeline sans jamais atteindre `document_understanding_agent`.
+    `TECHNICAL_FAILURE` est réservé aux pannes d'infrastructure (écriture
+    disque impossible...) — distinct de `BLOCKED`, qui suppose une décision
+    de politique effectivement prise, jamais une évaluation inaboutie."""
+
+    ACCEPTED = "ACCEPTED"
+    QUARANTINED = "QUARANTINED"
+    BLOCKED = "BLOCKED"
+    TECHNICAL_FAILURE = "TECHNICAL_FAILURE"

@@ -34,6 +34,7 @@ from api.schemas import (
     HealthResponse,
     HumanDecisionRequest,
 )
+from api.v2 import v2_router
 from config.logging import bind_case_context, clear_case_context, configure_logging, get_logger
 from graph.checkpoints import CheckpointerFactory, make_thread_config
 from graph.workflow import compile_workflow
@@ -113,6 +114,10 @@ def create_app(checkpointer: Any | None = None, *, compiled_graph: Any | None = 
         version="0.1.0",
     )
     app.state.compiled_graph = resolved_graph
+
+    # Point d'intégration V2 (§0 du plan de refonte) — une seule ligne
+    # additive, aucune modification des endpoints V1 ci-dessous.
+    app.include_router(v2_router, prefix="/v2")
 
     @app.get("/healthz", response_model=HealthResponse)
     def healthz() -> HealthResponse:

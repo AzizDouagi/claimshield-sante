@@ -48,7 +48,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from config.settings import get_settings  # noqa: E402
-from ui import api_client  # noqa: E402
+from ui import api_client, api_client_v2  # noqa: E402
 from ui.forms import form_from_pending_review, render_for_chainlit_actions  # noqa: E402
 from ui.uploads import stage_uploaded_files  # noqa: E402
 
@@ -202,6 +202,9 @@ async def on_chat_start() -> None:
         actions=[
             cl.Action(name="menu_submit", payload={}, label="Soumettre un dossier"),
             cl.Action(name="menu_status", payload={}, label="Consulter un dossier"),
+            cl.Action(name="menu_submit_v2", payload={}, label="Soumettre un dossier (V2 autonome)"),
+            cl.Action(name="menu_status_v2", payload={}, label="Consulter un dossier (V2)"),
+            cl.Action(name="menu_override_v2", payload={}, label="Corriger une décision (V2)"),
         ],
     ).send()
 
@@ -234,3 +237,125 @@ async def on_reject(action: cl.Action) -> None:
 @cl.action_callback("RETRY")
 async def on_retry(action: cl.Action) -> None:
     await _decision_flow(action.payload["case_id"], "RETRY")
+
+
+# ── Pipeline V2 (autonome, sans revue humaine bloquante) — bloc additif ──────
+#
+# Flux isolés (plan de refonte V2, Phase V2-9, §0 : `ui/app.py` reçoit
+# uniquement des enregistrements additifs, les callbacks V1 ci-dessus ne sont
+# jamais modifiés). Client HTTP dédié : `ui/api_client_v2.py`.
+
+
+def _format_status_v2(body: dict[str, Any]) -> str:
+    lines = [
+        f"**Dossier {body['case_id']} (V2)**",
+        f"- Étape courante : `{body.get('current_step')}`",
+        f"- Étapes complétées : {', '.join(body.get('completed_steps') or []) or '—'}",
+        f"- Décision finale : {body.get('final_decision') or '—'}",
+    ]
+    if body.get("decision_summary"):
+        lines.append("- Justification : " + "; ".join(body["decision_summary"]))
+    if body.get("bounded_by"):
+        lines.append("- Garde-fous appliqués : " + "; ".join(body["bounded_by"]))
+    if body.get("errors"):
+        lines.append(f"- Erreurs : {'; '.join(body['errors'])}")
+    if body.get("alerts"):
+        lines.append(f"- Alertes : {'; '.join(body['alerts'])}")
+    return "\n".join(lines)
+
+
+async def _submit_flow_v2() -> None:
+    case_id = await _ask_case_id("Identifiant du dossier à soumettre (V2, ex. CLM-0001) :")
+    if case_id is None:
+        await cl.Message(content="Soumission annulée.").send()
+        return
+
+    files = await cl.AskFileMessage(
+        content="Déposez les documents du dossier (PDF/image/JSON) :",
+        accept=_allowed_mime_types(),
+        max_files=10,
+        max_size_mb=20,
+        timeout=300,
+    ).send()
+    if not files:
+        await cl.Message(content="Aucun fichier reçu — soumission annulée.").send()
+        return
+
+    source_path = stage_uploaded_files(case_id, files)
+    response = await api_client_v2.submit_claim_v2(case_id, source_path)
+    if response.status_code >= 400:
+        await cl.Message(
+            content=f"Échec de la soumission V2 ({response.status_code}) : {response.text}"
+        ).send()
+        return
+
+    await cl.Message(content=_format_status_v2(response.json())).send()
+
+
+async def _status_flow_v2() -> None:
+    case_id = await _ask_case_id("Identifiant du dossier à consulter (V2, ex. CLM-0001) :")
+    if case_id is None:
+        await cl.Message(content="Consultation annulée.").send()
+        return
+
+    response = await api_client_v2.get_status_v2(case_id)
+    if response.status_code == 404:
+        await cl.Message(content=f"Dossier {case_id!r} introuvable (V2).").send()
+        return
+    if response.status_code >= 400:
+        await cl.Message(content=f"Erreur ({response.status_code}) : {response.text}").send()
+        return
+
+    await cl.Message(content=_format_status_v2(response.json())).send()
+
+
+async def _override_flow_v2() -> None:
+    case_id = await _ask_case_id("Identifiant du dossier à corriger (V2, ex. CLM-0001) :")
+    if case_id is None:
+        await cl.Message(content="Correction annulée.").send()
+        return
+
+    actor = cl.user_session.get("actor")
+    if not actor:
+        actor = await _ask_text("Votre identifiant (acteur, pour l'audit) :")
+        if not actor:
+            await cl.Message(content="Correction annulée (acteur requis).").send()
+            return
+        cl.user_session.set("actor", actor)
+
+    action = await _ask_text(
+        "Action (CONFIRM / OVERRIDE_APPROVE / OVERRIDE_REJECT / REOPEN) :"
+    )
+    if not action:
+        await cl.Message(content="Correction annulée.").send()
+        return
+
+    justification = await _ask_text("Justification (obligatoire) :")
+    if not justification:
+        await cl.Message(content="Correction annulée (justification requise).").send()
+        return
+
+    response = await api_client_v2.submit_override_v2(
+        case_id, actor=actor, action=action.strip().upper(), justification=justification
+    )
+    if response.status_code >= 400:
+        await cl.Message(content=f"Correction refusée ({response.status_code}) : {response.text}").send()
+        return
+
+    body = response.json()
+    await cl.Message(content=f"Correction enregistrée pour {case_id} : {body['action']}.").send()
+
+
+@cl.action_callback("menu_submit_v2")
+async def on_menu_submit_v2(action: cl.Action) -> None:
+    await _submit_flow_v2()
+
+
+@cl.action_callback("menu_status_v2")
+async def on_menu_status_v2(action: cl.Action) -> None:
+    await _status_flow_v2()
+
+
+@cl.action_callback("menu_override_v2")
+async def on_menu_override_v2(action: cl.Action) -> None:
+    await _override_flow_v2()
