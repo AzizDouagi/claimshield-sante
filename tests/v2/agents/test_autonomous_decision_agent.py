@@ -15,6 +15,7 @@ from schemas.domain import ClaimDecisionV2, IntakeSafetyStatus, VerificationStat
 from schemas.results import LlmMetadata, ProcedureCoding
 from schemas.v2_results import (
     EligibilityResult,
+    EvidenceCompleteness,
     IntakeSafetyResult,
     MedicalRiskResult,
     MedicalRiskResultPayload,
@@ -47,12 +48,15 @@ def _medical_risk(
     risk_level: RiskLevel = RiskLevel.LOW,
     status: VerificationStatus = VerificationStatus.PASS,
     codings: list[ProcedureCoding] | None = None,
+    evidence_completeness: EvidenceCompleteness = EvidenceCompleteness.COMPLETE,
 ) -> MedicalRiskResult:
     return MedicalRiskResult(
         case_id="CLM-6001",
         status=status,
         llm_trace=_llm_trace(),
-        result_payload=MedicalRiskResultPayload(risk_level=risk_level, codings=codings or []),
+        result_payload=MedicalRiskResultPayload(
+            risk_level=risk_level, codings=codings or [], evidence_completeness=evidence_completeness
+        ),
     )
 
 
@@ -111,12 +115,51 @@ class TestBoundedAuthority:
         state = _state(medical_risk_result=_medical_risk(risk_level=RiskLevel.HIGH))
         result = run("CLM-6001", state)
         assert result.decision is not ClaimDecisionV2.APPROVE
-        assert result.decision in (
-            ClaimDecisionV2.REJECT,
-            ClaimDecisionV2.QUARANTINE,
-            ClaimDecisionV2.REQUEST_MORE_INFO,
-        )
+        # Correctif post-mesure V2-10 : REQUEST_MORE_INFO retiré du plafond HIGH
+        # (un danger réel confirmé n'est pas résolu par une demande d'info).
+        assert result.decision in (ClaimDecisionV2.REJECT, ClaimDecisionV2.QUARANTINE)
         assert any("hors des bornes" in b for b in result.bounded_by)
+
+    def test_critical_risk_forces_quarantine_without_llm_call(self, monkeypatch):
+        spy = Mock()
+        monkeypatch.setattr(
+            "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision", spy
+        )
+        state = _state(medical_risk_result=_medical_risk(risk_level=RiskLevel.CRITICAL))
+        result = run("CLM-6001", state)
+        assert result.decision is ClaimDecisionV2.QUARANTINE
+        spy.assert_not_called()
+        assert any("CRITICAL" in b for b in result.bounded_by)
+
+    def test_insufficient_evidence_forces_request_more_info_never_quarantine(self, monkeypatch):
+        spy = Mock()
+        monkeypatch.setattr(
+            "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision", spy
+        )
+        state = _state(
+            medical_risk_result=_medical_risk(
+                risk_level=RiskLevel.LOW, evidence_completeness=EvidenceCompleteness.INSUFFICIENT
+            )
+        )
+        result = run("CLM-6001", state)
+        assert result.decision is ClaimDecisionV2.REQUEST_MORE_INFO
+        assert result.decision is not ClaimDecisionV2.QUARANTINE
+        spy.assert_not_called()
+
+    def test_fallback_prefers_request_more_info_over_quarantine(self, monkeypatch):
+        """`_merge_decision` — correctif post-mesure V2-10 : quand la
+        proposition LLM sort de `allowed`, le repli ne doit plus retomber
+        systématiquement sur QUARANTINE. Ici `allowed` par défaut inclut
+        REQUEST_MORE_INFO, jamais QUARANTINE (retiré de l'ensemble par
+        défaut) — donc même une décision LLM invalide ('QUARANTINE' n'étant
+        de toute façon plus dans `allowed`) retombe sur REQUEST_MORE_INFO."""
+        monkeypatch.setattr(
+            "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
+            Mock(return_value=_decision(decision="QUARANTINE")),
+        )
+        result = run("CLM-6001", _state())
+        assert result.decision is ClaimDecisionV2.REQUEST_MORE_INFO
+        assert result.decision is not ClaimDecisionV2.QUARANTINE
 
     def test_high_risk_never_produces_partial_approve(self, monkeypatch):
         monkeypatch.setattr(

@@ -19,8 +19,7 @@ modifiées (§0 du plan) :
     sévérité borné à un cran), `_fhir_summary`, `_medical_view_summary`.
   - `agents.fraud_detection_agent.agent` : `_collect_signals`,
     `_determine_status`, `_apply_signal_assessments` (ajustement de
-    pondération borné DOWNGRADE/NEUTRAL/UPGRADE), `_check_duplicate`,
-    seuils `_NEEDS_REVIEW_THRESHOLD`/`_FAIL_THRESHOLD`.
+    pondération borné DOWNGRADE/NEUTRAL/UPGRADE), `_check_duplicate`.
   - Les 3 outils `@tool` déjà autorisés en V1 : `rechercher_code`,
     `verifier_chronologie`, `verifier_doublon`.
 
@@ -29,6 +28,14 @@ modifiées (§0 du plan) :
 un `types.SimpleNamespace` construit depuis `initial_codings` (duck-typing
 volontaire, jamais un nouveau schéma dupliqué) : aucune modification des
 fonctions V1 réutilisées n'est nécessaire.
+
+Correctif post-mesure V2-10 (AZIZ) : `risk_score`/`risk_level` ne sont plus
+calculés sur la totalité des signaux fraude V1 — voir `_RISK_SIGNAL_TYPES`/
+`_COMPLETENESS_SIGNAL_TYPES`/`RiskThresholds` plus bas, qui séparent
+désormais le danger réel (alimente `risk_level`, jusqu'à `CRITICAL`) de la
+complétude des preuves (`evidence_completeness`, nouveau). Les poids
+`risk_contribution` de V1 (`_collect_signals`) restent inchangés — seule
+leur agrégation par cet agent change.
 
 Limite MVP assumée (héritée de V1, voir CLAUDE.md « câblage minimal ») :
 `procedures`/`medications` restent des listes vides tant qu'aucun
@@ -48,6 +55,7 @@ pour ses signaux, seul le contexte transmis au LLM est appauvri d'autant.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -82,10 +90,6 @@ from agents.fraud_detection_agent.agent import (
 from agents.fraud_detection_agent.agent import (
     _determine_status as _determine_fraud_status,
 )
-from agents.fraud_detection_agent.agent import (
-    _FAIL_THRESHOLD,
-    _NEEDS_REVIEW_THRESHOLD,
-)
 from agents.fraud_detection_agent.tools import _DEFAULT_DUPLICATE_INDEX, verifier_doublon
 from agents.medical_coding_agent.agent import _merge_with_llm
 from agents.medical_coding_agent.tools import rechercher_code
@@ -95,8 +99,13 @@ from agents.privacy_agent.schemas import FraudView
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
 from schemas.domain import VerificationStatus
-from schemas.results import ProcedureCoding, StructuredError
-from schemas.v2_results import MedicalRiskResult, MedicalRiskResultPayload, RiskLevel
+from schemas.results import FraudSignal, ProcedureCoding, StructuredError
+from schemas.v2_results import (
+    EvidenceCompleteness,
+    MedicalRiskResult,
+    MedicalRiskResultPayload,
+    RiskLevel,
+)
 from services.duplicate_index import DuplicateIndex
 from state.claim_state_v2 import ClaimStateV2, validate_state_update_v2
 from tools.medical_coding import code_medications, code_procedures, compute_global_status
@@ -114,14 +123,142 @@ def _worst(a: VerificationStatus, b: VerificationStatus) -> VerificationStatus:
     return a if _STATUS_RANK[a] >= _STATUS_RANK[b] else b
 
 
-def _risk_level_from_score(score: float) -> RiskLevel:
-    """Mêmes seuils que `agents.fraud_detection_agent.agent` (V1) — jamais
-    recalculés indépendamment."""
-    if score >= _FAIL_THRESHOLD:
+# ── Séparation risque réel / complétude des preuves (correctif post-mesure ────
+# V2-10, AZIZ) ─────────────────────────────────────────────────────────────
+#
+# La mesure réelle sur les 37 dossiers de démo a montré que `risk_level`
+# atteignait HIGH sur 36/37 dossiers alors qu'aucun n'était réellement
+# suspect — parce que `_collect_fraud_signals` (V1, réutilisée telle quelle)
+# mélange dans la même somme pondérée des signaux de danger réel
+# (identité confirmée non concordante, doublon de facture, plafond dépassé)
+# et des signaux de données manquantes (codification jamais tentée,
+# identité ambiguë faute de preuve, préautorisation non renseignée, faible
+# confiance d'extraction). Ces derniers sont désormais exclus du calcul de
+# `risk_score`/`risk_level` — ils alimentent uniquement `evidence_completeness`
+# (nouveau, voir `schemas.v2_results.EvidenceCompleteness`), jamais un
+# plafonnement vers QUARANTINE. Les poids `risk_contribution` eux-mêmes ne
+# sont jamais modifiés (fonction V1 `_collect_signals` non touchée) — seule
+# la façon dont `medical_risk_agent` les agrège change.
+
+_RISK_SIGNAL_TYPES: frozenset[str] = frozenset(
+    {
+        "IDENTITY_MISMATCH",
+        "COVERAGE_INACTIVE_OR_EXPIRED",
+        "CEILING_EXCEEDED",
+        "EXACT_DUPLICATE_INVOICE",
+        "NEAR_DUPLICATE_INVOICE",
+    }
+)
+"""Signaux de danger réel — alimentent `risk_score`/`risk_level`."""
+
+_COMPLETENESS_SIGNAL_TYPES: frozenset[str] = frozenset(
+    {
+        "IDENTITY_AMBIGUOUS",
+        "PREAUTHORIZATION_MISSING",
+        "UNRESOLVED_CODING",
+        "LOW_EXTRACTION_CONFIDENCE",
+    }
+)
+"""Signaux de données manquantes/ambiguës — alimentent `evidence_completeness`,
+jamais `risk_score`."""
+
+_CRITICAL_SIGNAL_TYPES: frozenset[str] = frozenset({"EXACT_DUPLICATE_INVOICE"})
+"""Signaux qui forcent `RiskLevel.CRITICAL` indépendamment du score — preuve
+de danger déjà quasi certaine (octets identiques à une facture déjà connue)."""
+
+
+@dataclass(frozen=True)
+class RiskThresholds:
+    """Seuils de `risk_score` (calculé sur les signaux de danger réel
+    uniquement) → `RiskLevel` — versionnés et configurables, jamais codés en
+    dur ailleurs. Valeurs proposées à valider empiriquement sur un
+    échantillon réel (voir plan de remédiation post-mesure V2-10, étape 2)
+    avant le rejeu complet des 37 dossiers — pas encore confirmées par une
+    mesure LLM réelle."""
+
+    version: str = "1.0.0"
+    critical_score: float = 0.70
+    high_score: float = 0.40
+    medium_score: float = 0.15
+
+    def __post_init__(self) -> None:
+        if not self.version.strip():
+            raise ValueError("RiskThresholds.version ne peut pas être vide")
+        if not (0.0 <= self.medium_score <= self.high_score <= self.critical_score <= 1.0):
+            raise ValueError(
+                "RiskThresholds doit vérifier 0 <= medium_score <= high_score <= "
+                "critical_score <= 1"
+            )
+
+
+DEFAULT_RISK_THRESHOLDS = RiskThresholds()
+
+
+def _split_fraud_signals(
+    signals: list[FraudSignal],
+) -> tuple[list[FraudSignal], list[FraudSignal]]:
+    """Sépare les signaux fraude déjà calculés (jamais recalculés ici) en
+    (signaux de risque réel, signaux de complétude) selon leur `signal_type`.
+    Un signal de type inconnu des deux ensembles (ne devrait jamais arriver
+    en pratique — les `signal_type` sont tous produits par
+    `agents.fraud_detection_agent.agent._collect_signals`/`_check_duplicate`,
+    eux-mêmes non modifiés) est classé prudemment côté risque réel plutôt que
+    silencieusement ignoré."""
+    risk_signals: list[FraudSignal] = []
+    completeness_signals: list[FraudSignal] = []
+    for signal in signals:
+        if signal.signal_type in _COMPLETENESS_SIGNAL_TYPES:
+            completeness_signals.append(signal)
+        else:
+            risk_signals.append(signal)
+    return risk_signals, completeness_signals
+
+
+def _risk_level_from_score(
+    score: float,
+    *,
+    risk_signals: list[FraudSignal],
+    thresholds: RiskThresholds = DEFAULT_RISK_THRESHOLDS,
+) -> RiskLevel:
+    """Dérive `RiskLevel` du score de risque réel (signaux de danger
+    uniquement, voir `_split_fraud_signals`) — un signal de
+    `_CRITICAL_SIGNAL_TYPES` (ex. doublon exact de facture) force CRITICAL
+    indépendamment du score, jamais l'inverse (un score élevé sans preuve
+    de ce type ne peut pas dépasser HIGH)."""
+    if any(s.signal_type in _CRITICAL_SIGNAL_TYPES for s in risk_signals):
+        return RiskLevel.CRITICAL
+    if score >= thresholds.critical_score:
+        return RiskLevel.CRITICAL
+    if score >= thresholds.high_score:
         return RiskLevel.HIGH
-    if score >= _NEEDS_REVIEW_THRESHOLD:
+    if score >= thresholds.medium_score:
         return RiskLevel.MEDIUM
     return RiskLevel.LOW
+
+
+def _evidence_completeness(
+    *,
+    completeness_signals: list[FraudSignal],
+    structural_absence: bool,
+) -> EvidenceCompleteness:
+    """`structural_absence` : aucune procédure/médicament ni preuve n'a même
+    été soumise à la codification (limite MVP du câblage, voir
+    `node()`/CLAUDE.md « câblage minimal ») — distinct d'une résolution
+    tentée et restée ambiguë (1 à 2 signaux de complétude).
+
+    Seuil `>= 3` (décision AZIZ post-mesure V2-10, sur mesure réelle des 37
+    fixtures) : le cas réel le plus fréquent — nom patient absent de l'OCR
+    (`IDENTITY_AMBIGUOUS`) + code médicament resté en correspondance
+    approximative (`UNRESOLVED_CODING`) — reste `PARTIAL` (LLM consulté,
+    `APPROVE` reste atteignable si le reste du dossier est propre), pas
+    `INSUFFICIENT` (`REQUEST_MORE_INFO` forcé). Le seuil précédent (`>= 2`)
+    bloquait systématiquement ce cas pourtant courant vers `REQUEST_MORE_INFO`
+    sans jamais consulter le LLM."""
+    if structural_absence or len(completeness_signals) >= 3:
+        return EvidenceCompleteness.INSUFFICIENT
+    if len(completeness_signals) >= 1:
+        return EvidenceCompleteness.PARTIAL
+    return EvidenceCompleteness.COMPLETE
 
 
 # ── Phase B : un seul appel ReAct LLM combiné ─────────────────────────────────
@@ -229,9 +366,10 @@ def run(
     )
     if duplicate_signal is not None:
         fraud_signals.append(duplicate_signal)
-    fraud_status, risk_score = _determine_fraud_status(
-        fraud_signals, insufficient_evidence=insufficient_fraud_evidence
-    )
+    # `fraud_status`/`risk_score` (Phase A) ne sont plus calculés ici — la
+    # séparation risque réel/complétude (voir `_split_fraud_signals`) n'est
+    # appliquée qu'une seule fois, en Phase C, sur `fraud_signals_final`
+    # (identique à `fraud_signals` quand l'ajustement LLM ne change rien).
 
     # ── Phase B : un seul appel ReAct LLM combiné ────────────────────────────
     needs_review_codings = [c for c in initial_codings if c.status == VerificationStatus.NEEDS_REVIEW]
@@ -323,20 +461,45 @@ def run(
     fraud_signals_final, fraud_notes = _apply_fraud_assessments(
         fraud_signals, llm_decision.fraud_signal_assessments if llm_decision is not None else []
     )
-    if fraud_notes:
-        fraud_status_final, risk_score_final = _determine_fraud_status(
-            fraud_signals_final, insufficient_evidence=insufficient_fraud_evidence
-        )
-    else:
-        fraud_status_final, risk_score_final = fraud_status, risk_score
 
-    overall_status = _worst(coding_status_final, _worst(clinical_status_final, fraud_status_final))
-    risk_level = _risk_level_from_score(risk_score_final)
+    # ── Séparation risque réel / complétude (post-mesure V2-10, AZIZ) ────────
+    # `risk_score`/`risk_level` ne sont plus jamais dérivés des signaux de
+    # données manquantes (voir `_RISK_SIGNAL_TYPES`/`_COMPLETENESS_SIGNAL_TYPES`
+    # en tête de module) — ces derniers alimentent exclusivement
+    # `evidence_completeness`, jamais un plafonnement vers QUARANTINE.
+    risk_signals_final, completeness_signals_final = _split_fraud_signals(fraud_signals_final)
+    fraud_status_final, risk_score_final = _determine_fraud_status(
+        risk_signals_final, insufficient_evidence=insufficient_fraud_evidence
+    )
+    risk_level = _risk_level_from_score(risk_score_final, risk_signals=risk_signals_final)
+
+    structural_absence = not final_codings and not procedures and not medications
+    evidence_completeness = _evidence_completeness(
+        completeness_signals=completeness_signals_final, structural_absence=structural_absence
+    )
+    # Une complétude insuffisante dégrade au plus à NEEDS_REVIEW — jamais
+    # FAIL (réservé aux vrais échecs cliniques/de risque) : c'est une donnée
+    # manquante, pas une preuve de danger.
+    completeness_status = (
+        VerificationStatus.PASS
+        if evidence_completeness is EvidenceCompleteness.COMPLETE
+        else VerificationStatus.NEEDS_REVIEW
+    )
+
+    overall_status = _worst(
+        coding_status_final, _worst(clinical_status_final, _worst(fraud_status_final, completeness_status))
+    )
 
     reasons: list[str] = list(clinical_reasons)
     reasons.append(duplicate_reason)
     if not final_codings:
         reasons.append("Aucun acte ou médicament fourni pour codification.")
+    if completeness_signals_final:
+        reasons.append(
+            f"{len(completeness_signals_final)} signal(aux) de données manquantes/ambiguës "
+            f"({', '.join(sorted({s.signal_type for s in completeness_signals_final}))}) — "
+            "comptés en complétude, jamais en risque."
+        )
     reasons.extend(clinical_status_reasons)
     reasons.extend(clinical_notes)
     reasons.extend(fraud_notes)
@@ -391,6 +554,13 @@ def run(
         )
 
     confidence = max(0.4, 1.0 - 0.1 * (len(clinical_signals_final) + len(fraud_signals_final)))
+    # Plafonnée par la complétude des preuves — une confiance élevée n'a pas
+    # de sens sur un dossier dont l'évaluation manque de données, même si le
+    # peu de signaux présents ne suggère aucun danger particulier.
+    if evidence_completeness is EvidenceCompleteness.INSUFFICIENT:
+        confidence = min(confidence, 0.4)
+    elif evidence_completeness is EvidenceCompleteness.PARTIAL:
+        confidence = min(confidence, 0.7)
 
     payload = MedicalRiskResultPayload(
         procedure_count=procedure_count,
@@ -402,6 +572,7 @@ def run(
         duplicate_invoice=duplicate_invoice,
         risk_score=risk_score_final,
         risk_level=risk_level,
+        evidence_completeness=evidence_completeness,
         reasons=[r for r in reasons if r],
     )
 
@@ -433,6 +604,7 @@ def node(state: ClaimStateV2) -> dict:
     eligibility_result = state.get("eligibility_result")
 
     ocr_result_like: object | None = None
+    medications: list[str] = []
     if document_understanding_result is not None:
         extraction = (
             document_understanding_result.extraction
@@ -452,6 +624,32 @@ def node(state: ClaimStateV2) -> dict:
                 document_type=None,
                 sha256=None,
             )
+            # Câblage best-effort (correctif post-mesure V2-10, AZIZ) :
+            # `essential_fields.medical_items` n'est peuplé que par un regex
+            # médicament-only (`tools.document_parser._MEDICATION_RE`) — tout
+            # élément qui y figure est donc déjà, par construction, classé
+            # médicament, jamais un acte. `procedures` reste volontairement
+            # vide : aucun discriminant fiable acte/médicament n'existe
+            # encore côté extraction (même limite que V1,
+            # `graph/input_builders.py::build_coding_input` — jamais une
+            # répartition heuristique inventée ici).
+            essential_fields = (
+                extraction.essential_fields
+                if hasattr(extraction, "essential_fields")
+                else extraction.get("essential_fields")
+            )
+            medical_items = (
+                getattr(essential_fields, "medical_items", None)
+                if essential_fields is not None and not isinstance(essential_fields, dict)
+                else (essential_fields or {}).get("medical_items")
+            )
+            if medical_items:
+                for item in medical_items:
+                    description = (
+                        item.description if hasattr(item, "description") else item.get("description")
+                    )
+                    if description:
+                        medications.append(description)
 
     identity_like: object | None = None
     if eligibility_result is not None:
@@ -470,7 +668,7 @@ def node(state: ClaimStateV2) -> dict:
     result = run(
         case_id=case_id,
         procedures=[],
-        medications=[],
+        medications=medications,
         ocr_result=ocr_result_like,
         identity_coverage_result=identity_like,
     )

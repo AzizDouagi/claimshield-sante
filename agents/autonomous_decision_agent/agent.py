@@ -71,12 +71,33 @@ _ALWAYS_ALLOWED_WHEN_UNBLOCKED: frozenset[ClaimDecisionV2] = frozenset(
         ClaimDecisionV2.APPROVE,
         ClaimDecisionV2.REJECT,
         ClaimDecisionV2.REQUEST_MORE_INFO,
-        ClaimDecisionV2.QUARANTINE,
     }
 )
+"""Correctif post-mesure V2-10 (AZIZ) : QUARANTINE retiré de l'ensemble par
+défaut — il n'est plus jamais proposable « par erreur » au LLM, réservé
+exclusivement aux branches forcées (`intake_safety.status == QUARANTINED`,
+`medical_risk.risk_level == CRITICAL`). Un dossier sans danger réel confirmé
+ne doit jamais pouvoir atterrir sur QUARANTINE, y compris via le repli de
+`_merge_decision`."""
+
 _HIGH_RISK_ALLOWED: frozenset[ClaimDecisionV2] = frozenset(
-    {ClaimDecisionV2.REJECT, ClaimDecisionV2.QUARANTINE, ClaimDecisionV2.REQUEST_MORE_INFO}
+    {ClaimDecisionV2.REJECT, ClaimDecisionV2.QUARANTINE}
 )
+"""`risk_level == HIGH` : danger réel mais pas certain — REQUEST_MORE_INFO
+volontairement absent (plus d'information ne résout pas un danger déjà
+confirmé par au moins un signal réel, voir `medical_risk_agent`)."""
+
+_CRITICAL_RISK_ALLOWED: frozenset[ClaimDecisionV2] = frozenset({ClaimDecisionV2.QUARANTINE})
+"""`risk_level == CRITICAL` : danger confirmé (doublon exact ou score de
+risque réel au-delà du seuil) — décision forcée, LLM non consulté, même
+patron que BLOCKED/QUARANTINED."""
+
+_INSUFFICIENT_EVIDENCE_ALLOWED: frozenset[ClaimDecisionV2] = frozenset(
+    {ClaimDecisionV2.REQUEST_MORE_INFO}
+)
+"""`evidence_completeness == INSUFFICIENT` (et risque réel non HIGH/CRITICAL) :
+données manquantes, jamais un danger — décision forcée vers REQUEST_MORE_INFO,
+jamais QUARANTINE. Voir `schemas.v2_results.EvidenceCompleteness`."""
 
 
 def _value(value: object | None) -> str | None:
@@ -123,6 +144,9 @@ def _build_snapshot(state: ClaimStateV2) -> dict[str, dict[str, object]]:
             "coverage_status": _upper(
                 getattr(getattr(eligibility, "coverage", None), "status", None)
             ),
+            "coverage_data_available": bool(getattr(eligibility, "coverage_data_available", True))
+            if eligibility is not None
+            else None,
             "ceiling_exceeded": bool(
                 getattr(getattr(eligibility, "coverage", None), "ceiling_exceeded", False)
             ),
@@ -135,6 +159,9 @@ def _build_snapshot(state: ClaimStateV2) -> dict[str, dict[str, object]]:
             "status": _upper(getattr(medical_risk, "status", None)),
             "risk_level": _upper(getattr(medical_risk_payload, "risk_level", None)),
             "risk_score": getattr(medical_risk_payload, "risk_score", None),
+            "evidence_completeness": _upper(
+                getattr(medical_risk_payload, "evidence_completeness", None)
+            ),
             "duplicate_invoice": getattr(medical_risk_payload, "duplicate_invoice", None),
             "signal_count": _count_items(getattr(medical_risk_payload, "clinical_signals", None))
             + _count_items(getattr(medical_risk_payload, "fraud_signals", None)),
@@ -182,10 +209,29 @@ def _has_partial_approve_condition(state: ClaimStateV2) -> bool:
 
 
 def _allowed_decisions(
-    *, intake_status: str | None, risk_level: str | None, has_partial_condition: bool
+    *,
+    intake_status: str | None,
+    risk_level: str | None,
+    evidence_completeness: str | None,
+    has_partial_condition: bool,
 ) -> tuple[frozenset[ClaimDecisionV2], list[str]]:
     """Calcule, en Python pur, l'ensemble des décisions autorisées pour ce
-    dossier — jamais laissé à l'appréciation du LLM."""
+    dossier — jamais laissé à l'appréciation du LLM.
+
+    Matrice révisée post-mesure V2-10 (AZIZ) — ordre de priorité strict,
+    chaque branche court-circuite les suivantes :
+      1. intake BLOCKED/QUARANTINED (inchangé, décision technique/sécurité
+         déjà prise en amont, LLM jamais consulté) ;
+      2. `risk_level == CRITICAL` (danger confirmé) → QUARANTINE forcé ;
+      3. `risk_level == HIGH` (danger réel non certain) → {REJECT, QUARANTINE} ;
+      4. `evidence_completeness == INSUFFICIENT` (données manquantes, jamais
+         un danger réel confirmé à ce stade) → REQUEST_MORE_INFO forcé,
+         jamais QUARANTINE ;
+      5. par défaut : {APPROVE, REJECT, REQUEST_MORE_INFO} (+ PARTIAL_APPROVE
+         si un mélange réel de codings l'autorise) — QUARANTINE n'apparaît
+         plus jamais dans cet ensemble par défaut (voir
+         `_ALWAYS_ALLOWED_WHEN_UNBLOCKED`).
+    """
     bounded_by: list[str] = []
 
     if intake_status == "BLOCKED":
@@ -195,16 +241,30 @@ def _allowed_decisions(
         bounded_by.append("intake_safety.status == QUARANTINED → QUARANTINE forcé, LLM non consulté.")
         return frozenset({ClaimDecisionV2.QUARANTINE}), bounded_by
 
+    if risk_level == "CRITICAL":
+        bounded_by.append(
+            "medical_risk.risk_level == CRITICAL → QUARANTINE forcé (danger réel confirmé), "
+            "LLM non consulté."
+        )
+        return frozenset(_CRITICAL_RISK_ALLOWED), bounded_by
+
+    if risk_level == "HIGH":
+        bounded_by.append(
+            "medical_risk.risk_level == HIGH → décision plafonnée à REJECT/QUARANTINE "
+            "(danger réel, information supplémentaire non pertinente)."
+        )
+        return frozenset(_HIGH_RISK_ALLOWED), bounded_by
+
+    if evidence_completeness == "INSUFFICIENT":
+        bounded_by.append(
+            "medical_risk.evidence_completeness == INSUFFICIENT → REQUEST_MORE_INFO forcé "
+            "(données manquantes, jamais un danger réel confirmé), LLM non consulté."
+        )
+        return frozenset(_INSUFFICIENT_EVIDENCE_ALLOWED), bounded_by
+
     allowed = set(_ALWAYS_ALLOWED_WHEN_UNBLOCKED)
     if has_partial_condition:
         allowed.add(ClaimDecisionV2.PARTIAL_APPROVE)
-
-    if risk_level == "HIGH":
-        allowed &= set(_HIGH_RISK_ALLOWED)
-        bounded_by.append(
-            "medical_risk.risk_level == HIGH → décision plafonnée à "
-            "REJECT/QUARANTINE/REQUEST_MORE_INFO."
-        )
 
     return frozenset(allowed), bounded_by
 
@@ -240,12 +300,29 @@ def _invoke_llm_autonomous_decision(data: dict[str, Any]) -> LlmAutonomousDecisi
         return None
 
 
+_FALLBACK_PRIORITY: tuple[ClaimDecisionV2, ...] = (
+    ClaimDecisionV2.REQUEST_MORE_INFO,
+    ClaimDecisionV2.REJECT,
+    ClaimDecisionV2.QUARANTINE,
+    ClaimDecisionV2.PARTIAL_APPROVE,
+)
+"""Ordre de repli quand la décision LLM sort de `allowed` — correctif
+post-mesure V2-10 (AZIZ) : l'ancien repli systématique vers QUARANTINE
+(`fallback = QUARANTINE if QUARANTINE in allowed else next(iter(allowed))`)
+biaisait la décision indépendamment même du plafond `risk_level == HIGH`
+lui-même. Le nouvel ordre préfère la voie la moins irréversible
+(demander plus d'information) puis la plus prudente parmi celles restant
+disponibles — jamais APPROVE (qui n'apparaît volontairement pas dans cette
+liste : un repli ne peut jamais approuver automatiquement un dossier)."""
+
+
 def _merge_decision(
     allowed: frozenset[ClaimDecisionV2],
     llm_decision: LlmAutonomousDecision | None,
 ) -> tuple[ClaimDecisionV2, list[str]]:
     """N'accepte la décision LLM que si elle appartient à `allowed` — sinon
-    repli déterministe conservateur, jamais la valeur hors bornes."""
+    repli déterministe conservateur (voir `_FALLBACK_PRIORITY`), jamais la
+    valeur hors bornes proposée, jamais un repli automatique vers APPROVE."""
     if llm_decision is None:
         return ClaimDecisionV2.TECHNICAL_FAILURE, [
             "LLM indisponible ou réponse invalide — décision impossible sans synthèse."
@@ -258,7 +335,7 @@ def _merge_decision(
     if proposed is not None and proposed in allowed:
         return proposed, []
 
-    fallback = ClaimDecisionV2.QUARANTINE if ClaimDecisionV2.QUARANTINE in allowed else next(iter(allowed))
+    fallback = next((d for d in _FALLBACK_PRIORITY if d in allowed), None) or next(iter(allowed))
     return fallback, [
         f"Décision LLM {llm_decision.decision!r} hors des bornes autorisées "
         f"({sorted(d.value for d in allowed)}) pour ce dossier — repli sur {fallback.value}."
@@ -281,14 +358,19 @@ def run(case_id: str, state: ClaimStateV2 | None = None) -> AutonomousDecisionRe
 
     intake_status = snapshot["intake_safety"].get("status")
     risk_level = snapshot["medical_risk"].get("risk_level")
+    evidence_completeness = snapshot["medical_risk"].get("evidence_completeness")
     has_partial_condition = _has_partial_approve_condition(decision_state)
     allowed, bounded_by = _allowed_decisions(
         intake_status=str(intake_status) if intake_status else None,
         risk_level=str(risk_level) if risk_level else None,
+        evidence_completeness=str(evidence_completeness) if evidence_completeness else None,
         has_partial_condition=has_partial_condition,
     )
 
-    llm_consulted = len(allowed) > 1  # jamais consulté si BLOCKED/QUARANTINED forcé
+    # Jamais consulté si `allowed` est un singleton forcé (BLOCKED/QUARANTINED/
+    # CRITICAL/INSUFFICIENT) ; toujours consulté sinon, y compris pour HIGH
+    # (deux options restantes : REJECT vs QUARANTINE).
+    llm_consulted = len(allowed) > 1
     llm_decision: LlmAutonomousDecision | None = None
     if llm_consulted:
         llm_decision = _invoke_llm_autonomous_decision(

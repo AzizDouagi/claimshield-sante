@@ -87,6 +87,87 @@ def _sanitize_reason(text: str) -> str:
     return text.replace("\n", " ").strip()
 
 
+_PAYER_NAME_ABSENT_REASON = "Assureur (payer_name) absent ou vide — couverture non vérifiable"
+"""Motif unique et déterministe renvoyé par `tools.coverage_rules.verify_coverage`
+(V1, non modifié — ligne ~344-364) quand `payer_name` est vide : c'est un
+retour anticipé, aucun autre motif ne peut co-exister avec celui-ci dans le
+même appel (la fonction retourne avant d'évaluer quoi que ce soit d'autre)."""
+
+_AMOUNT_REQUESTED_ABSENT_REASON = (
+    "Montant demandé (amount_requested) absent ou invalide — couverture non vérifiable"
+)
+"""Même patron que `_PAYER_NAME_ABSENT_REASON` — second retour anticipé à
+motif unique de `verify_coverage` (V1, non modifié — ligne ~366-386), quand
+`amount_requested` est absent/invalide. Généralisation post-mesure V2-10
+(AZIZ) : découvert lors de la validation sur 5 dossiers réels (CLM-0002),
+où ce second motif produisait exactement le même faux FAIL que
+`_PAYER_NAME_ABSENT_REASON`, non couvert par le premier correctif."""
+
+
+def _field_value(fields: dict | None, name: str) -> str | None:
+    """Même duck-typing que `identity_coverage_agent.agent._extract_field_value`
+    (V1, non modifié) : une valeur peut être un `ExtractedField` Pydantic
+    (`.value`), un dict brut (`["value"]`) ou une chaîne directe."""
+    if not fields or name not in fields:
+        return None
+    field = fields.get(name)
+    if hasattr(field, "value"):
+        raw = field.value
+    elif isinstance(field, dict):
+        raw = field.get("value")
+    elif isinstance(field, str):
+        raw = field
+    else:
+        raw = None
+    return raw if isinstance(raw, str) and raw.strip() else None
+
+
+def _downgrade_missing_input_data_to_review(
+    coverage,
+    *,
+    payer_data_available: bool,
+    amount_data_available: bool,
+):
+    """Correctif post-mesure V2-10 (AZIZ) : absence de donnée n'est pas une
+    inéligibilité confirmée — `tools.coverage_rules.verify_coverage` (V1,
+    partagé, jamais modifié — §0 « ne jamais toucher la V1 ») retourne un
+    FAIL immédiat dès que `payer_name` OU `amount_requested` est vide, sans
+    distinguer « aucune donnée n'a jamais été fournie » de « la couverture a
+    été évaluée et jugée invalide ». La réinterprétation vit exclusivement
+    dans ce wrapper V2, via `model_copy` (jamais une mutation du résultat V1
+    partagé, jamais un contournement de `verify_coverage` lui-même) — ne
+    s'applique que si (a) le FAIL provient EXCLUSIVEMENT de l'un de ces deux
+    motifs exacts (retour anticipé, aucun autre échec n'a pu être évalué) ET
+    (b) la donnée d'entrée correspondante n'a jamais été transmise à cet
+    agent (généralisé : `payer_data_available`/`amount_data_available`,
+    chacun spécifique à son propre motif — jamais utilisés l'un pour
+    l'autre)."""
+    reasons = list(coverage.reasons)
+    if coverage.status is not VerificationStatus.FAIL or len(reasons) != 1:
+        return coverage
+
+    single_reason = reasons[0]
+    if single_reason == _PAYER_NAME_ABSENT_REASON and not payer_data_available:
+        note = (
+            "Couverture non évaluable : assureur non extrait des documents — "
+            "pas une inéligibilité confirmée, informations complémentaires requises."
+        )
+    elif single_reason == _AMOUNT_REQUESTED_ABSENT_REASON and not amount_data_available:
+        note = (
+            "Couverture non évaluable : montant demandé non extrait des documents — "
+            "pas une inéligibilité confirmée, informations complémentaires requises."
+        )
+    else:
+        return coverage
+
+    return coverage.model_copy(
+        update={
+            "status": VerificationStatus.NEEDS_REVIEW,
+            "reasons": [*coverage.reasons, note],
+        }
+    )
+
+
 # ── Fonction principale (testable sans LangGraph) ─────────────────────────────
 
 
@@ -138,10 +219,25 @@ def run(
         provenance=provenance,
     )
 
-    status = _worse(v1_result.identity.status, v1_result.coverage.status)
+    coverage_data_available = bool(
+        contract or policy_number or _field_value(extracted_fields, "payer_name")
+    )
+    amount_data_available = bool(
+        requested_amount is not None
+        or total_amount is not None
+        or _field_value(extracted_fields, "amount_requested")
+        or _field_value(extracted_fields, "total_billed")
+    )
+    coverage = _downgrade_missing_input_data_to_review(
+        v1_result.coverage,
+        payer_data_available=coverage_data_available,
+        amount_data_available=amount_data_available,
+    )
+
+    status = _worse(v1_result.identity.status, coverage.status)
     reasons = [
         _sanitize_reason(r)
-        for r in (*v1_result.identity.reasons, *v1_result.coverage.reasons, *v1_result.warnings)
+        for r in (*v1_result.identity.reasons, *coverage.reasons, *v1_result.warnings)
         if r
     ]
     errors = [
@@ -153,7 +249,8 @@ def run(
         case_id=v1_result.case_id,
         status=status,
         identity=v1_result.identity,
-        coverage=v1_result.coverage,
+        coverage=coverage,
+        coverage_data_available=coverage_data_available,
         rule_version=v1_result.rule_version,
         reasons=reasons or ["Vérification identité/couverture terminée."],
         errors=errors,

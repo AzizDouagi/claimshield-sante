@@ -45,6 +45,7 @@ __all__ = [
     "AutonomousDecisionResult",
     "DocumentUnderstandingResult",
     "EligibilityResult",
+    "EvidenceCompleteness",
     "IntakeSafetyResult",
     "MedicalRiskResult",
     "MedicalRiskResultPayload",
@@ -149,12 +150,19 @@ class DocumentUnderstandingResult(StrictModel):
 
 class EligibilityResult(StrictModel):
     """Porte quasi 1:1 de `schemas.results.IdentityCoverageResult` (V1) —
-    renommage seul, logique métier inchangée (plan V2 Phase V2-4)."""
+    renommage seul, logique métier inchangée (plan V2 Phase V2-4).
+
+    `coverage_data_available` (ajouté post-mesure V2-10, AZIZ) distingue
+    explicitement « aucune donnée de police/contrat n'a jamais été fournie »
+    de « la couverture a été évaluée et jugée invalide » — nécessaire pour
+    qu'`autonomous_decision_agent` ne confonde plus une absence de donnée
+    avec un risque réel (voir `agents/eligibility_agent/agent.py::run()`)."""
 
     case_id: str = Field(..., pattern=r"^CLM-\d{4,}$")
     status: VerificationStatus
     identity: IdentityResult
     coverage: CoverageResult
+    coverage_data_available: bool = True
     rule_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
     errors: list[StructuredError] = Field(default_factory=list)
@@ -172,11 +180,36 @@ class EligibilityResult(StrictModel):
 class RiskLevel(str, Enum):
     """Niveau de risque dérivé déterministiquement de `risk_score` — jamais
     choisi librement par le LLM (voir agents/medical_risk_agent/agent.py,
-    même patron de bornage que P1-1/P1-2 en V1)."""
+    même patron de bornage que P1-1/P1-2 en V1).
+
+    `CRITICAL` ajouté post-mesure V2-10 (AZIZ) : réservé aux signaux de
+    danger *réel* et confirmé (doublon exact de facture, ou score de risque
+    réel au-delà du seuil HIGH) — seul niveau qui plafonne directement à
+    QUARANTINE dans `autonomous_decision_agent`. `risk_level` n'est plus
+    calculé à partir de TOUS les signaux (voir `EvidenceCompleteness`, qui
+    porte désormais les signaux de données manquantes)."""
 
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class EvidenceCompleteness(str, Enum):
+    """Complétude des preuves disponibles pour l'évaluation — axe distinct
+    et indépendant de `RiskLevel` (ajouté post-mesure V2-10, AZIZ, suite au
+    constat que des données manquantes — codification jamais tentée,
+    couverture non vérifiable — étaient auparavant comptées comme du risque
+    réel et plafonnaient systématiquement à QUARANTINE).
+
+    Dérivé des signaux `IDENTITY_AMBIGUOUS`/`UNRESOLVED_CODING`/
+    `LOW_EXTRACTION_CONFIDENCE`/`PREAUTHORIZATION_MISSING` (voir
+    `agents/medical_risk_agent/agent.py::_COMPLETENESS_SIGNAL_TYPES`) —
+    jamais des signaux de danger réel (`RiskLevel`)."""
+
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    INSUFFICIENT = "INSUFFICIENT"
 
 
 class MedicalRiskResultPayload(StrictModel):
@@ -200,6 +233,7 @@ class MedicalRiskResultPayload(StrictModel):
     duplicate_invoice: bool | None = None
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     risk_level: RiskLevel = RiskLevel.LOW
+    evidence_completeness: EvidenceCompleteness = EvidenceCompleteness.COMPLETE
     threshold_version: str = "1.0.0"
     reasons: list[str] = Field(default_factory=list)
 

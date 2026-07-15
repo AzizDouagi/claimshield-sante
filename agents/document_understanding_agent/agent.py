@@ -37,6 +37,7 @@ Simplifications volontaires par rapport à V1 (documentées, pas des oublis) :
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -72,7 +73,10 @@ from schemas.results import (
     DocumentClassification,
     DocumentExtraction,
     DocumentOcrResult,
+    ExtractedField,
+    FieldProvenance,
     InspectedFile,
+    MedicalItem,
     StructuredError,
 )
 from schemas.v2_results import DocumentUnderstandingResult, IntakeSafetyResult
@@ -114,6 +118,18 @@ def _select_document_candidate(files: list[InspectedFile]) -> InspectedFile | No
         if "facture" in f.original_name.lower():
             return f
     return non_fhir[0]
+
+
+def _select_secondary_candidates(
+    files: list[InspectedFile], primary: InspectedFile | None
+) -> list[InspectedFile]:
+    """Autres documents acceptés, non-FHIR, hors le document principal déjà
+    traité par `_select_document_candidate` — correctif post-mesure V2-10
+    (AZIZ), Phase 4. Comparaison par identité d'objet (`is not primary`),
+    jamais par nom — `primary` provient toujours de ce même `files`."""
+    accepted = [f for f in files if f.status == FileStatus.ACCEPTED]
+    non_fhir = [f for f in accepted if not _looks_like_fhir_bundle(f)]
+    return [f for f in non_fhir if f is not primary]
 
 
 def _select_fhir_bundle_candidate(files: list[InspectedFile]) -> InspectedFile | None:
@@ -160,6 +176,198 @@ def _build_privacy_claim_data(extraction: DocumentExtraction | None) -> dict:
     if ef.medical_items:
         data["procedures"] = [item.description for item in ef.medical_items]
     return data
+
+
+# ── Extraction multi-documents ciblée aux champs de couverture (correctif ────
+# post-mesure V2-10, AZIZ, Phase 4) ─────────────────────────────────────────
+#
+# Limite MVP assouplie en Phase 5 (voir plus bas) : le document principal
+# (sélectionné par `_select_document_candidate`, en pratique la facture)
+# reste seul pleinement traité, mais les actes/médicaments d'un document
+# secondaire (en pratique l'ordonnance, dont `_MEDICATION_RE` — V1, jamais
+# modifiée — capture déjà les lignes de médicament) sont récupérés à moindre
+# coût : `parse_fields()` sur un document secondaire calcule déjà
+# `essential_fields.medical_items` dans le cadre du harvest des champs de
+# couverture ci-dessous — aucun appel OCR/classification supplémentaire.
+# Toujours jamais une répartition heuristique acte/médicament inventée : les
+# éléments sont pris tels quels, uniquement si le document principal n'en a
+# lui-même trouvé aucun. Ce qui suit récupère trois champs d'en-tête de
+# couverture déjà connus du référentiel (`payer_name`/`coverage_rate`/
+# `contract_number`), jamais un deuxième document pleinement re-traité,
+# jamais un champ déjà présent écrasé.
+
+_SUPPLEMENTARY_FIELD_NAMES: tuple[str, ...] = ("payer_name", "coverage_rate", "contract_number")
+
+_PAYER_HINT_RE = re.compile(
+    r"(?:assureur|mutuelle|assurance|payer|cigna|blue\s+cross|axa|harmonie|malakoff)",
+    re.IGNORECASE,
+)
+"""Dupliqué volontairement depuis `tools.document_parser._PAYER_RE` (V1,
+jamais modifié — §0 du plan) : `tools.document_parser.parse_fields()`
+n'applique ce motif que pour `DocumentType.INVOICE`, alors que le nom de
+l'assureur figure en pratique sur le document de demande de remboursement
+(`DocumentType.CLAIM_REQUEST`), jamais sur la facture elle-même (vérifié sur
+les fixtures réelles CLM-0001/CLM-0002 — `pdftotext` sur les PDF sources).
+Dupliqué plutôt que la branche CLAIM_REQUEST de V1 modifiée pour ne jamais
+toucher `tools/document_parser.py` — même convention que
+`schemas.v2_results._reject_unstructured_content`, documentée comme choix
+délibéré de duplication pour préserver l'autonomie de chaque module."""
+
+_MEDICATION_HINT_RE = re.compile(
+    r"\b([a-zà-ÿA-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ\-]{2,30}(?:\s+[a-zà-ÿA-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ\-]{2,30}){0,2})"
+    r"\s+(\d+(?:[.,]\d+)?\s*(?:mg|ml|g|mcg|µg|ug)\b)",
+    re.IGNORECASE,
+)
+"""Tolère ce que `tools.document_parser._MEDICATION_RE` (V1, jamais modifié
+— §0 du plan) ne capture pas : unités en majuscules (`MG`, format Synthea
+réel — le motif V1 n'a pas de drapeau `re.IGNORECASE`) et doses décimales
+(`0.0272 MG`, le motif V1 n'accepte que des entiers). Vérifié sur les
+fixtures réelles CLM-0001 à CLM-0008 (`pypdf` sur les PDF d'ordonnance
+sources) : `_MEDICATION_RE` ne matche aucune ligne de médicament Synthea
+réelle, ce motif local en capture systématiquement au moins une par
+document. Utilisé uniquement en repli, jamais si `parse_fields()` (V1) a
+déjà trouvé un acte/médicament sur le document secondaire lui-même —
+préférence donnée à l'extraction V1 quand elle fonctionne."""
+
+
+def _missing_field_names(fields: dict[str, ExtractedField]) -> list[str]:
+    return [
+        name
+        for name in _SUPPLEMENTARY_FIELD_NAMES
+        if not fields.get(name) or not fields[name].value
+    ]
+
+
+def _harvest_supplementary_fields(
+    candidates: list[InspectedFile],
+    fields: dict[str, ExtractedField],
+    *,
+    case_id: str,
+    storage_root: Path,
+    strategy,
+    needs_medical_items: bool = False,
+) -> tuple[dict[str, ExtractedField], list[MedicalItem], list[str]]:
+    """Passe légère sur les documents secondaires du dossier — reprend
+    exactement les mêmes briques déterministes que le document principal
+    (`extract_pages`, `classify_document`, `tools.document_parser.parse_fields`,
+    toutes non modifiées), jamais une nouvelle logique d'extraction inventée.
+    S'arrête dès que les trois champs ciblés (+ les actes/médicaments si
+    `needs_medical_items`) sont trouvés ou que les documents secondaires sont
+    épuisés. Ne modifie jamais `fields` en place — retourne une copie
+    fusionnée et la liste des `MedicalItem` récoltés (vide si
+    `needs_medical_items=False` ou aucun trouvé)."""
+    missing = _missing_field_names(fields)
+    if (not missing and not needs_medical_items) or not candidates:
+        return fields, [], []
+
+    harvested = dict(fields)
+    harvested_medical_items: list[MedicalItem] = []
+    notes: list[str] = []
+
+    for candidate in candidates:
+        if not missing and (not needs_medical_items or harvested_medical_items):
+            break
+        if not candidate.sha256 or not candidate.relative_storage_path:
+            continue
+        try:
+            ocr_input = DocumentOcrInput(
+                claim_id=case_id,
+                document_id=f"{case_id}-doc-secondaire-{candidate.storage_name}",
+                filename=candidate.original_name,
+                mime_type=candidate.detected_mime_type,
+                sha256=candidate.sha256,
+                sanitized_path=candidate.relative_storage_path,
+                security_decision=SecurityDecision.ALLOW,
+            )
+        except ValidationError:
+            continue
+
+        verified = verify_file_integrity(ocr_input, storage_root=storage_root)
+        if isinstance(verified, DocumentOcrResult):
+            continue
+        extracted = extract_pages(
+            ocr_input=ocr_input,
+            abs_path=verified.abs_path,
+            mime=ocr_input.mime_type,
+            storage_root=storage_root,
+            strategy=strategy,
+        )
+        if isinstance(extracted, DocumentOcrResult):
+            continue
+        secondary_text = extracted.full_text
+        if not secondary_text:
+            continue
+
+        raw_classification = classify_document(
+            secondary_text, filename=candidate.original_name, mime_type=candidate.detected_mime_type
+        )
+        secondary_parse = parse_fields(
+            text=secondary_text,
+            document_type=raw_classification.document_type,
+            page_number=(extracted.pages_content[0].page_number if extracted.pages_content else None),
+            ocr_source=extracted.ocr_source,
+            base_confidence=extracted.ocr_raw_confidence,
+            filename=candidate.original_name,
+            sha256=ocr_input.sha256,
+        )
+
+        for name in list(missing):
+            found = secondary_parse.fields.get(name)
+            if found is not None and found.value:
+                harvested[name] = found
+                notes.append(
+                    f"Champ '{name}' récupéré depuis un document secondaire "
+                    f"({candidate.original_name}) — jamais depuis le document principal."
+                )
+                missing.remove(name)
+
+        if needs_medical_items and not harvested_medical_items:
+            if secondary_parse.essential_fields.medical_items:
+                harvested_medical_items = list(secondary_parse.essential_fields.medical_items)
+                source_note = "extraction standard"
+            else:
+                seen_descriptions: set[str] = set()
+                for match in _MEDICATION_HINT_RE.finditer(secondary_text):
+                    description = f"{match.group(1).strip()} {match.group(2).strip()}"
+                    normalized = " ".join(description.lower().split())
+                    if normalized in seen_descriptions:
+                        continue
+                    seen_descriptions.add(normalized)
+                    harvested_medical_items.append(MedicalItem(description=description, quantity=1))
+                source_note = "détection tolérante (dose décimale/unité majuscule)"
+            if harvested_medical_items:
+                notes.append(
+                    f"{len(harvested_medical_items)} acte(s)/médicament(s) récupéré(s) depuis un "
+                    f"document secondaire ({candidate.original_name}, {source_note}) — document "
+                    "principal sans acte/médicament détecté."
+                )
+
+        if "payer_name" in missing:
+            payer_match = _PAYER_HINT_RE.search(secondary_text)
+            if payer_match:
+                harvested["payer_name"] = ExtractedField(
+                    field_name="payer_name",
+                    value=payer_match.group(0),
+                    confidence=0.05,
+                    requires_review=True,
+                    provenance=FieldProvenance(
+                        filename=candidate.original_name,
+                        sha256=candidate.sha256 or "",
+                        method=extracted.ocr_source,
+                        source_text=payer_match.group(0)[:200],
+                        confidence=0.05,
+                        parser_version="document-understanding-v2-supplementary-1.0.0",
+                        extracted_at=datetime.now(UTC),
+                    ),
+                )
+                notes.append(
+                    f"Champ 'payer_name' récupéré depuis un document secondaire "
+                    f"({candidate.original_name}) via détection de mention d'assureur — "
+                    "jamais depuis le document principal."
+                )
+                missing.remove("payer_name")
+
+    return harvested, harvested_medical_items, notes
 
 
 # ── Phase B : LLM ─────────────────────────────────────────────────────────────
@@ -392,6 +600,36 @@ def run(
                         security_findings=security_findings,
                     )
                     reasons.extend(review_reasons)
+
+                    # ── Phase 4/5 (correctif post-mesure V2-10, AZIZ) ─────────
+                    # Récolte ciblée payer_name/coverage_rate/contract_number
+                    # (Phase 4) et actes/médicaments (Phase 5, ex. ordonnance
+                    # quand la facture — document principal — n'en contient
+                    # aucun) depuis les documents secondaires du dossier —
+                    # jamais un deuxième document pleinement retraité (voir
+                    # docstring de `_harvest_supplementary_fields`).
+                    secondary_candidates = _select_secondary_candidates(manifest_files, doc_candidate)
+                    needs_medical_items = not (
+                        extraction.essential_fields and extraction.essential_fields.medical_items
+                    )
+                    merged_fields, harvested_medical_items, harvest_notes = _harvest_supplementary_fields(
+                        secondary_candidates,
+                        extraction.fields,
+                        case_id=case_id,
+                        storage_root=root,
+                        strategy=strategy,
+                        needs_medical_items=needs_medical_items,
+                    )
+                    updates: dict = {}
+                    if harvest_notes:
+                        updates["fields"] = merged_fields
+                    if harvested_medical_items and extraction.essential_fields:
+                        updates["essential_fields"] = extraction.essential_fields.model_copy(
+                            update={"medical_items": harvested_medical_items}
+                        )
+                    if updates:
+                        extraction = extraction.model_copy(update=updates)
+                        reasons.extend(harvest_notes)
 
     # ── Phase A.2 : validation FHIR structurelle ─────────────────────────────
     fhir_status = VerificationStatus.PASS

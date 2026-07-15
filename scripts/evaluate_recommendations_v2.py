@@ -114,8 +114,34 @@ def _build_initial_state(case_id: str, source_path: Path) -> dict[str, Any]:
     }
 
 
-def _evaluate_case(app: Any, case_id: str) -> CaseEvaluation:
+def _reset_storage_for_case(case_id: str) -> None:
+    """Supprime les artefacts de stockage d'une exécution antérieure pour ce
+    `case_id` avant de le rejouer — corrige la collision `NO_OVERWRITE`
+    (`services/storage.py::commit_file`, nommage physique déterministe de
+    `tools/file_inspection.py::build_storage_name`) qui a produit un faux
+    `TECHNICAL_FAILURE` sur CLM-0001 lors de la mesure V2-10 (artefacts
+    périmés d'un smoke test antérieur). Idempotent : ne fait rien si aucun
+    artefact n'existe. N'agit jamais sur `datasets/fixtures/` (entrée en
+    lecture seule) ni sur l'oracle."""
+    import shutil
+
+    from services.storage import StorageService
+
+    svc = StorageService()
+    for base_dir in (svc.incoming_dir, svc.quarantine_dir):
+        case_dir = base_dir / case_id
+        if case_dir.exists():
+            shutil.rmtree(case_dir)
+    manifest_path = svc.manifests_dir / f"{case_id}.json"
+    if manifest_path.exists():
+        manifest_path.unlink()
+
+
+def _evaluate_case(app: Any, case_id: str, *, reset_storage: bool = True) -> CaseEvaluation:
     from graph.checkpoints import make_thread_config
+
+    if reset_storage:
+        _reset_storage_for_case(case_id)
 
     expected = _load_expected_recommendation(case_id)
     source_path = FIXTURES_ROOT / case_id / "input"
@@ -207,13 +233,15 @@ def _summarize(evaluations: list[CaseEvaluation]) -> dict[str, Any]:
     }
 
 
-def run_evaluation(case_ids: list[str]) -> tuple[list[CaseEvaluation], dict[str, Any]]:
+def run_evaluation(
+    case_ids: list[str], *, reset_storage: bool = True
+) -> tuple[list[CaseEvaluation], dict[str, Any]]:
     from config.settings import get_settings
     from graph.workflow_v2 import compile_workflow_v2
     from langgraph.checkpoint.memory import InMemorySaver
 
     app = compile_workflow_v2(InMemorySaver())
-    evaluations = [_evaluate_case(app, case_id) for case_id in case_ids]
+    evaluations = [_evaluate_case(app, case_id, reset_storage=reset_storage) for case_id in case_ids]
     summary = _summarize(evaluations)
     settings = get_settings()
     summary["run_metadata"] = {
@@ -245,6 +273,15 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Limite le nombre de dossiers évalués")
     parser.add_argument("--output", type=Path, default=None, help="Chemin de sortie JSON/CSV (défaut : logs/evals/<horodatage>.json)")
     parser.add_argument("--format", choices=["table", "json", "csv"], default="table", help="Format d'affichage console")
+    parser.add_argument(
+        "--no-reset",
+        action="store_true",
+        help=(
+            "Désactive le nettoyage automatique de storage/{incoming,quarantine,manifests}/<case_id> "
+            "avant chaque dossier (actif par défaut — évite une fausse collision NO_OVERWRITE/"
+            "TECHNICAL_FAILURE sur un case_id déjà traité par un run antérieur)."
+        ),
+    )
     args = parser.parse_args()
 
     case_ids = _discover_case_ids(args.cases, args.limit)
@@ -252,7 +289,7 @@ def main() -> None:
         print("Aucun dossier à évaluer.", file=sys.stderr)
         sys.exit(1)
 
-    evaluations, summary = run_evaluation(case_ids)
+    evaluations, summary = run_evaluation(case_ids, reset_storage=not args.no_reset)
 
     if args.format == "table":
         _print_table(evaluations)

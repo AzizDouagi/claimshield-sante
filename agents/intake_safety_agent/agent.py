@@ -535,7 +535,15 @@ def run(
     duplicate = [f for f in inspected_files if f.status == FileStatus.DUPLICATE]
     errored = [f for f in inspected_files if f.status == FileStatus.ERROR]
 
-    if errored or errors:
+    # Note : `errors` (liste brute de StructuredError) n'est volontairement
+    # pas utilisée ici — elle inclut aussi les collisions de politique
+    # (NO_OVERWRITE, déjà classées FileStatus.BLOCKED ci-dessus, ligne
+    # ~471-475) qui ne sont pas des pannes techniques du stockage. Seul
+    # `errored` (fichiers réellement FileStatus.ERROR) doit déclencher
+    # TECHNICAL_FAILURE — sinon une simple re-soumission d'un case_id déjà
+    # traité (fichiers déjà présents en storage/incoming/) est à tort
+    # classée comme une panne d'infrastructure.
+    if errored:
         global_status = IntakeSafetyStatus.TECHNICAL_FAILURE
         reasons.append(f"{len(errored)} fichier(s) en erreur technique — stockage inaccessible")
     elif blocked:

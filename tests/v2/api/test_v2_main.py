@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -101,12 +102,24 @@ def deterministic_v2_llm(monkeypatch):
 
 
 @pytest.fixture()
-def v2_client(deterministic_v2_llm) -> TestClient:
+def v2_client(deterministic_v2_llm, monkeypatch) -> TestClient:
     compiled_graph = compile_workflow_v2(InMemorySaver())
     override_store = OverrideStore()
     app = FastAPI()
     app.include_router(build_v2_router(compiled_graph=compiled_graph, override_store=override_store))
     app.include_router(build_chat_router())
+
+    def _test_chat_client() -> httpx.AsyncClient:
+        # `chat/tools.py` appelle `/v2/*` en HTTP — jamais un vrai serveur en
+        # test, cible la même application FastAPI en mémoire (ASGITransport).
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",  # routeur monté sans préfixe /v2 dans cette app de test
+            headers={"X-API-Key": _API_KEY},
+            timeout=30.0,
+        )
+
+    monkeypatch.setattr("chat.tools._build_client", _test_chat_client)
     return TestClient(app)
 
 
@@ -227,15 +240,95 @@ class TestOverride:
         assert response.status_code == 422
 
 
-class TestChatStub:
-    def test_chat_returns_501_not_implemented(self, v2_client: TestClient):
-        response = v2_client.post(
-            "/chat",
-            json={"message": "pourquoi ce dossier est rejeté ?"},
-            headers={"X-API-Key": _API_KEY},
-        )
-        assert response.status_code == 501
+class TestChatEndpoint:
+    """Tests d'intégration bout en bout (`chat.tools` → HTTP réel via
+    ASGITransport → `/v2/claims/*`) — la couverture exhaustive du NLU/
+    planner/response_composer/anti-hallucination vit dans
+    `tests/v2/chat/`, ce fichier vérifie uniquement le câblage endpoint."""
 
     def test_chat_requires_api_key(self, v2_client: TestClient):
         response = v2_client.post("/chat", json={"message": "test"})
         assert response.status_code == 401
+
+    def test_chat_explain_returns_grounded_reply_for_known_case(
+        self, v2_client: TestClient, tmp_path, monkeypatch
+    ):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        case_id = "CLM-8010"
+        _submit(v2_client, case_id, _stage_deposit_folder(tmp_path))
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id=case_id)),
+        )
+        compose_spy = Mock(return_value=f"Le dossier {case_id} a été traité, voici les motifs.")
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", compose_spy)
+
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi cette décision ?", "case_id": case_id},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.json()["reply"]
+        # Preuve que `chat.tools.explain_claim` a bien récupéré le contexte
+        # réel du dossier via HTTP (pas un 404 masqué) : le composer a été
+        # appelé avec un `case_id` non vide dans ses données groundées —
+        # régression directe sur un bug réel trouvé pendant l'écriture de
+        # ces tests (préfixe /v2 absent de l'app de test, `get_claim_context`
+        # retournait silencieusement `None`).
+        compose_spy.assert_called_once()
+        composed_data = compose_spy.call_args[0][0]
+        assert composed_data["case_id"] == case_id
+        assert composed_data.get("explanation") is not None
+        assert composed_data["explanation"]["case_id"] == case_id
+
+    def test_chat_unknown_case_returns_graceful_message(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(
+                return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")
+            ),
+        )
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert "introuvable" in response.json()["reply"].lower()
+
+    def test_chat_audit_intent_returns_grounded_reply(self, v2_client: TestClient, monkeypatch):
+        """AUDIT est livré depuis V2-11c (plus de « bientôt disponible » —
+        voir `tests/v2/chat/test_planner.py::TestPlanNotYetAvailable`, qui
+        documente pourquoi ce chemin défensif est désormais inatteignable
+        avec de vraies valeurs `ChatIntent`)."""
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.AUDIT], case_id="CLM-8011")),
+        )
+        compose_spy = Mock(return_value="Aucun événement d'audit trouvé pour ce dossier.")
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", compose_spy)
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Montre-moi l'historique complet.", "case_id": "CLM-8011"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.json()["reply"] == "Aucun événement d'audit trouvé pour ce dossier."
+        compose_spy.assert_called_once()
+
+    def test_chat_llm_unavailable_returns_clarify_message(self, v2_client: TestClient, monkeypatch):
+        monkeypatch.setattr("chat.nlu._invoke_llm_intent", Mock(return_value=None))
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Bonjour"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.json()["reply"]

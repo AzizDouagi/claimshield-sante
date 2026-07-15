@@ -36,6 +36,43 @@ _INVOICE_LINES = [
     "Ibuprofene 400 mg",
 ]
 
+_CLAIM_REQUEST_LINES = [
+    "Demande de remboursement",
+    "Dossier : CLM-9999",
+    "Assureur : Cigna Health",
+    "Contrat POL-TEST1234",
+    "Taux de couverture synthetique : 80 %",
+]
+
+_INVOICE_LINES_NO_MEDICATION = [
+    "FACTURE MEDICALE",
+    "Numero : INV-CLM-9999",
+    "patient_id : PAT-9999-DEMO",
+    "Prestataire : Bernard Leclerc",
+    "Date du document : 2024-03-01",
+    "Date de soins : 25/02/2024",
+    "Devise : USD",
+    "Montant total facture : 3666.69 USD",
+]
+
+_PRESCRIPTION_LINES = [
+    "ORDONNANCE",
+    "Dossier : CLM-9999",
+    "Amoxicilline 500 mg",
+    "Ibuprofene 400 mg",
+]
+
+_PRESCRIPTION_LINES_SYNTHEA_FORMAT = [
+    "ORDONNANCE SYNTHETIQUE",
+    "Dossier : CLM-9999",
+    "Medicaments prescrits",
+    "sodium fluoride 0.0272 MG/MG Oral Gel",
+]
+"""Format réel observé sur les fixtures Synthea (`pypdf` sur
+datasets/fixtures/valid/CLM-0001/input/ordonnance_CLM-0001.pdf) — dose
+décimale, unité en majuscules — que `tools.document_parser._MEDICATION_RE`
+(V1) ne capture jamais (pas de `re.IGNORECASE`, entiers uniquement)."""
+
 _MINIMAL_FHIR_BUNDLE = {
     "resourceType": "Bundle",
     "type": "collection",
@@ -70,6 +107,46 @@ def _stage_document(case_id: str, lines: list[str] = _INVOICE_LINES) -> Inspecte
         status=FileStatus.ACCEPTED,
         reasons=[],
         relative_storage_path=f"incoming/{case_id}/facture_test.pdf",
+    )
+
+
+def _stage_claim_request_document(case_id: str) -> InspectedFile:
+    incoming = get_settings().storage_dir / "incoming" / case_id
+    incoming.mkdir(parents=True, exist_ok=True)
+    dest = incoming / "demande_remboursement_test.pdf"
+    _make_pdf(dest, _CLAIM_REQUEST_LINES)
+    sha = compute_sha256(dest)
+    return InspectedFile(
+        original_name="demande_remboursement_test.pdf",
+        storage_name="demande_remboursement_test.pdf",
+        normalized_extension="pdf",
+        detected_mime_type="application/pdf",
+        actual_size=dest.stat().st_size,
+        sha256=sha,
+        status=FileStatus.ACCEPTED,
+        reasons=[],
+        relative_storage_path=f"incoming/{case_id}/demande_remboursement_test.pdf",
+    )
+
+
+def _stage_prescription_document(
+    case_id: str, lines: list[str] = _PRESCRIPTION_LINES
+) -> InspectedFile:
+    incoming = get_settings().storage_dir / "incoming" / case_id
+    incoming.mkdir(parents=True, exist_ok=True)
+    dest = incoming / "ordonnance_test.pdf"
+    _make_pdf(dest, lines)
+    sha = compute_sha256(dest)
+    return InspectedFile(
+        original_name="ordonnance_test.pdf",
+        storage_name="ordonnance_test.pdf",
+        normalized_extension="pdf",
+        detected_mime_type="application/pdf",
+        actual_size=dest.stat().st_size,
+        sha256=sha,
+        status=FileStatus.ACCEPTED,
+        reasons=[],
+        relative_storage_path=f"incoming/{case_id}/ordonnance_test.pdf",
     )
 
 
@@ -204,6 +281,164 @@ class TestLlmBehavior:
         )
         # Le FHIR déterministe était PASS ; le LLM a durci vers FAIL — autorisé.
         assert result.status is VerificationStatus.FAIL
+
+
+class TestSupplementaryFieldHarvest:
+    """Correctif post-mesure V2-10 (AZIZ), Phase 4 : `payer_name`/
+    `coverage_rate`/`contract_number` sont récupérés depuis un document
+    secondaire (demande de remboursement) quand le document principal
+    (facture) ne les contient pas — jamais un deuxième document pleinement
+    retraité, jamais un champ déjà présent écrasé."""
+
+    def test_payer_and_coverage_harvested_from_secondary_claim_request(self, monkeypatch):
+        case_id = "CLM-3050"
+        # La facture (document principal, sélectionné en priorité) ne contient
+        # ni assureur ni taux de couverture — reproduit exactement le constat
+        # de la mesure V2-10 sur les fixtures réelles.
+        invoice_file = _stage_document(case_id)
+        claim_request_file = _stage_claim_request_document(case_id)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(
+            case_id=case_id,
+            manifest_files=[invoice_file, claim_request_file],
+            role=ReaderRole.ADMINISTRATIVE_MANAGER,
+        )
+        assert result.extraction is not None
+        # Le document principal reste bien la facture (priorité "facture").
+        assert result.extraction.classification.document_type is DocumentType.INVOICE
+        fields = result.extraction.fields
+        # `payer_name` réutilise le même motif que `tools.document_parser._PAYER_RE`
+        # (V1) : détecte la mention d'un assureur (mot-clé), ne capture pas le
+        # nom réel — comportement hérité, pas une régression introduite ici.
+        assert "payer_name" in fields
+        assert fields["payer_name"].value
+        assert "coverage_rate" in fields
+        assert fields["coverage_rate"].value == "0.80"
+        assert "contract_number" in fields
+        assert "POL-TEST1234" in fields["contract_number"].value
+        assert any("document secondaire" in r for r in result.reasons)
+
+    def test_no_secondary_document_never_crashes(self, monkeypatch):
+        case_id = "CLM-3051"
+        invoice_file = _stage_document(case_id)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(case_id=case_id, manifest_files=[invoice_file], role=ReaderRole.ADMINISTRATIVE_MANAGER)
+        assert result.extraction is not None
+        assert "payer_name" not in result.extraction.fields
+
+    def test_existing_primary_field_never_overwritten_by_secondary(self, monkeypatch):
+        case_id = "CLM-3052"
+        # Facture contenant déjà une mention d'assureur ("Blue Cross", motif
+        # distinct de celui du document secondaire "Assureur : Cigna Health")
+        # — la valeur du document principal ne doit jamais être écrasée.
+        invoice_with_payer = _INVOICE_LINES + ["Blue Cross"]
+        invoice_file = _stage_document(case_id, lines=invoice_with_payer)
+        claim_request_file = _stage_claim_request_document(case_id)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(
+            case_id=case_id,
+            manifest_files=[invoice_file, claim_request_file],
+            role=ReaderRole.ADMINISTRATIVE_MANAGER,
+        )
+        assert result.extraction is not None
+        assert "blue" in result.extraction.fields["payer_name"].value.lower()
+        assert not any("document secondaire" in r and "payer_name" in r for r in result.reasons)
+
+
+class TestMedicalItemsHarvest:
+    """Correctif post-mesure V2-10 (AZIZ), Phase 5 : les actes/médicaments
+    sont récupérés depuis un document secondaire (ordonnance) quand le
+    document principal (facture) n'en contient aucun — sans appel OCR/
+    classification supplémentaire (réutilise le calcul déjà fait pour la
+    Phase 4). Toujours jamais une répartition heuristique inventée : les
+    éléments du document secondaire sont pris tels quels, uniquement si le
+    document principal n'en a lui-même trouvé aucun."""
+
+    def test_medical_items_harvested_from_secondary_prescription(self, monkeypatch):
+        case_id = "CLM-3060"
+        invoice_file = _stage_document(case_id, lines=_INVOICE_LINES_NO_MEDICATION)
+        prescription_file = _stage_prescription_document(case_id)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(
+            case_id=case_id,
+            manifest_files=[invoice_file, prescription_file],
+            role=ReaderRole.ADMINISTRATIVE_MANAGER,
+        )
+        assert result.extraction is not None
+        # Le document principal reste la facture (priorité "facture").
+        assert result.extraction.classification.document_type is DocumentType.INVOICE
+        medical_items = result.extraction.essential_fields.medical_items
+        descriptions = {item.description for item in medical_items}
+        assert descriptions == {"Amoxicilline 500 mg", "Ibuprofene 400 mg"}
+        assert any("document secondaire" in r and "médicament" in r for r in result.reasons)
+
+    def test_synthea_decimal_uppercase_format_harvested_via_tolerant_fallback(self, monkeypatch):
+        """Régression V2-10 (Phase 5) : le format réel Synthea (dose
+        décimale, unité en majuscules, ex. `"sodium fluoride 0.0272 MG"`)
+        n'est jamais capturé par `tools.document_parser._MEDICATION_RE`
+        (V1) — vérifié qu'il l'est bien via le repli tolérant local."""
+        case_id = "CLM-3063"
+        invoice_file = _stage_document(case_id, lines=_INVOICE_LINES_NO_MEDICATION)
+        prescription_file = _stage_prescription_document(
+            case_id, lines=_PRESCRIPTION_LINES_SYNTHEA_FORMAT
+        )
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(
+            case_id=case_id,
+            manifest_files=[invoice_file, prescription_file],
+            role=ReaderRole.ADMINISTRATIVE_MANAGER,
+        )
+        assert result.extraction is not None
+        medical_items = result.extraction.essential_fields.medical_items
+        assert len(medical_items) >= 1
+        assert any("sodium fluoride" in item.description.lower() for item in medical_items)
+        assert any("détection tolérante" in r for r in result.reasons)
+
+    def test_no_secondary_document_leaves_medical_items_empty(self, monkeypatch):
+        case_id = "CLM-3061"
+        invoice_file = _stage_document(case_id, lines=_INVOICE_LINES_NO_MEDICATION)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(case_id=case_id, manifest_files=[invoice_file], role=ReaderRole.ADMINISTRATIVE_MANAGER)
+        assert result.extraction is not None
+        assert result.extraction.essential_fields.medical_items == []
+
+    def test_primary_medical_items_never_overwritten_by_secondary(self, monkeypatch):
+        case_id = "CLM-3062"
+        # La facture (document principal) contient déjà ses propres
+        # médicaments — l'ordonnance secondaire ne doit jamais les remplacer.
+        invoice_file = _stage_document(case_id)  # _INVOICE_LINES par défaut, avec médicaments
+        prescription_file = _stage_prescription_document(case_id)
+        monkeypatch.setattr(
+            "agents.document_understanding_agent.agent._invoke_llm_document_understanding",
+            Mock(return_value=_decision()),
+        )
+        result = run(
+            case_id=case_id,
+            manifest_files=[invoice_file, prescription_file],
+            role=ReaderRole.ADMINISTRATIVE_MANAGER,
+        )
+        assert result.extraction is not None
+        assert not any(
+            "document secondaire" in r and "médicament" in r for r in result.reasons
+        )
 
 
 class TestPrivacyIntegration:

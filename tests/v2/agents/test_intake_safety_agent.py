@@ -210,6 +210,35 @@ class TestLlmFailClosed:
         assert result.status is IntakeSafetyStatus.QUARANTINED
 
 
+class TestStorageCollisionIsBlockedNotTechnicalFailure:
+    """Correctif post-mesure V2-10 (AZIZ) : une collision de stockage
+    (NO_OVERWRITE — fichier déjà committé lors d'un run antérieur pour le
+    même case_id) est une décision de politique (BLOCKED), jamais une panne
+    d'infrastructure (TECHNICAL_FAILURE). `agent.py` ligne ~538 ne doit plus
+    déclencher TECHNICAL_FAILURE sur la seule présence de `errors` (liste
+    brute incluant NO_OVERWRITE) — uniquement sur `errored` (fichiers
+    réellement FileStatus.ERROR, pannes techniques)."""
+
+    def test_resubmitting_same_case_id_is_blocked_not_technical_failure(self, tmp_path, monkeypatch):
+        svc = _make_storage(tmp_path)
+        source = tmp_path / "input"
+        _write_pdf(source, "facture.pdf")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision()),
+        )
+
+        first = run(case_id="CLM-2050", source_path=source, storage=svc)
+        assert first.status is IntakeSafetyStatus.ACCEPTED
+
+        # Même case_id, même fichier — build_storage_name est déterministe
+        # (pas d'aléa), donc le second commit collisionne physiquement avec
+        # le premier sous storage/incoming/CLM-2050/.
+        second = run(case_id="CLM-2050", source_path=source, storage=svc)
+        assert second.status is IntakeSafetyStatus.BLOCKED
+        assert second.status is not IntakeSafetyStatus.TECHNICAL_FAILURE
+
+
 class TestNodeIntegration:
     def test_node_updates_state_on_acceptance(self, tmp_path, monkeypatch):
         svc = _make_storage(tmp_path)

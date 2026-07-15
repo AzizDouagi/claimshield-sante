@@ -109,6 +109,71 @@ class TestStatusAggregation:
         assert result.reasons
 
 
+class TestMissingCoverageDataDowngrade:
+    """Correctif post-mesure V2-10 (AZIZ) : l'absence de donnée de police/
+    assureur ne doit jamais produire un `coverage.status = FAIL` automatique
+    — seulement `NEEDS_REVIEW`, avec `coverage_data_available=False` pour que
+    `autonomous_decision_agent` distingue explicitement « donnée manquante »
+    de « couverture réellement invalide »."""
+
+    def test_missing_payer_name_downgrades_to_needs_review_not_fail(self):
+        # Aucun contrat, aucun policy_number, aucun payer_name dans les champs
+        # extraits — exactement la situation réelle du graphe V2 (bug diagnostiqué
+        # post-mesure V2-10 : eligibility_agent.node() ne transmet jamais
+        # contract=/policy_number=, et payer_name n'est souvent pas extrait).
+        result = run(
+            case_id="CLM-4012",
+            dossier_patient_id="PAT-001",
+            extracted_fields={"patient_id": "PAT-001", "amount_requested": "100.00"},
+        )
+        assert result.coverage.status is VerificationStatus.NEEDS_REVIEW
+        assert result.coverage.status is not VerificationStatus.FAIL
+        assert result.coverage_data_available is False
+
+    def test_missing_amount_requested_downgrades_to_needs_review_not_fail(self):
+        # Généralisation post-mesure V2-10 (CLM-0002, échantillon à 5 dossiers) :
+        # payer_name présent mais aucun montant demandé nulle part — second
+        # motif à item unique de verify_coverage, non couvert par le premier
+        # correctif (payer_name seul).
+        result = run(
+            case_id="CLM-4016",
+            dossier_patient_id="PAT-001",
+            extracted_fields={"patient_id": "PAT-001", "payer_name": "Cigna Health"},
+        )
+        assert result.coverage.status is VerificationStatus.NEEDS_REVIEW
+        assert result.coverage.status is not VerificationStatus.FAIL
+
+    def test_coverage_data_available_true_when_contract_provided(self):
+        result = run(
+            case_id="CLM-4013",
+            dossier_patient_id="PAT-001",
+            contract=_LEGACY_CONTRACT,
+            extracted_fields=_EXTRACTED_FIELDS,
+        )
+        assert result.coverage_data_available is True
+
+    def test_coverage_data_available_true_when_payer_name_present_without_contract(self):
+        result = run(
+            case_id="CLM-4014",
+            dossier_patient_id="PAT-001",
+            extracted_fields={"patient_id": "PAT-001", "payer_name": "Cigna Health"},
+        )
+        assert result.coverage_data_available is True
+
+    def test_real_fail_reason_is_never_downgraded(self):
+        # Contrat réellement fourni, réellement inactif — un FAIL confirmé
+        # par une vraie donnée de contrat ne doit jamais être adouci.
+        inactive_contract = {**_LEGACY_CONTRACT, "policy_active": False}
+        result = run(
+            case_id="CLM-4015",
+            dossier_patient_id="PAT-001",
+            contract=inactive_contract,
+            extracted_fields=_EXTRACTED_FIELDS,
+        )
+        assert result.coverage.status is VerificationStatus.FAIL
+        assert result.coverage_data_available is True
+
+
 class TestErrorsMapping:
     def test_low_extraction_confidence_populates_errors(self):
         result = run(

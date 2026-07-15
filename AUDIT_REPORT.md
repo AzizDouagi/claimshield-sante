@@ -2,7 +2,7 @@
 
 **Date de l'audit :** 2026-07-09
 **Périmètre :** dépôt `claimshield-sante` (branche `main`, working tree courant, y compris les modifications non commitées visibles via `git status`)
-**Commanditaire :** AZIZ Douagi (stagiaire Wevioo)
+
 **Nature :** audit lecture seule — aucune modification de code effectuée dans le cadre de cette mission.
 
 ---
