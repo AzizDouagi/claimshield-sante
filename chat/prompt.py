@@ -14,18 +14,22 @@ __all__ = [
     "ChatIntentExtractionPrompt",
     "ChatPatientMessagePrompt",
     "ChatReasoningPrompt",
+    "ChatSemanticSummaryPrompt",
     "load_chat_intent_extraction_prompt",
     "load_chat_patient_message_prompt",
     "load_chat_reasoning_prompt",
+    "load_chat_semantic_summary_prompt",
 ]
 
 INTENT_EXTRACTION_PROMPT_VERSION = "1.1.0"
-REASONING_PROMPT_VERSION = "1.1.0"
+REASONING_PROMPT_VERSION = "1.2.0"
 PATIENT_MESSAGE_PROMPT_VERSION = "1.0.0"
+SEMANTIC_SUMMARY_PROMPT_VERSION = "1.1.0"
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 _INTENT_EXTRACTION_PATH = _PROMPTS_DIR / "chat_intent_extraction.yaml"
 _REASONING_PATH = _PROMPTS_DIR / "chat_reasoning_agent.yaml"
 _PATIENT_MESSAGE_PATH = _PROMPTS_DIR / "chat_patient_message.yaml"
+_SEMANTIC_SUMMARY_PATH = _PROMPTS_DIR / "chat_semantic_summary.yaml"
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,12 @@ class ChatReasoningPrompt:
 
 @dataclass(frozen=True)
 class ChatPatientMessagePrompt:
+    version: str
+    system_prompt: str
+
+
+@dataclass(frozen=True)
+class ChatSemanticSummaryPrompt:
     version: str
     system_prompt: str
 
@@ -80,3 +90,15 @@ def load_chat_patient_message_prompt() -> ChatPatientMessagePrompt:
             f"(attendu {PATIENT_MESSAGE_PROMPT_VERSION!r})"
         )
     return ChatPatientMessagePrompt(version=version, system_prompt=str(data["system_prompt"]))
+
+
+@lru_cache(maxsize=1)
+def load_chat_semantic_summary_prompt() -> ChatSemanticSummaryPrompt:
+    data = yaml.safe_load(_SEMANTIC_SUMMARY_PATH.read_text(encoding="utf-8"))
+    version = str(data["version"])
+    if version != SEMANTIC_SUMMARY_PROMPT_VERSION:
+        raise ValueError(
+            f"Version de prompt chat_semantic_summary inattendue : {version!r} "
+            f"(attendu {SEMANTIC_SUMMARY_PROMPT_VERSION!r})"
+        )
+    return ChatSemanticSummaryPrompt(version=version, system_prompt=str(data["system_prompt"]))

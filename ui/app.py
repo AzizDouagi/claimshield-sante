@@ -28,18 +28,6 @@ os.environ.pop("DATABASE_URL", None)
 
 import chainlit as cl  # noqa: E402
 
-# `.chainlit/config.toml` auto-généré au premier lancement fixe
-# `[features.spontaneous_file_upload].accept = ["*/*"]` par défaut — un
-# type MIME invalide (le propre commentaire du template Chainlit prévient :
-# "Using '*/*' is not recommended as it may cause browser warnings") qui
-# spamme la console à chaque interaction. Cette fonctionnalité (dépôt de
-# fichier libre dans le champ de message général) n'est de toute façon pas
-# utilisée par notre flux, entièrement guidé via `cl.AskFileMessage` — on la
-# désactive plutôt que de la reconfigurer, pour ne pas laisser un second
-# canal de dépôt de fichier sans effet réel (jamais lu par `ui/app.py`).
-if cl.config.config.features.spontaneous_file_upload is not None:
-    cl.config.config.features.spontaneous_file_upload.enabled = False
-
 # Chainlit charge ce fichier directement (importlib, hors package) — sans
 # cet ajout, `from ui import ...` échoue (`ModuleNotFoundError: No module
 # named 'ui'`), même patron que `scripts/run_agent_manual.py`.
@@ -51,6 +39,24 @@ from config.settings import get_settings  # noqa: E402
 from ui import api_client, api_client_v2  # noqa: E402
 from ui.forms import form_from_pending_review, render_for_chainlit_actions  # noqa: E402
 from ui.uploads import stage_uploaded_files  # noqa: E402
+
+# `.chainlit/config.toml` auto-généré au premier lancement fixe
+# `[features.spontaneous_file_upload].accept = ["*/*"]` par défaut — un
+# type MIME invalide (le propre commentaire du template Chainlit prévient :
+# "Using '*/*' is not recommended as it may cause browser warnings").
+# Cette fonctionnalité n'est pas lue par notre flux (entièrement guidé via
+# `cl.AskFileMessage`), mais elle ne peut PAS être désactivée : le serveur
+# Chainlit (`chainlit/server.py::validate_file_upload`) rejette aussi les
+# uploads légitimes de `cl.AskFileMessage` quand `ask_parent_id` n'est pas
+# reconnu côté serveur (observé en pratique dans cette version — l'upload
+# retombe alors sur ce chemin "spontané" et un `enabled=False` le bloque
+# avec un 400 "File upload is not enabled", même depuis le bon widget).
+# On la laisse donc active, avec notre vraie liste de types MIME plutôt
+# que `*/*` — supprime l'avertissement navigateur sans jamais bloquer un
+# dépôt légitime.
+if cl.config.config.features.spontaneous_file_upload is not None:
+    cl.config.config.features.spontaneous_file_upload.enabled = True
+    cl.config.config.features.spontaneous_file_upload.accept = get_settings().allowed_mime_types
 
 _CASE_ID_PATTERN = re.compile(r"^CLM-\d{4,}$")
 
@@ -124,6 +130,7 @@ async def _submit_flow() -> None:
     if case_id is None:
         await cl.Message(content="Soumission annulée.").send()
         return
+    cl.user_session.set("last_case_id", case_id)
 
     files = await cl.AskFileMessage(
         content="Déposez les documents du dossier (PDF/image/JSON) :",
@@ -150,6 +157,7 @@ async def _status_flow() -> None:
     if case_id is None:
         await cl.Message(content="Consultation annulée.").send()
         return
+    cl.user_session.set("last_case_id", case_id)
 
     response = await api_client.get_status(case_id)
     if response.status_code == 404:
@@ -163,6 +171,7 @@ async def _status_flow() -> None:
 
 
 async def _decision_flow(case_id: str, action: str) -> None:
+    cl.user_session.set("last_case_id", case_id)
     actor = cl.user_session.get("actor")
     if not actor:
         actor = await _ask_text("Votre identifiant (acteur, pour l'audit) :")
@@ -269,6 +278,7 @@ async def _submit_flow_v2() -> None:
     if case_id is None:
         await cl.Message(content="Soumission annulée.").send()
         return
+    cl.user_session.set("last_case_id", case_id)
 
     files = await cl.AskFileMessage(
         content="Déposez les documents du dossier (PDF/image/JSON) :",
@@ -297,6 +307,7 @@ async def _status_flow_v2() -> None:
     if case_id is None:
         await cl.Message(content="Consultation annulée.").send()
         return
+    cl.user_session.set("last_case_id", case_id)
 
     response = await api_client_v2.get_status_v2(case_id)
     if response.status_code == 404:
@@ -314,6 +325,7 @@ async def _override_flow_v2() -> None:
     if case_id is None:
         await cl.Message(content="Correction annulée.").send()
         return
+    cl.user_session.set("last_case_id", case_id)
 
     actor = cl.user_session.get("actor")
     if not actor:
@@ -359,3 +371,38 @@ async def on_menu_status_v2(action: cl.Action) -> None:
 @cl.action_callback("menu_override_v2")
 async def on_menu_override_v2(action: cl.Action) -> None:
     await _override_flow_v2()
+
+
+# ── Chat conversationnel (Chat Reasoning Agent, `chat/` + `/v2/chat`) ────────
+#
+# Tout message libre tapé hors d'une invite structurée (`cl.AskUserMessage`/
+# `cl.AskFileMessage`, qui interceptent déjà la réponse suivante avant
+# qu'elle n'atteigne ce gestionnaire) est transmis tel quel à
+# `POST /v2/chat` — permet de demander « pourquoi ce dossier est refusé ? »,
+# « simule sans l'ordonnance », etc. `last_case_id` (posé par les flux
+# soumission/consultation/décision ci-dessus) sert de contexte par défaut :
+# il prime sur un identifiant que le NLU croirait détecter dans le texte
+# (voir `chat.agent.handle_message`), mais un identifiant explicite dans le
+# message reste toujours possible si aucun dossier n'a encore été consulté.
+@cl.on_message
+async def on_message(message: cl.Message) -> None:
+    text = (message.content or "").strip()
+    if not text:
+        return
+
+    case_id = cl.user_session.get("last_case_id")
+    # Mémoire conversationnelle (Phase 8) — entièrement opt-in côté API :
+    # `thread_id` (session Chainlit, stable pour toute la conversation) et
+    # `actor` (déjà demandé/caché en session par les flux de décision
+    # humaine/override ci-dessus, jamais redemandé ici) activent la mémoire
+    # uniquement si `actor` est déjà connu — sinon comportement inchangé.
+    thread_id = cl.context.session.id
+    actor = cl.user_session.get("actor")
+    response = await api_client_v2.send_chat_message_v2(
+        text, case_id=case_id, thread_id=thread_id, actor=actor
+    )
+    if response.status_code >= 400:
+        await cl.Message(content=f"Erreur chat ({response.status_code}) : {response.text}").send()
+        return
+
+    await cl.Message(content=response.json()["reply"]).send()

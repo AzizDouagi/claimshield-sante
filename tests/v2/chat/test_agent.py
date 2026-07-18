@@ -7,15 +7,19 @@ explicite de la Phase V2-11a (plan de refonte V2 §4). SIMULATE (V2-11b) est
 couvert séparément dans `TestSimulate` ci-dessous."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from chat.agent import handle_message
+from chat.conversation_store import ConversationAccessError, ConversationStore
+from chat.memory_schemas import ConversationSemanticState, ConversationTurn, DiscussedScenario
 from chat.schemas import (
     ChatIntent,
     ExplanationFacts,
     LlmIntentDecision,
     SimulationChangeRequest,
+    SimulationPatch,
     SimulationResult,
 )
 
@@ -247,6 +251,285 @@ class TestUnknownCase:
         monkeypatch.setattr("chat.agent.explain_claim", AsyncMock(return_value=None))
         reply = await handle_message("Pourquoi ?", case_id="CLM-2099")
         assert "introuvable" in reply.lower()
+
+
+class TestConversationMemory:
+    """Phase 8 (plan de remédiation « autonomie décisionnelle V2 », §6) —
+    mémoire conversationnelle entièrement opt-in : absence de
+    `thread_id`/`user_id`/`conversation_store` reproduit exactement le
+    comportement d'avant cette phase (couvert par toutes les classes
+    ci-dessus, jamais modifiées)."""
+
+    async def test_memory_disabled_when_params_absent_no_store_interaction(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6001")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6001", final_decision="APPROVE")),
+        )
+        store = ConversationStore()
+        reply = await handle_message("Pourquoi ?", case_id="CLM-6001")
+        assert reply == "Réponse groundée de test."
+        # Store jamais touché puisqu'il n'a même pas été transmis.
+        assert store.get(user_id="anyone", thread_id="anyone") is None
+
+    async def test_memory_disabled_when_only_thread_id_given(self, monkeypatch):
+        """Les trois paramètres mémoire doivent être fournis ensemble —
+        jamais un état partiel silencieusement actif."""
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6002")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6002", final_decision="APPROVE")),
+        )
+        store = ConversationStore()
+        reply = await handle_message("Pourquoi ?", case_id="CLM-6002", thread_id="thread-1")
+        assert reply == "Réponse groundée de test."
+        assert store.get(user_id="alice", thread_id="thread-1") is None
+
+    async def test_turn_recorded_with_digest_never_raw_message(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6003")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6003", final_decision="APPROVE")),
+        )
+        store = ConversationStore()
+        secret_message = "Pourquoi le dossier CLM-6003 est-il refusé, ma sécu est 123-45-6789 ?"
+        await handle_message(
+            secret_message, case_id="CLM-6003", thread_id="thread-1", user_id="alice", conversation_store=store
+        )
+        context = store.get(user_id="alice", thread_id="thread-1")
+        assert context is not None
+        assert len(context.turns) == 1
+        turn = context.turns[0]
+        assert secret_message not in turn.model_dump_json()
+        assert turn.message_digest != secret_message
+        assert ChatIntent.EXPLAIN in turn.intents
+        assert turn.case_id == "CLM-6003"
+
+    async def test_conversation_access_error_propagates(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6004")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6004", final_decision="APPROVE")),
+        )
+        store = ConversationStore()
+        await handle_message(
+            "Pourquoi ?", case_id="CLM-6004", thread_id="thread-1", user_id="alice", conversation_store=store
+        )
+        with pytest.raises(ConversationAccessError):
+            await handle_message(
+                "Pourquoi ?", case_id="CLM-6004", thread_id="thread-1", user_id="mallory", conversation_store=store
+            )
+
+    async def test_semantic_state_updated_after_turn(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6005")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6005", final_decision="APPROVE")),
+        )
+        new_state = ConversationSemanticState(
+            conversation_summary="Le dossier CLM-6005 a été approuvé.",
+            updated_at=datetime.now(UTC),
+        )
+        summarizer_spy = Mock(return_value=new_state)
+        monkeypatch.setattr("chat.agent.update_semantic_state", summarizer_spy)
+        store = ConversationStore()
+        await handle_message(
+            "Pourquoi ?", case_id="CLM-6005", thread_id="thread-1", user_id="alice", conversation_store=store
+        )
+        summarizer_spy.assert_called_once()
+        context = store.get(user_id="alice", thread_id="thread-1")
+        assert context.semantic_state == new_state
+
+    async def test_memory_failure_never_breaks_the_reply(self, monkeypatch):
+        """Une panne de la couche mémoire (bug/LLM de résumé) ne doit
+        jamais faire échouer une réponse déjà composée."""
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6006")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6006", final_decision="APPROVE")),
+        )
+        monkeypatch.setattr(
+            "chat.agent.update_semantic_state", Mock(side_effect=RuntimeError("panne inattendue"))
+        )
+        store = ConversationStore()
+        reply = await handle_message(
+            "Pourquoi ?", case_id="CLM-6006", thread_id="thread-1", user_id="alice", conversation_store=store
+        )
+        assert reply == "Réponse groundée de test."
+
+    async def test_resolved_scenario_included_in_composed_context(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-6007")
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-6007", final_decision="APPROVE")),
+        )
+        compose_spy = Mock(return_value="Réponse groundée de test.")
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", compose_spy)
+
+        store = ConversationStore()
+        scenario = DiscussedScenario(
+            scenario_id="SCENARIO-1", description="Premier scénario discuté.", kind="REAL_DECISION"
+        )
+        store.append_turn(
+            user_id="alice",
+            thread_id="thread-1",
+            turn=ConversationTurn(
+                turn_id="t0", message_digest="a" * 64, reply_digest="b" * 64, created_at=datetime.now(UTC)
+            ),
+        )
+        store.update_semantic_state(
+            user_id="alice",
+            thread_id="thread-1",
+            semantic_state=ConversationSemanticState(
+                conversation_summary="résumé",
+                discussed_scenarios=[scenario],
+                resolved_references={"le premier scénario": "SCENARIO-1"},
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+        monkeypatch.setattr("chat.nlu._resolve_scenario_reference", Mock(return_value="SCENARIO-1"))
+        await handle_message(
+            "Compare avec le premier scénario",
+            case_id="CLM-6007",
+            thread_id="thread-1",
+            user_id="alice",
+            conversation_store=store,
+        )
+        composed_data = compose_spy.call_args[0][0]
+        assert composed_data.get("resolved_scenario") is not None
+        assert composed_data["resolved_scenario"]["scenario_id"] == "SCENARIO-1"
+
+
+class TestActiveSimulationAccumulation:
+    """Phase 9 (plan de remédiation « autonomie décisionnelle V2 », §7) —
+    les patches d'une simulation ciblée s'accumulent pour un même thread
+    (« et si on changeait aussi... ») plutôt que de repartir à chaque
+    message d'un dossier réel non modifié."""
+
+    def _patch(self, field: str, value: str) -> SimulationPatch:
+        return SimulationPatch(field=field, value=value)
+
+    async def test_first_targeted_simulation_has_no_previous_patches_to_merge(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9001")
+        _mock_compose_passthrough(monkeypatch)
+        sim_spy = AsyncMock(
+            return_value=SimulationResult(
+                case_id="CLM-9001", applied=True, original_decision="REJECT", simulated_decision="APPROVE",
+                decision_changed=True,
+            )
+        )
+        monkeypatch.setattr("chat.agent.simulate_changes", sim_spy)
+        store = ConversationStore()
+
+        changes = SimulationChangeRequest(field_patches=[self._patch("COVERAGE_STATUS", "PASS")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9001", simulation_changes=changes)
+        await handle_message(
+            "Et si la couverture était confirmée ?",
+            case_id="CLM-9001",
+            thread_id="thread-1",
+            user_id="alice",
+            conversation_store=store,
+        )
+
+        sent_changes = sim_spy.call_args[0][1]
+        assert len(sent_changes.field_patches) == 1
+        assert sent_changes.field_patches[0].field.value == "COVERAGE_STATUS"
+
+        context = store.get(user_id="alice", thread_id="thread-1")
+        assert len(context.active_simulation_patches) == 1
+
+    async def test_second_targeted_simulation_merges_with_active_patches(self, monkeypatch):
+        _mock_compose_passthrough(monkeypatch)
+        sim_spy = AsyncMock(
+            return_value=SimulationResult(
+                case_id="CLM-9002", applied=True, original_decision="REJECT", simulated_decision="APPROVE",
+                decision_changed=True,
+            )
+        )
+        monkeypatch.setattr("chat.agent.simulate_changes", sim_spy)
+        store = ConversationStore()
+
+        first_changes = SimulationChangeRequest(field_patches=[self._patch("COVERAGE_STATUS", "PASS")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9002", simulation_changes=first_changes)
+        await handle_message(
+            "Et si la couverture était confirmée ?",
+            case_id="CLM-9002",
+            thread_id="thread-1",
+            user_id="alice",
+            conversation_store=store,
+        )
+
+        second_changes = SimulationChangeRequest(field_patches=[self._patch("IDENTITY_STATUS", "PASS")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9002", simulation_changes=second_changes)
+        await handle_message(
+            "Et si en plus l'identité était confirmée ?",
+            case_id="CLM-9002",
+            thread_id="thread-1",
+            user_id="alice",
+            conversation_store=store,
+        )
+
+        sent_changes = sim_spy.call_args[0][1]
+        sent_fields = {p.field.value for p in sent_changes.field_patches}
+        assert sent_fields == {"COVERAGE_STATUS", "IDENTITY_STATUS"}
+
+        context = store.get(user_id="alice", thread_id="thread-1")
+        assert len(context.active_simulation_patches) == 2
+
+    async def test_new_patch_on_same_field_replaces_the_old_one(self, monkeypatch):
+        _mock_compose_passthrough(monkeypatch)
+        sim_spy = AsyncMock(
+            return_value=SimulationResult(
+                case_id="CLM-9003", applied=True, original_decision="REJECT", simulated_decision="REJECT",
+                decision_changed=False,
+            )
+        )
+        monkeypatch.setattr("chat.agent.simulate_changes", sim_spy)
+        store = ConversationStore()
+
+        first_changes = SimulationChangeRequest(field_patches=[self._patch("COVERAGE_STATUS", "PASS")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9003", simulation_changes=first_changes)
+        await handle_message(
+            "Et si la couverture était confirmée ?",
+            case_id="CLM-9003", thread_id="thread-1", user_id="alice", conversation_store=store,
+        )
+
+        second_changes = SimulationChangeRequest(field_patches=[self._patch("COVERAGE_STATUS", "FAIL")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9003", simulation_changes=second_changes)
+        await handle_message(
+            "En fait, et si la couverture était refusée ?",
+            case_id="CLM-9003", thread_id="thread-1", user_id="alice", conversation_store=store,
+        )
+
+        sent_changes = sim_spy.call_args[0][1]
+        assert len(sent_changes.field_patches) == 1
+        assert sent_changes.field_patches[0].value == "FAIL"
+
+    async def test_no_memory_never_accumulates(self, monkeypatch):
+        """Sans mémoire, chaque simulation ciblée est indépendante — jamais
+        une accumulation implicite."""
+        _mock_compose_passthrough(monkeypatch)
+        sim_spy = AsyncMock(
+            return_value=SimulationResult(
+                case_id="CLM-9004", applied=True, original_decision="REJECT", simulated_decision="REJECT",
+                decision_changed=False,
+            )
+        )
+        monkeypatch.setattr("chat.agent.simulate_changes", sim_spy)
+
+        changes = SimulationChangeRequest(field_patches=[self._patch("COVERAGE_STATUS", "PASS")])
+        _mock_intent(monkeypatch, [ChatIntent.SIMULATE], case_id="CLM-9004", simulation_changes=changes)
+        await handle_message("Et si la couverture était confirmée ?", case_id="CLM-9004")
+
+        sent_changes = sim_spy.call_args[0][1]
+        assert len(sent_changes.field_patches) == 1
 
 
 class TestCallerCaseIdWinsOverMessage:

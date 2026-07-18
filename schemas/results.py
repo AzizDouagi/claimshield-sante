@@ -119,7 +119,21 @@ class UploadedFileInfo(StrictModel):
 
 
 class InspectedFile(StrictModel):
-    """Résultat réel de l'inspection d'un fichier après lecture physique."""
+    """Résultat réel de l'inspection d'un fichier après lecture physique.
+
+    Champs de versionnement (V2, ajout additif — plan de remédiation
+    « rejouabilité des dossiers », phase 1) : tous à défaut neutre, jamais
+    définis ni lus par V1 (`claim_intake_agent`), aucun changement de
+    comportement V1. `document_family_id` regroupe toutes les versions
+    successives d'un même document logique (identité stable, indépendante du
+    contenu) ; `document_id` identifie une version physique précise ;
+    `is_active` distingue la version courante des versions remplacées mais
+    conservées pour l'audit — un seul `InspectedFile` par
+    `document_family_id` doit avoir `is_active=True` à un instant donné
+    (voir `agents/intake_safety_agent/agent.py`, seul producteur de ces
+    champs). Les agents consommateurs du manifeste (`document_understanding_agent`)
+    ne doivent jamais traiter une entrée `is_active=False`.
+    """
 
     original_name: str
     storage_name: str
@@ -130,6 +144,13 @@ class InspectedFile(StrictModel):
     status: FileStatus
     reasons: list[StructuredError] = Field(default_factory=list)
     relative_storage_path: str | None = None
+    document_id: str | None = None
+    document_family_id: str | None = None
+    document_version: int = Field(default=1, ge=1)
+    supersedes_document_id: str | None = None
+    is_active: bool = True
+    submission_id: str | None = None
+    revision_id: str | None = None
 
 
 class StructuredError(StrictModel):

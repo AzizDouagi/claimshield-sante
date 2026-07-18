@@ -21,7 +21,7 @@ from config.settings import get_settings
 # (V1), pour la même raison (LLM local, matériel modeste).
 _PIPELINE_TIMEOUT_SECONDS = 600.0
 
-__all__ = ["get_status_v2", "submit_claim_v2", "submit_override_v2"]
+__all__ = ["get_status_v2", "send_chat_message_v2", "submit_claim_v2", "submit_override_v2"]
 
 
 def _base_url() -> str:
@@ -49,6 +49,28 @@ async def submit_claim_v2(
 async def get_status_v2(case_id: str) -> httpx.Response:
     async with httpx.AsyncClient(base_url=_base_url(), timeout=30.0) as client:
         return await client.get(f"/claims/{case_id}")
+
+
+async def send_chat_message_v2(
+    message: str,
+    *,
+    case_id: str | None = None,
+    thread_id: str | None = None,
+    actor: str | None = None,
+) -> httpx.Response:
+    """``POST /v2/chat`` — Chat Reasoning Agent (``chat/agent.py``). ``case_id``
+    optionnel : le contexte déjà connu de l'appelant (dossier affiché côté
+    UI) prime toujours sur un identifiant que le NLU détecterait dans le
+    texte (voir ``chat.agent.handle_message``).
+
+    ``thread_id``/``actor`` (Phase 8, mémoire conversationnelle) : optionnels
+    — la mémoire n'est activée côté API que si ``actor`` est fourni."""
+    async with httpx.AsyncClient(base_url=_base_url(), timeout=_PIPELINE_TIMEOUT_SECONDS) as client:
+        return await client.post(
+            "/chat",
+            json={"case_id": case_id, "message": message, "thread_id": thread_id, "actor": actor},
+            headers=_auth_headers(),
+        )
 
 
 async def submit_override_v2(

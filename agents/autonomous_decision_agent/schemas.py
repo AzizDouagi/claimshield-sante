@@ -1,17 +1,29 @@
-"""Schéma de décision LLM de autonomous_decision_agent (V2, plan Phase V2-6).
+"""Schéma de décision LLM de autonomous_decision_agent (V2).
 
-Remplace `agents/case_reviewer_agent/schemas.py::LlmCaseReviewDecision` (V1).
-Différence structurante : le LLM porte ici une **autorité réelle mais
-bornée** sur `decision` (contrairement à V1, où `CaseReviewerResult`
-verrouillait `status`/`human_review_required` et où le LLM ne pouvait
-jamais choisir la décision finale) — les bornes elles-mêmes (quelles
-valeurs de `ClaimDecisionV2` sont autorisées selon le contexte) sont
-calculées en Python par `agent.py::_allowed_decisions`, jamais laissées au
-LLM ; une valeur hors bornes est toujours ignorée au profit d'un repli
-déterministe (voir `agent.py::_merge_decision`).
+Plan de remédiation « autonomie décisionnelle V2 », phase 5 — restructure
+`LlmAutonomousDecision` d'une simple sélection binaire (`decision`) vers un
+**rôle d'analyse structurée** : le LLM analyse les relations entre les
+preuves déjà calculées, identifie les conflits non résolus, propose une
+recommandation ET une alternative bornée avec ses conditions, mais ne fixe
+jamais lui-même une valeur absolue de confiance (seulement un ajustement
+borné `[-0.3, 0.3]` appliqué à une confiance de base calculée en Python).
 
-Conserve, de V1, l'interdiction de diagnostic médical et d'accusation de
-fraude avérée (garde-fous universels, toujours pertinents). Abandonne
+Autorité réelle mais bornée, inchangée dans son principe (V2-6) :
+`recommended_decision` n'a d'effet que si elle figure dans l'ensemble
+autorisé calculé en Python par `agent.py::_allowed_decisions` — les bornes
+elles-mêmes ne sont jamais laissées au LLM ; une valeur hors bornes est
+toujours ignorée au profit d'un repli déterministe fondé sur les preuves
+disponibles (voir `agent.py::_merge_llm_analysis`/
+`choose_accept_or_reject_from_available_evidence`). `supporting_factor_ids`/
+`adverse_factor_ids` ne sont acceptés que s'ils référencent des
+`DecisionFactor.code` réellement calculés par la Phase A — toute référence
+inconnue est silencieusement ignorée et signalée, jamais acceptée comme
+preuve. `alternative_decision`/`alternative_conditions` alimentent
+`AutonomousDecisionResult.counterfactuals`, jamais un contournement de la
+décision finale elle-même.
+
+Conserve, de V1/V2-6, l'interdiction de diagnostic médical et d'accusation
+de fraude avérée (garde-fous universels, toujours pertinents). Abandonne
 volontairement les interdictions V1 de « décision de paiement » et de
 « validation finale » — contradictoires avec le rôle même de cet agent en
 V2 (décider est précisément sa fonction, plus une synthèse révisable).
@@ -78,20 +90,24 @@ def _reject_prohibited_assertions(value: str, field_name: str) -> str:
 
 
 class LlmAutonomousDecision(StrictModel):
-    """Décision LLM bornée — `decision` n'a d'effet réel que si elle figure
-    dans l'ensemble autorisé calculé par `agent.py::_allowed_decisions` pour
-    ce dossier ; sinon `agent.py::_merge_decision` l'ignore et retombe sur
-    un repli déterministe, jamais sur la valeur hors bornes proposée."""
+    """Analyse structurée du LLM — `recommended_decision` n'a d'effet réel
+    que si elle figure dans l'ensemble autorisé calculé par
+    `agent.py::_allowed_decisions` pour ce dossier ; sinon
+    `agent.py::_merge_llm_analysis` l'ignore et retombe sur un repli fondé
+    sur les preuves disponibles, jamais sur la valeur hors bornes proposée.
+    """
 
-    decision: Literal[
+    recommended_decision: Literal[
         "APPROVE", "PARTIAL_APPROVE", "REJECT", "REQUEST_MORE_INFO", "QUARANTINE", "TECHNICAL_FAILURE"
     ]
-    summary: str = Field(..., min_length=1, max_length=1000)
-    reasons: list[str] = Field(default_factory=list, max_length=10)
-    referenced_evidence_ids: list[str] = Field(default_factory=list)
-    acknowledged_risks: list[str] = Field(default_factory=list)
-    acknowledged_disagreements: list[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reasoning_summary: str = Field(..., min_length=1, max_length=1000)
+    supporting_factor_ids: list[str] = Field(default_factory=list)
+    adverse_factor_ids: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list, max_length=10)
+    assumptions: list[str] = Field(default_factory=list, max_length=10)
+    alternative_decision: Literal["APPROVE", "PARTIAL_APPROVE", "REJECT", "QUARANTINE"] | None = None
+    alternative_conditions: list[str] = Field(default_factory=list, max_length=5)
+    confidence_adjustment: float = Field(default=0.0, ge=-0.3, le=0.3)
     escalation_required: bool = False
     escalation_reasons: list[str] = Field(default_factory=list)
 
@@ -101,19 +117,19 @@ class LlmAutonomousDecision(StrictModel):
             raise ValueError("escalation_reasons obligatoire dès que escalation_required=True")
         return self
 
-    @field_validator("summary")
+    @field_validator("reasoning_summary")
     @classmethod
-    def _summary_checked(cls, v: str) -> str:
-        _reject_leak(v, "summary")
-        return _reject_prohibited_assertions(v, "summary")
+    def _reasoning_summary_checked(cls, v: str) -> str:
+        _reject_leak(v, "reasoning_summary")
+        return _reject_prohibited_assertions(v, "reasoning_summary")
 
-    @field_validator("reasons", "acknowledged_risks", "escalation_reasons")
+    @field_validator("unresolved_conflicts", "assumptions", "alternative_conditions", "escalation_reasons")
     @classmethod
     def _list_checked(cls, v: list[str], info) -> list[str]:
         checked = [_reject_leak(item, info.field_name) for item in v]
         return [_reject_prohibited_assertions(item, info.field_name) for item in checked]
 
-    @field_validator("referenced_evidence_ids", "acknowledged_disagreements")
+    @field_validator("supporting_factor_ids", "adverse_factor_ids")
     @classmethod
     def _ids_checked(cls, v: list[str], info) -> list[str]:
         return [_reject_leak(item, info.field_name) for item in v]

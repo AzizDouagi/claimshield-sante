@@ -494,3 +494,50 @@ class TestNodeIntegration:
         assert updates["current_step"] == "document_understanding"
         assert updates["document_understanding_result"].status is VerificationStatus.PASS
         assert "errors" not in updates
+
+
+class TestActiveVersionFiltering:
+    """Plan de remédiation « rejouabilité des dossiers » (phase 1) — aucun
+    agent ne doit jamais traiter une version de document désactivée
+    (`is_active=False`, remplacée par une révision plus récente ou une
+    substitution suspecte encore en attente de revue humaine). Le filtre vit
+    au point unique où le manifeste est parcouru (`_select_document_candidate`/
+    `_select_secondary_candidates`/`_select_fhir_bundle_candidate`), jamais
+    dupliqué agent par agent."""
+
+    def test_select_document_candidate_ignores_inactive_version(self):
+        from agents.document_understanding_agent.agent import _select_document_candidate
+
+        case_id = "CLM-3050"
+        active = _stage_document(case_id).model_copy(
+            update={"document_id": "doc-active", "document_family_id": "fam-1", "is_active": True}
+        )
+        inactive = _stage_document(case_id).model_copy(
+            update={"document_id": "doc-old", "document_family_id": "fam-1", "is_active": False}
+        )
+        # L'ancienne version (inactive) apparaît en premier dans le manifeste —
+        # si le filtre `is_active` était omis, elle serait sélectionnée à tort.
+        candidate = _select_document_candidate([inactive, active])
+        assert candidate is not None
+        assert candidate.document_id == "doc-active"
+
+    def test_select_document_candidate_returns_none_if_only_inactive_versions(self):
+        from agents.document_understanding_agent.agent import _select_document_candidate
+
+        case_id = "CLM-3051"
+        inactive = _stage_document(case_id).model_copy(update={"is_active": False})
+        assert _select_document_candidate([inactive]) is None
+
+    def test_select_fhir_bundle_candidate_ignores_inactive_version(self):
+        from agents.document_understanding_agent.agent import _select_fhir_bundle_candidate
+
+        case_id = "CLM-3052"
+        active_bundle = _stage_fhir_bundle(case_id).model_copy(
+            update={"document_id": "bundle-active", "is_active": True}
+        )
+        inactive_bundle = _stage_fhir_bundle(case_id).model_copy(
+            update={"document_id": "bundle-old", "is_active": False}
+        )
+        candidate = _select_fhir_bundle_candidate([inactive_bundle, active_bundle])
+        assert candidate is not None
+        assert candidate.document_id == "bundle-active"

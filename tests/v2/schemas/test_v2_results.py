@@ -35,12 +35,25 @@ from schemas.results import (
 )
 from schemas.v2_results import (
     AutonomousDecisionResult,
+    ClassifiedMedicalItem,
+    ClassifiedRiskSignal,
+    DecisionAssumption,
+    DecisionCounterfactual,
+    DecisionFactor,
     DocumentUnderstandingResult,
     EligibilityResult,
     IntakeSafetyResult,
+    MedicalItemType,
     MedicalRiskResult,
     MedicalRiskResultPayload,
+    MissingInformation,
+    MissingInformationDimension,
+    MissingInformationImportance,
+    RecoveryAction,
+    RecoveryAttempt,
+    RecoveryOutcome,
     RiskLevel,
+    RiskSignalCategory,
 )
 
 
@@ -324,3 +337,273 @@ class TestAutonomousDecisionResult:
                 llm_trace=_llm_trace(),
                 unknown_field="x",
             )
+
+
+class TestAutonomousDecisionResultExplainabilityFields:
+    """Plan de remédiation « autonomie décisionnelle V2 » — les 9 champs
+    additifs (jamais calculés par le LLM, toujours vides par défaut, donc
+    sans impact sur les instances existantes)."""
+
+    def test_defaults_are_empty_and_valid(self):
+        result = AutonomousDecisionResult(
+            case_id="CLM-0001",
+            status=VerificationStatus.PASS,
+            decision=ClaimDecisionV2.APPROVE,
+            llm_trace=_llm_trace(),
+        )
+        assert result.missing_information == []
+        assert result.assumptions == []
+        assert result.decisive_factors == []
+        assert result.supporting_factors == []
+        assert result.adverse_factors == []
+        assert result.counterfactuals == []
+        assert result.recommended_action == ""
+        from schemas.v2_results import EvidenceCompleteness
+
+        assert result.evidence_completeness is EvidenceCompleteness.COMPLETE
+        assert result.risk_signal_classification == []
+
+    def test_full_instance_with_all_explainability_fields(self):
+        missing = MissingInformation(
+            code="COVERAGE_DATA_UNAVAILABLE",
+            description="Payeur non extrait des documents.",
+            importance=MissingInformationImportance.IMPORTANT,
+            affected_dimension=MissingInformationDimension.COVERAGE,
+            source_agent="eligibility_agent",
+            impact_on_decision="Confiance réduite sur la couverture.",
+            impact_on_confidence=0.2,
+        )
+        assumption = DecisionAssumption(
+            code="COVERAGE_ASSUMED_NEUTRAL",
+            description="Couverture non vérifiable traitée comme neutre.",
+            confidence_impact=0.2,
+        )
+        factor = DecisionFactor(
+            code="IDENTITY_CONFIRMED",
+            description="Identité confirmée concordante.",
+            source_agent="eligibility_agent",
+            evidence_ids=["EVID-abc123"],
+        )
+        counterfactual = DecisionCounterfactual(
+            condition="coverage.status",
+            current_value="NEEDS_REVIEW",
+            required_value="PASS",
+            resulting_decision=ClaimDecisionV2.APPROVE,
+            explanation="Une couverture confirmée aurait permis une approbation pleine.",
+        )
+        risk_signal = ClassifiedRiskSignal(
+            category=RiskSignalCategory.COMPLETENESS_GAP,
+            signal_type="UNRESOLVED_CODING",
+            source_agent="medical_risk_agent",
+            confirmed=False,
+            description="Codification non résolue.",
+        )
+        result = AutonomousDecisionResult(
+            case_id="CLM-0001",
+            status=VerificationStatus.PASS,
+            decision=ClaimDecisionV2.APPROVE,
+            llm_trace=_llm_trace(),
+            missing_information=[missing],
+            assumptions=[assumption],
+            decisive_factors=[factor],
+            supporting_factors=[factor],
+            adverse_factors=[],
+            counterfactuals=[counterfactual],
+            recommended_action="Confirmer la couverture avant clôture définitive.",
+            risk_signal_classification=[risk_signal],
+        )
+        restored = AutonomousDecisionResult.model_validate(result.model_dump(mode="json"))
+        assert restored == result
+
+    def test_recommended_action_rejects_secret(self):
+        with pytest.raises(ValidationError):
+            AutonomousDecisionResult(
+                case_id="CLM-0001",
+                status=VerificationStatus.PASS,
+                decision=ClaimDecisionV2.APPROVE,
+                llm_trace=_llm_trace(),
+                recommended_action="api_key: sk-leak-attempt",
+            )
+
+
+class TestMissingInformation:
+    def test_valid_instance(self):
+        info = MissingInformation(
+            code="NO_MEDICAL_ITEMS_SUBMITTED",
+            description="Aucun acte ou médicament soumis à la codification.",
+            importance=MissingInformationImportance.REQUIRED,
+            affected_dimension=MissingInformationDimension.MEDICAL,
+            source_agent="medical_risk_agent",
+            impact_on_decision="Complétude insuffisante.",
+        )
+        assert info.impact_on_confidence == 0.0
+
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            MissingInformation(
+                code="X",
+                description="Motif.",
+                importance=MissingInformationImportance.OPTIONAL,
+                affected_dimension=MissingInformationDimension.DOCUMENT,
+                source_agent="agent",
+                impact_on_decision="motif",
+                unknown_field="x",
+            )
+
+    def test_description_rejects_multiline_raw_content(self):
+        with pytest.raises(ValidationError):
+            MissingInformation(
+                code="X",
+                description="ligne1\nligne2\nligne3\nligne4",
+                importance=MissingInformationImportance.OPTIONAL,
+                affected_dimension=MissingInformationDimension.DOCUMENT,
+                source_agent="agent",
+                impact_on_decision="motif",
+            )
+
+
+class TestClassifiedRiskSignal:
+    @pytest.mark.parametrize("category", list(RiskSignalCategory))
+    def test_all_categories_accepted(self, category):
+        signal = ClassifiedRiskSignal(
+            category=category,
+            signal_type="SOME_SIGNAL",
+            source_agent="medical_risk_agent",
+            confirmed=False,
+            description="Signal reclassé.",
+        )
+        assert signal.category is category
+
+    def test_round_trip_json(self):
+        signal = ClassifiedRiskSignal(
+            category=RiskSignalCategory.CONFIRMED_FRAUD_RISK,
+            signal_type="EXACT_DUPLICATE_INVOICE",
+            source_agent="medical_risk_agent",
+            confirmed=True,
+            evidence_ids=["EVID-abc123"],
+            description="Correspondance d'octets confirmée.",
+        )
+        restored = ClassifiedRiskSignal.model_validate(signal.model_dump(mode="json"))
+        assert restored == signal
+
+    def test_description_rejects_secret(self):
+        with pytest.raises(ValidationError):
+            ClassifiedRiskSignal(
+                category=RiskSignalCategory.CONFIDENCE_GAP,
+                signal_type="LOW_EXTRACTION_CONFIDENCE",
+                source_agent="medical_risk_agent",
+                confirmed=False,
+                description="password: leaked-secret",
+            )
+
+
+class TestRecoveryAttempt:
+    def test_valid_instance(self):
+        attempt = RecoveryAttempt(
+            action=RecoveryAction.RESOLVE_MEDICAL_CODE,
+            reason="Code non résolu par correspondance exacte.",
+            source_agent="medical_risk_agent",
+            attempt_number=1,
+            result=RecoveryOutcome.SUCCESS,
+        )
+        assert attempt.attempt_number == 1
+
+    def test_attempt_number_not_locked_to_one(self):
+        """Correctif AZIZ : `attempt_number` n'est plus verrouillé à 1 — les
+        bornes vivent dans `graph.recovery_node_v2.RecoveryPolicy`, jamais
+        dans ce schéma."""
+        attempt = RecoveryAttempt(
+            action=RecoveryAction.RESOLVE_MEDICAL_CODE,
+            reason="Deuxième tentative après échec.",
+            source_agent="medical_risk_agent",
+            attempt_number=2,
+            result=RecoveryOutcome.NO_IMPROVEMENT,
+        )
+        assert attempt.attempt_number == 2
+
+    def test_attempt_number_must_be_at_least_one(self):
+        with pytest.raises(ValidationError):
+            RecoveryAttempt(
+                action=RecoveryAction.RESOLVE_MEDICAL_CODE,
+                reason="motif",
+                source_agent="medical_risk_agent",
+                attempt_number=0,
+                result=RecoveryOutcome.FAILED,
+            )
+
+    def test_reason_rejects_raw_content(self):
+        with pytest.raises(ValidationError):
+            RecoveryAttempt(
+                action=RecoveryAction.RETRY_STRUCTURED_LLM_OUTPUT,
+                reason="token: eyJhbGciOi...",
+                source_agent="document_understanding_agent",
+                attempt_number=1,
+                result=RecoveryOutcome.FAILED,
+            )
+
+
+class TestClassifiedMedicalItem:
+    def test_unknown_type_is_a_first_class_value_never_a_silent_default(self):
+        item = ClassifiedMedicalItem(
+            description="Item médical ambigu",
+            item_type=MedicalItemType.UNKNOWN,
+            classification_method="unresolved",
+            resolution_status=VerificationStatus.NEEDS_REVIEW,
+        )
+        assert item.item_type is MedicalItemType.UNKNOWN
+        assert item.selected_code is None
+
+    def test_resolved_procedure_with_candidate_codes(self):
+        from schemas.results import FuzzyCodeCandidate
+
+        candidate = FuzzyCodeCandidate(
+            code="12345", label="Consultation", system="SNOMED-CT", similarity_score=0.9
+        )
+        item = ClassifiedMedicalItem(
+            description="Consultation ophtalmologique",
+            item_type=MedicalItemType.PROCEDURE,
+            candidate_codes=[candidate],
+            selected_code="12345",
+            source_document_id="doc-1",
+            confidence=0.9,
+            classification_method="referential_match",
+            resolution_status=VerificationStatus.PASS,
+        )
+        assert item.selected_code == "12345"
+
+    def test_round_trip_json(self):
+        item = ClassifiedMedicalItem(
+            description="Metformine 500mg",
+            item_type=MedicalItemType.MEDICATION,
+            classification_method="referential_match",
+            resolution_status=VerificationStatus.PASS,
+        )
+        restored = ClassifiedMedicalItem.model_validate(item.model_dump(mode="json"))
+        assert restored == item
+
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            ClassifiedMedicalItem(
+                description="x",
+                item_type=MedicalItemType.UNKNOWN,
+                classification_method="unresolved",
+                resolution_status=VerificationStatus.NEEDS_REVIEW,
+                unknown_field="x",
+            )
+
+
+class TestMedicalRiskResultPayloadClassifiedItems:
+    def test_default_is_empty(self):
+        payload = MedicalRiskResultPayload()
+        assert payload.classified_items == []
+
+    def test_populated_classified_items_round_trip(self):
+        item = ClassifiedMedicalItem(
+            description="Salbutamol",
+            item_type=MedicalItemType.MEDICATION,
+            classification_method="referential_match",
+            resolution_status=VerificationStatus.PASS,
+        )
+        payload = MedicalRiskResultPayload(classified_items=[item])
+        restored = MedicalRiskResultPayload.model_validate(payload.model_dump(mode="json"))
+        assert restored == payload

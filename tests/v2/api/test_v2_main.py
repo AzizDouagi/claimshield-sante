@@ -94,7 +94,7 @@ def deterministic_v2_llm(monkeypatch):
         "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
         Mock(
             return_value=LlmAutonomousDecision(
-                decision="APPROVE", summary="Dossier conforme.", confidence=0.95
+                recommended_decision="APPROVE", reasoning_summary="Dossier conforme."
             )
         ),
     )
@@ -300,6 +300,92 @@ class TestChatEndpoint:
         )
         assert response.status_code == 200
         assert "introuvable" in response.json()["reply"].lower()
+
+
+class TestChatMemoryWiring:
+    """Phase 8 (plan de remédiation « autonomie décisionnelle V2 », §6) —
+    mémoire conversationnelle opt-in au niveau HTTP : `thread_id`/`actor`."""
+
+    def test_no_actor_means_no_thread_id_in_response(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")),
+        )
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.json()["thread_id"] is None
+
+    def test_actor_without_thread_id_generates_one_server_side(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")),
+        )
+        response = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099", "actor": "gestionnaire.dupont"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.json()["thread_id"]
+
+    def test_same_actor_reusing_thread_id_never_errors(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")),
+        )
+        first = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099", "actor": "gestionnaire.dupont"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        thread_id = first.json()["thread_id"]
+        second = v2_client.post(
+            "/chat",
+            json={
+                "message": "Et sinon ?",
+                "case_id": "CLM-8099",
+                "actor": "gestionnaire.dupont",
+                "thread_id": thread_id,
+            },
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert second.status_code == 200
+        assert second.json()["thread_id"] == thread_id
+
+    def test_different_actor_reusing_thread_id_returns_403(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")),
+        )
+        first = v2_client.post(
+            "/chat",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099", "actor": "gestionnaire.dupont"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        thread_id = first.json()["thread_id"]
+        second = v2_client.post(
+            "/chat",
+            json={
+                "message": "Pourquoi ?",
+                "case_id": "CLM-8099",
+                "actor": "un.autre.gestionnaire",
+                "thread_id": thread_id,
+            },
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert second.status_code == 403
 
     def test_chat_audit_intent_returns_grounded_reply(self, v2_client: TestClient, monkeypatch):
         """AUDIT est livré depuis V2-11c (plus de « bientôt disponible » —

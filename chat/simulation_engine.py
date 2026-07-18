@@ -42,6 +42,25 @@ retiré hypothétiquement (`remove_document`), ou le rôle de lecture changé
 pas réalisable via ce canal (aucun upload possible depuis un message texte)
 — hors périmètre de V2-11b, documenté ici plutôt que simulé silencieusement.
 
+**Simulation ciblée** (`run_targeted_simulation`, Phase 9, plan de
+remédiation « autonomie décisionnelle V2 », §7) — **second module
+d'exception** documenté explicitement : outre `graph.*` (ci-dessus), ce
+fichier importe aussi directement `agents.autonomous_decision_agent.agent`,
+pour la raison précise que décrit le plan : « exécution ciblée via
+ré-invocation directe de `autonomous_decision_agent.run()` », jamais le
+graphe entier. Contrairement à `run_simulation` (ci-dessus), aucun fichier
+n'est copié, aucun `case_id` synthétique n'est créé, aucune écriture disque
+n'a lieu : l'état réel déjà calculé du dossier (`eligibility_result`) est lu
+une seule fois (`compiled_graph.get_state()`, lecture seule), patché sur une
+**copie** (`model_copy`, jamais une mutation de l'objet réel), puis
+`autonomous_decision_agent.run(case_id, patched_state)` est rejoué —
+équivalent au patron « appel direct d'une fonction pure hors LangGraph »
+déjà utilisé partout ailleurs dans le projet pour les tests/scripts. Bornée
+à une liste blanche fermée de champs d'éligibilité déjà calculés
+(`chat.schemas.SimulationPatchField`) — jamais un champ arbitraire, jamais
+un acte/médicament (nécessiterait de retraiter l'OCR/FHIR, hors périmètre de
+cette phase, resterait à `remove_document`/simulation complète).
+
 **Contrainte opérationnelle réelle, non résolue dans cette phase** (§0 du
 plan : « fichiers existants touchés : aucun » pour V2-11b — corrigerait
 sinon `api/v2/claims.py`/`api/v2/__init__.py`, hors périmètre) : en
@@ -70,16 +89,25 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agents.autonomous_decision_agent.agent import run as run_autonomous_decision
 from config.settings import get_settings
 from graph.checkpoints import CheckpointerFactory, make_thread_config
 from graph.workflow_v2 import compile_workflow_v2
-from schemas.domain import FileStatus, ReaderRole
+from schemas.domain import FileStatus, ReaderRole, VerificationStatus
 from schemas.results import ClaimManifest
+from schemas.v2_results import EligibilityResult
 from services.storage import StorageService
 
-from chat.schemas import SimulationChangeRequest, SimulationResult
+from chat.schemas import SimulationChangeRequest, SimulationPatch, SimulationPatchField, SimulationResult
 
-__all__ = ["run_simulation"]
+__all__ = ["run_simulation", "run_targeted_simulation"]
+
+_STATUS_PATCH_FIELDS = frozenset(
+    {SimulationPatchField.IDENTITY_STATUS, SimulationPatchField.COVERAGE_STATUS}
+)
+_BOOL_PATCH_FIELDS = frozenset(
+    {SimulationPatchField.CEILING_EXCEEDED, SimulationPatchField.PREAUTHORIZATION_REQUIRED}
+)
 
 
 def _stringify(value: Any) -> str | None:
@@ -163,7 +191,15 @@ def run_simulation(
     (décision AZIZ, plan V2 §0). `compiled_graph` injectable (tests) ;
     `None` construit une instance depuis les paramètres d'environnement,
     même convention que `graph.workflow_v2.compile_workflow_v2` partout
-    ailleurs dans le projet."""
+    ailleurs dans le projet.
+
+    `changes.field_patches` non vide (Phase 9) délègue entièrement à
+    `run_targeted_simulation` — simulation ciblée, jamais le graphe entier
+    (mutuellement exclusif avec `remove_document`/`reader_role`, déjà validé
+    par `chat.schemas.SimulationChangeRequest`)."""
+    if changes.field_patches:
+        return run_targeted_simulation(case_id, changes.field_patches, compiled_graph=compiled_graph)
+
     graph = (
         compiled_graph
         if compiled_graph is not None
@@ -226,4 +262,107 @@ def run_simulation(
         simulated_decision=simulated_decision,
         decision_changed=simulated_decision != original_decision,
         simulated_reasons=reasons,
+    )
+
+
+# ── Simulation ciblée (Phase 9) ────────────────────────────────────────────────
+
+
+def _apply_patches_to_eligibility(
+    eligibility_result: EligibilityResult, patches: list[SimulationPatch]
+) -> EligibilityResult:
+    """Applique les patches sur une **copie** (`model_copy`) — l'objet
+    `eligibility_result` réel (lu depuis `compiled_graph.get_state()`) n'est
+    jamais mutée. Bornée à la liste blanche fermée `SimulationPatchField` —
+    la validation de cohérence valeur/champ est déjà garantie par
+    `SimulationPatch` (schéma), jamais revalidée en doublon ici."""
+    identity_updates: dict[str, object] = {}
+    coverage_updates: dict[str, object] = {}
+    for patch in patches:
+        if patch.field is SimulationPatchField.IDENTITY_STATUS:
+            identity_updates["status"] = VerificationStatus(patch.value)
+        elif patch.field is SimulationPatchField.COVERAGE_STATUS:
+            coverage_updates["status"] = VerificationStatus(patch.value)
+        elif patch.field is SimulationPatchField.CEILING_EXCEEDED:
+            coverage_updates["ceiling_exceeded"] = patch.value.lower() == "true"
+        elif patch.field is SimulationPatchField.PREAUTHORIZATION_REQUIRED:
+            coverage_updates["preauthorization_required"] = patch.value.lower() == "true"
+
+    identity = (
+        eligibility_result.identity.model_copy(update=identity_updates)
+        if identity_updates
+        else eligibility_result.identity
+    )
+    coverage = (
+        eligibility_result.coverage.model_copy(update=coverage_updates)
+        if coverage_updates
+        else eligibility_result.coverage
+    )
+    return eligibility_result.model_copy(update={"identity": identity, "coverage": coverage})
+
+
+def run_targeted_simulation(
+    case_id: str,
+    patches: list[SimulationPatch],
+    *,
+    compiled_graph: Any | None = None,
+) -> SimulationResult:
+    """Simulation **ciblée** (Phase 9) — jamais le graphe entier réinvoqué,
+    jamais de fichier copié/modifié, jamais de `case_id` synthétique : lit
+    l'état réel déjà calculé (`eligibility_result`, lecture seule via
+    `compiled_graph.get_state()`), le patche sur une copie, puis rejoue
+    directement `agents.autonomous_decision_agent.agent.run()` — le seul
+    résultat qui dépend de `eligibility_result` dans la matrice de décision.
+
+    `compiled_graph` injectable (tests) ; `None` construit une instance
+    depuis les paramètres d'environnement, même convention que
+    `run_simulation`."""
+    graph = (
+        compiled_graph
+        if compiled_graph is not None
+        else compile_workflow_v2(CheckpointerFactory.from_settings().build())
+    )
+    config = make_thread_config(case_id)
+    snapshot = graph.get_state(config)
+    if not snapshot.values:
+        return SimulationResult(
+            case_id=case_id,
+            applied=False,
+            error="Dossier introuvable — jamais soumis, thread expiré, ou aucun document accepté.",
+        )
+
+    values = snapshot.values
+    original_decision = _stringify(values.get("final_decision"))
+    eligibility_result = values.get("eligibility_result")
+    if eligibility_result is None:
+        return SimulationResult(
+            case_id=case_id,
+            applied=False,
+            original_decision=original_decision,
+            error="Simulation ciblée impossible : résultat d'éligibilité non disponible pour ce dossier.",
+        )
+    if isinstance(eligibility_result, dict):
+        eligibility_result = EligibilityResult.model_validate(eligibility_result)
+
+    try:
+        patched_eligibility = _apply_patches_to_eligibility(eligibility_result, patches)
+        patched_state = dict(values)
+        patched_state["eligibility_result"] = patched_eligibility
+        result = run_autonomous_decision(case_id, patched_state)  # type: ignore[arg-type]
+    except Exception as exc:  # noqa: BLE001 — une simulation en échec ne doit jamais lever
+        return SimulationResult(
+            case_id=case_id,
+            applied=False,
+            original_decision=original_decision,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    simulated_decision = result.decision.value
+    return SimulationResult(
+        case_id=case_id,
+        applied=True,
+        original_decision=original_decision,
+        simulated_decision=simulated_decision,
+        decision_changed=simulated_decision != original_decision,
+        simulated_reasons=list(result.justification),
     )

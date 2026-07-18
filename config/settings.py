@@ -222,6 +222,26 @@ class Settings(BaseSettings):
             )
         return v
 
+    # ── Chat Reasoning Agent — mémoire conversationnelle (Phase 8) ───────────
+    claimshield_chat_memory_ttl_seconds: int = Field(
+        3600,
+        alias="CLAIMSHIELD_CHAT_MEMORY_TTL_SECONDS",
+        description=(
+            "Durée de vie (en secondes) d'une conversation entière avant "
+            "expiration (chat.conversation_store.ConversationStore.expire_older_than) "
+            "— retire toujours une conversation complète, jamais un tour "
+            "isolé. Défaut 1h, appliqué de façon identique au résumé "
+            "sémantique (aucun cycle de vie séparé, voir §6.3 du plan)."
+        ),
+    )
+
+    @field_validator("claimshield_chat_memory_ttl_seconds")
+    @classmethod
+    def _chat_memory_ttl_valide(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"claimshield_chat_memory_ttl_seconds doit être strictement positif, reçu : {v}")
+        return v
+
     # ── Raccourcis calculés (compat. avec l'ancienne API) ────────────────────
     @computed_field  # type: ignore[prop-decorator]
     @property

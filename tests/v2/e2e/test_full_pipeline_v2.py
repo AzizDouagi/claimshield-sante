@@ -77,7 +77,7 @@ def deterministic_v2_llm(monkeypatch):
         "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
         Mock(
             return_value=LlmAutonomousDecision(
-                decision="APPROVE", summary="Dossier conforme.", confidence=0.95
+                recommended_decision="APPROVE", reasoning_summary="Dossier conforme."
             )
         ),
     )

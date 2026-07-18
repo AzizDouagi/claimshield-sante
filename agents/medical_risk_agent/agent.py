@@ -37,11 +37,15 @@ complétude des preuves (`evidence_completeness`, nouveau). Les poids
 `risk_contribution` de V1 (`_collect_signals`) restent inchangés — seule
 leur agrégation par cet agent change.
 
-Limite MVP assumée (héritée de V1, voir CLAUDE.md « câblage minimal ») :
-`procedures`/`medications` restent des listes vides tant qu'aucun
-discriminant acte/médicament n'est disponible depuis un seul document —
-jamais une répartition heuristique inventée (même décision que
-`graph/input_builders.py::build_coding_input`, V1).
+Ancienne limite MVP (héritée de V1, voir CLAUDE.md « câblage minimal ») levée
+par la Phase 3 du plan de remédiation « autonomie décisionnelle V2 » :
+`node()` classe désormais chaque `medical_item` individuellement par
+référentiel (`_classify_medical_item`, SNOMED-CT vs RxNorm — jamais une
+heuristique inventée hors référentiel) plutôt que de tout classer en
+médicament par défaut. Un élément non résolu ou ambigu devient `UNKNOWN`
+(tracé dans `result_payload.classified_items`, exclu de `procedures`/
+`medications`, jamais un choix arbitraire) — voir
+`schemas.v2_results.MedicalItemType`.
 
 Simplification volontaire par rapport à V1 : `medical_view`/`fraud_view`
 (vues privacy pseudonymisées spécifiques à un rôle) ne sont pas dérivées
@@ -101,14 +105,21 @@ from llm.metadata import build_llm_metadata
 from schemas.domain import VerificationStatus
 from schemas.results import FraudSignal, ProcedureCoding, StructuredError
 from schemas.v2_results import (
+    ClassifiedMedicalItem,
     EvidenceCompleteness,
+    MedicalItemType,
     MedicalRiskResult,
     MedicalRiskResultPayload,
     RiskLevel,
 )
 from services.duplicate_index import DuplicateIndex
 from state.claim_state_v2 import ClaimStateV2, validate_state_update_v2
-from tools.medical_coding import code_medications, code_procedures, compute_global_status
+from tools.medical_coding import (
+    code_medications,
+    code_procedures,
+    compute_global_status,
+    find_fuzzy_candidates,
+)
 
 _AGENT_NAME = "medical_risk_agent"
 
@@ -121,6 +132,80 @@ _STATUS_RANK: dict[VerificationStatus, int] = {
 
 def _worst(a: VerificationStatus, b: VerificationStatus) -> VerificationStatus:
     return a if _STATUS_RANK[a] >= _STATUS_RANK[b] else b
+
+
+# ── Classification médicale par référentiel (plan de remédiation « autonomie ──
+# décisionnelle V2 », phase 3 — corrige le repli silencieux vers MEDICATION) ────
+#
+# Remplace la boucle qui classait systématiquement tout `medical_item` comme
+# médicament (limite MVP héritée de V1, voir CLAUDE.md « câblage minimal »).
+# Utilise le même référentiel déjà validé (config/rules/medical_codes.yaml,
+# SNOMED-CT/RxNorm) que `tools/medical_coding.py::lookup_code` — jamais une
+# heuristique inventée hors référentiel.
+
+_CLASSIFICATION_SCORE_CUTOFF = 0.80
+_CLASSIFICATION_AMBIGUITY_MARGIN = 0.05
+"""Écart minimal entre le meilleur score « procédure » et « médicament »
+pour trancher — en dessous, les deux pistes sont trop proches pour choisir
+sans arbitraire, l'élément reste `UNKNOWN` (jamais un choix arbitraire)."""
+
+
+def _classify_medical_item(
+    description: str,
+    *,
+    source_document_id: str | None = None,
+    score_cutoff: float = _CLASSIFICATION_SCORE_CUTOFF,
+) -> ClassifiedMedicalItem:
+    """Classe un élément médical extrait par référentiel (SNOMED-CT vs
+    RxNorm) — jamais un repli silencieux vers `MEDICATION`. Un élément sans
+    correspondance dans aucune des deux sections, ou dont les deux meilleurs
+    scores sont trop proches pour trancher, devient `UNKNOWN` — point final,
+    jamais un choix arbitraire. Ne sélectionne jamais de code final (reste le
+    rôle de `code_procedures`/`code_medications` -> `tools.medical_coding.lookup_code`,
+    inchangé) — uniquement le type et les candidats de référence."""
+    procedure_candidates = find_fuzzy_candidates(description, "procedures", score_cutoff=score_cutoff)
+    medication_candidates = find_fuzzy_candidates(description, "medications", score_cutoff=score_cutoff)
+    best_procedure = max((c.similarity_score for c in procedure_candidates), default=0.0)
+    best_medication = max((c.similarity_score for c in medication_candidates), default=0.0)
+
+    if best_procedure == 0.0 and best_medication == 0.0:
+        return ClassifiedMedicalItem(
+            description=description,
+            item_type=MedicalItemType.UNKNOWN,
+            source_document_id=source_document_id,
+            confidence=0.0,
+            classification_method="unresolved",
+            resolution_status=VerificationStatus.NEEDS_REVIEW,
+        )
+
+    if abs(best_procedure - best_medication) < _CLASSIFICATION_AMBIGUITY_MARGIN:
+        return ClassifiedMedicalItem(
+            description=description,
+            item_type=MedicalItemType.UNKNOWN,
+            candidate_codes=[*procedure_candidates, *medication_candidates],
+            source_document_id=source_document_id,
+            confidence=max(best_procedure, best_medication),
+            classification_method="unresolved",
+            resolution_status=VerificationStatus.NEEDS_REVIEW,
+        )
+
+    if best_procedure > best_medication:
+        item_type, candidates, confidence = MedicalItemType.PROCEDURE, procedure_candidates, best_procedure
+    else:
+        item_type, candidates, confidence = MedicalItemType.MEDICATION, medication_candidates, best_medication
+
+    return ClassifiedMedicalItem(
+        description=description,
+        item_type=item_type,
+        candidate_codes=candidates,
+        source_document_id=source_document_id,
+        confidence=confidence,
+        classification_method="referential_match",
+        # Une correspondance approximative reste par nature soumise à revue,
+        # même résolue — même convention que `tools.medical_coding.lookup_code`
+        # (`rule_applied="fuzzy_candidates_found"` -> toujours NEEDS_REVIEW).
+        resolution_status=VerificationStatus.NEEDS_REVIEW,
+    )
 
 
 # ── Séparation risque réel / complétude des preuves (correctif post-mesure ────
@@ -308,14 +393,16 @@ def run(
     medical_view: object | None = None,
     fraud_view: object | None = None,
     duplicate_index: DuplicateIndex | None = None,
+    classified_items: list[ClassifiedMedicalItem] | None = None,
 ) -> MedicalRiskResult:
     """Évalue codification + cohérence clinique + risque de fraude en une
     seule passe.
 
     Args:
         case_id: identifiant du dossier.
-        procedures/medications: descriptions à coder (limite MVP : listes
-            vides en pratique, voir docstring du module).
+        procedures/medications: descriptions à coder — désormais dérivées de
+            `classified_items` par `node()` (Phase 3 du plan de remédiation),
+            jamais toutes classées médicament par défaut.
         ocr_result: objet exposant `.extracted_fields`/`.confidence_score`/
             `.document_type`/`.sha256` (duck-typing, `DocumentOcrResult`
             V1 ou équivalent).
@@ -325,6 +412,9 @@ def run(
         medical_view/fraud_view: vues privacy déjà minimisées (optionnelles).
         duplicate_index: index injecté (tests) ; `None` retombe sur l'index
             partagé par défaut de `fraud_detection_agent`.
+        classified_items: classification déjà calculée (type/candidats/preuve
+            par élément, voir `_classify_medical_item`) — tracée telle quelle
+            dans `result_payload.classified_items`, jamais recalculée ici.
 
     Returns:
         MedicalRiskResult — statut PASS/NEEDS_REVIEW/FAIL.
@@ -569,6 +659,7 @@ def run(
         clinical_signals=clinical_signals_final,
         clinical_inconsistencies=inconsistencies,
         fraud_signals=fraud_signals_final,
+        classified_items=classified_items or [],
         duplicate_invoice=duplicate_invoice,
         risk_score=risk_score_final,
         risk_level=risk_level,
@@ -604,7 +695,9 @@ def node(state: ClaimStateV2) -> dict:
     eligibility_result = state.get("eligibility_result")
 
     ocr_result_like: object | None = None
+    procedures: list[str] = []
     medications: list[str] = []
+    classified_items: list[ClassifiedMedicalItem] = []
     if document_understanding_result is not None:
         extraction = (
             document_understanding_result.extraction
@@ -624,15 +717,14 @@ def node(state: ClaimStateV2) -> dict:
                 document_type=None,
                 sha256=None,
             )
-            # Câblage best-effort (correctif post-mesure V2-10, AZIZ) :
-            # `essential_fields.medical_items` n'est peuplé que par un regex
-            # médicament-only (`tools.document_parser._MEDICATION_RE`) — tout
-            # élément qui y figure est donc déjà, par construction, classé
-            # médicament, jamais un acte. `procedures` reste volontairement
-            # vide : aucun discriminant fiable acte/médicament n'existe
-            # encore côté extraction (même limite que V1,
-            # `graph/input_builders.py::build_coding_input` — jamais une
-            # répartition heuristique inventée ici).
+            # Classification par référentiel (Phase 3 du plan de remédiation
+            # « autonomie décisionnelle V2 », AZIZ) — remplace l'ancien
+            # câblage best-effort qui classait systématiquement tout
+            # `medical_item` en médicament. Chaque élément est classé
+            # individuellement (`_classify_medical_item`) : PROCEDURE ->
+            # `procedures`, MEDICATION -> `medications`, UNKNOWN -> exclu des
+            # deux (jamais un choix arbitraire) mais tracé dans
+            # `classified_items` pour audit/récupération (Phase 6).
             essential_fields = (
                 extraction.essential_fields
                 if hasattr(extraction, "essential_fields")
@@ -648,7 +740,13 @@ def node(state: ClaimStateV2) -> dict:
                     description = (
                         item.description if hasattr(item, "description") else item.get("description")
                     )
-                    if description:
+                    if not description:
+                        continue
+                    classified = _classify_medical_item(description)
+                    classified_items.append(classified)
+                    if classified.item_type is MedicalItemType.PROCEDURE:
+                        procedures.append(description)
+                    elif classified.item_type is MedicalItemType.MEDICATION:
                         medications.append(description)
 
     identity_like: object | None = None
@@ -667,10 +765,11 @@ def node(state: ClaimStateV2) -> dict:
 
     result = run(
         case_id=case_id,
-        procedures=[],
+        procedures=procedures,
         medications=medications,
         ocr_result=ocr_result_like,
         identity_coverage_result=identity_like,
+        classified_items=classified_items,
     )
 
     updates: dict = {

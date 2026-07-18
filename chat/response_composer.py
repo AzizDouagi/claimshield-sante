@@ -23,6 +23,8 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from chat.answer_mode import detect_answer_modes
+from chat.memory_schemas import DiscussedScenario
 from chat.prompt import load_chat_patient_message_prompt, load_chat_reasoning_prompt
 from chat.schemas import (
     AuditSummary,
@@ -107,11 +109,30 @@ def _fallback_compose(*, case_id: str | None, tool_results: dict) -> str:
     explanation = tool_results.get("explanation")
     if isinstance(explanation, ExplanationFacts):
         if explanation.final_decision and not isinstance(context, dict):
-            lines.append(f"Décision actuelle : {explanation.final_decision}.")
+            lines.append(f"[FAIT] Décision actuelle : {explanation.final_decision}.")
         if explanation.decision_summary:
-            lines.append("Justification : " + " ; ".join(explanation.decision_summary))
+            lines.append("[FAIT] Justification : " + " ; ".join(explanation.decision_summary))
         if explanation.bounded_by:
-            lines.append("Garde-fous appliqués : " + " ; ".join(explanation.bounded_by))
+            lines.append("[FAIT] Garde-fous appliqués : " + " ; ".join(explanation.bounded_by))
+        if explanation.missing_information:
+            lines.append(
+                "[HYPOTHÈSE] Informations manquantes : "
+                + " ; ".join(m.description for m in explanation.missing_information)
+            )
+        if explanation.assumptions:
+            lines.append(
+                "[HYPOTHÈSE] Hypothèses retenues : "
+                + " ; ".join(a.description for a in explanation.assumptions)
+            )
+        if explanation.counterfactuals:
+            lines.append(
+                "[HYPOTHÈSE] Ce qui changerait la décision : "
+                + " ; ".join(
+                    f"{c.condition} → {c.resulting_decision.value}" for c in explanation.counterfactuals
+                )
+            )
+        if explanation.recommended_action:
+            lines.append(f"[FAIT] Action recommandée : {explanation.recommended_action}.")
 
     corrections = tool_results.get("corrections")
     if corrections:
@@ -122,15 +143,24 @@ def _fallback_compose(*, case_id: str | None, tool_results: dict) -> str:
     simulation = tool_results.get("simulation")
     if isinstance(simulation, SimulationResult):
         if not simulation.applied:
-            lines.append(f"Simulation impossible : {simulation.error or 'motif inconnu'}.")
+            lines.append(f"[SIMULATION] Simulation impossible : {simulation.error or 'motif inconnu'}.")
         else:
             lines.append(
-                f"Simulation : décision actuelle {simulation.original_decision}, "
+                f"[SIMULATION] décision actuelle {simulation.original_decision}, "
                 f"décision simulée {simulation.simulated_decision}."
             )
             lines.append(
-                "La décision changerait." if simulation.decision_changed else "La décision ne changerait pas."
+                "[SIMULATION] La décision changerait."
+                if simulation.decision_changed
+                else "[SIMULATION] La décision ne changerait pas."
             )
+
+    resolved_scenario = tool_results.get("resolved_scenario")
+    if isinstance(resolved_scenario, DiscussedScenario):
+        line = f"[FAIT] Scénario référencé : {resolved_scenario.description}"
+        if resolved_scenario.related_decision:
+            line += f" (décision : {resolved_scenario.related_decision})"
+        lines.append(line + ".")
 
     audit_summary = tool_results.get("audit_summary")
     if isinstance(audit_summary, AuditSummary):
@@ -177,8 +207,14 @@ def compose(*, case_id: str | None, intents: list[ChatIntent], tool_results: dic
 
     serialized = {key: _serialize(value) for key, value in tool_results.items()}
     grounded_tokens = _grounded_tokens(serialized)
+    answer_modes = [mode.value for mode in detect_answer_modes(intents=intents, tool_results=tool_results)]
 
-    llm_data = {"case_id": case_id, "intentions": [intent.value for intent in intents], **serialized}
+    llm_data = {
+        "case_id": case_id,
+        "intentions": [intent.value for intent in intents],
+        "answer_modes": answer_modes,
+        **serialized,
+    }
     invoke = _invoke_llm_patient_message if ChatIntent.DRAFT_MESSAGE in intents else _invoke_llm_compose
     llm_text = invoke(llm_data)
     if llm_text is None:

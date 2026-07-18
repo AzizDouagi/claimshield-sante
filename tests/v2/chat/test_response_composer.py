@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 from chat.response_composer import compose
 from chat.schemas import ChatIntent, CorrectionRecommendation, ExplanationFacts
+from schemas.domain import ClaimDecisionV2
+from schemas.v2_results import DecisionAssumption, DecisionCounterfactual, MissingInformation, MissingInformationDimension, MissingInformationImportance
 
 
 class TestComposeNoData:
@@ -62,3 +64,79 @@ class TestComposeWithLlm:
             },
         )
         assert "Faire quelque chose." in result
+
+
+class TestAnswerModeWiring:
+    """Plan de remédiation « autonomie décisionnelle V2 », Phase 7."""
+
+    def test_llm_payload_carries_answer_modes(self, monkeypatch):
+        compose_spy = Mock(return_value="Réponse.")
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", compose_spy)
+        compose(
+            case_id="CLM-1006",
+            intents=[ChatIntent.EXPLAIN],
+            tool_results={
+                "explanation": ExplanationFacts(
+                    case_id="CLM-1006",
+                    missing_information=[
+                        MissingInformation(
+                            code="UNRESOLVED_CODING",
+                            description="Codification non résolue.",
+                            importance=MissingInformationImportance.IMPORTANT,
+                            affected_dimension=MissingInformationDimension.CODING,
+                            source_agent="medical_risk_agent",
+                            impact_on_decision="Confiance réduite.",
+                        )
+                    ],
+                )
+            },
+        )
+        payload = compose_spy.call_args[0][0]
+        assert "ASSUMPTION" in payload["answer_modes"]
+        assert "FACT" in payload["answer_modes"]
+
+    def test_fallback_labels_missing_information_and_assumptions(self, monkeypatch):
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", Mock(return_value=None))
+        result = compose(
+            case_id="CLM-1007",
+            intents=[ChatIntent.EXPLAIN],
+            tool_results={
+                "explanation": ExplanationFacts(
+                    case_id="CLM-1007",
+                    assumptions=[DecisionAssumption(code="X", description="Décision malgré une donnée incomplète.")],
+                    counterfactuals=[
+                        DecisionCounterfactual(
+                            condition="Code résolu",
+                            current_value="Non résolu",
+                            required_value="Résolu",
+                            resulting_decision=ClaimDecisionV2.APPROVE,
+                            explanation="Un code résolu changerait la décision.",
+                        )
+                    ],
+                    recommended_action="Vérifier la codification.",
+                )
+            },
+        )
+        assert "[HYPOTHÈSE]" in result
+        assert "Décision malgré une donnée incomplète." in result
+        assert "Code résolu" in result
+        assert "Vérifier la codification." in result
+
+    def test_fallback_labels_simulation(self, monkeypatch):
+        from chat.schemas import SimulationResult
+
+        monkeypatch.setattr("chat.response_composer._invoke_llm_compose", Mock(return_value=None))
+        result = compose(
+            case_id="CLM-1008",
+            intents=[ChatIntent.SIMULATE],
+            tool_results={
+                "simulation": SimulationResult(
+                    case_id="CLM-1008",
+                    applied=True,
+                    original_decision="APPROVE",
+                    simulated_decision="REJECT",
+                    decision_changed=True,
+                )
+            },
+        )
+        assert "[SIMULATION]" in result

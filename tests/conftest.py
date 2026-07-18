@@ -18,7 +18,16 @@ from llm.factory import reset_llm_cache
 
 @pytest.fixture(autouse=True)
 def clean_shared_storage() -> None:
-    """Supprime les sous-dossiers CLM-* dans les zones de stockage partagées."""
+    """Supprime les sous-dossiers CLM-* dans les zones de stockage partagées.
+
+    Inclut `manifests/` (fichiers `CLM-*.json`, pas des répertoires) depuis le
+    plan de remédiation « rejouabilité des dossiers » (V2, phase 1) :
+    `agents/intake_safety_agent/agent.py::_load_previous_active_files` relit
+    désormais le manifeste d'un run précédent pour détecter une révision de
+    document — un manifeste non nettoyé entre deux tests utilisant le même
+    `case_id` littéral (ex. `tests/v2/graph/test_workflow_v2.py`) serait sinon
+    interprété à tort comme une soumission déjà connue de ce dossier.
+    """
     s = get_settings()
     zones = [
         s.storage_dir / "incoming",
@@ -29,6 +38,10 @@ def clean_shared_storage() -> None:
         if zone.exists():
             for clm_dir in zone.glob("CLM-*"):
                 shutil.rmtree(clm_dir, ignore_errors=True)
+    manifests_dir = s.storage_dir / "manifests"
+    if manifests_dir.exists():
+        for manifest_file in manifests_dir.glob("CLM-*.json"):
+            manifest_file.unlink(missing_ok=True)
     yield
 
 

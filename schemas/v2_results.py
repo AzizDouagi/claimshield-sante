@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -34,6 +35,7 @@ from schemas.results import (
     DisagreementPoint,
     DocumentExtraction,
     FraudSignal,
+    FuzzyCodeCandidate,
     IdentityResult,
     LlmMetadata,
     ProcedureCoding,
@@ -43,13 +45,26 @@ from schemas.results import (
 
 __all__ = [
     "AutonomousDecisionResult",
+    "ClassifiedMedicalItem",
+    "ClassifiedRiskSignal",
+    "DecisionAssumption",
+    "DecisionCounterfactual",
+    "DecisionFactor",
     "DocumentUnderstandingResult",
     "EligibilityResult",
     "EvidenceCompleteness",
     "IntakeSafetyResult",
+    "MedicalItemType",
     "MedicalRiskResult",
     "MedicalRiskResultPayload",
+    "MissingInformation",
+    "MissingInformationDimension",
+    "MissingInformationImportance",
+    "RecoveryAction",
+    "RecoveryAttempt",
+    "RecoveryOutcome",
     "RiskLevel",
+    "RiskSignalCategory",
 ]
 
 # ── Validateur anti-fuite partagé ──────────────────────────────────────────────
@@ -212,6 +227,50 @@ class EvidenceCompleteness(str, Enum):
     INSUFFICIENT = "INSUFFICIENT"
 
 
+class MedicalItemType(str, Enum):
+    """Classification d'un élément médical extrait — plan de remédiation
+    « autonomie décisionnelle V2 » (point 5 AZIZ). `UNKNOWN` remplace tout
+    repli silencieux vers `MEDICATION` : un élément non résolu ou ambigu
+    reste explicitement `UNKNOWN`, jamais forcé dans une catégorie pour
+    remplir un champ (voir `agents/medical_risk_agent/agent.py::_classify_medical_item`,
+    Phase 3 du plan).
+
+    `DIAGNOSIS`/`LAB_TEST`/`MEDICAL_DEVICE` figurent ici pour complétude
+    sémantique mais ne sont **jamais atteints** par la classification
+    actuelle — `config/rules/medical_codes.yaml` ne référence que
+    `procedures` (SNOMED-CT) et `medications` (RxNorm), aucun référentiel de
+    diagnostic/analyse/dispositif n'existe dans ce dépôt. Limite honnête,
+    documentée plutôt que masquée."""
+
+    PROCEDURE = "PROCEDURE"
+    MEDICATION = "MEDICATION"
+    DIAGNOSIS = "DIAGNOSIS"
+    LAB_TEST = "LAB_TEST"
+    MEDICAL_DEVICE = "MEDICAL_DEVICE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ClassifiedMedicalItem(StrictModel):
+    """Élément médical extrait, classé et tracé — provenance complète
+    (description, type, candidats de codification, code sélectionné,
+    document source, preuves, confiance, méthode, statut de résolution)."""
+
+    description: str = Field(..., min_length=1)
+    item_type: MedicalItemType
+    candidate_codes: list[FuzzyCodeCandidate] = Field(default_factory=list)
+    selected_code: str | None = None
+    source_document_id: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    classification_method: Literal["referential_match", "fhir_resource_type", "unresolved"]
+    resolution_status: VerificationStatus
+
+    @field_validator("description")
+    @classmethod
+    def _description_no_raw_content(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "description")
+
+
 class MedicalRiskResultPayload(StrictModel):
     """Détail métier fusionné : codification + cohérence clinique + fraude.
 
@@ -222,6 +281,13 @@ class MedicalRiskResultPayload(StrictModel):
     détail métier V2, calculé par une seule Phase A puis vérifié par un seul
     appel LLM (plan V2 Phase V2-5, fallback conditionnel V2-5-bis documenté
     dans le plan si la fusion dégrade la qualité mesurée).
+
+    `classified_items` (plan de remédiation « autonomie décisionnelle V2 »,
+    additif) : trace la classification acte/médicament/inconnu de chaque
+    élément médical extrait, y compris ceux restés `UNKNOWN` — jamais
+    persisté ailleurs, populé par `agents/medical_risk_agent/agent.py`
+    (Phase 3 du plan), vide par défaut tant que cette phase n'est pas
+    câblée.
     """
 
     procedure_count: int | None = Field(default=None, ge=0)
@@ -230,6 +296,7 @@ class MedicalRiskResultPayload(StrictModel):
     clinical_signals: list[ClinicalSignal] = Field(default_factory=list)
     clinical_inconsistencies: list[ClinicalInconsistency] = Field(default_factory=list)
     fraud_signals: list[FraudSignal] = Field(default_factory=list)
+    classified_items: list[ClassifiedMedicalItem] = Field(default_factory=list)
     duplicate_invoice: bool | None = None
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     risk_level: RiskLevel = RiskLevel.LOW
@@ -287,6 +354,177 @@ class MedicalRiskResult(StrictModel):
         return self
 
 
+# ── 4bis. Récupération autonome (plan de remédiation « autonomie décisionnelle
+# V2 ») ────────────────────────────────────────────────────────────────────────
+
+
+class RecoveryAction(str, Enum):
+    """Actions de récupération automatique bornées, tentées avant la décision
+    finale lorsqu'un résultat amont est incomplet mais potentiellement
+    récupérable — jamais un cycle (voir `graph/recovery_node_v2.py`, Phase 6
+    du plan). Ensemble fermé, retenu après étude explicite de 8 actions
+    candidates (voir CLAUDE.md/le plan pour la justification de chaque
+    exclusion — `RECHECK_DUPLICATE`/`RETRY_DOCUMENT_EXTRACTION` écartées,
+    `READ_MEDICAL_ITEMS_FROM_FHIR`/`CROSS_CHECK_DOCUMENT_AND_FHIR` fusionnées,
+    `RESOLVE_MEDICAL_CODE`/`RECLASSIFY_MEDICAL_ITEM` fusionnées)."""
+
+    RETRY_STRUCTURED_LLM_OUTPUT = "RETRY_STRUCTURED_LLM_OUTPUT"
+    READ_MEDICAL_ITEMS_FROM_FHIR = "READ_MEDICAL_ITEMS_FROM_FHIR"
+    RESOLVE_MEDICAL_CODE = "RESOLVE_MEDICAL_CODE"
+    RECOMPUTE_ELIGIBILITY = "RECOMPUTE_ELIGIBILITY"
+
+
+class RecoveryOutcome(str, Enum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    NO_IMPROVEMENT = "NO_IMPROVEMENT"
+
+
+class RecoveryAttempt(StrictModel):
+    """Une tentative de récupération auditée. `attempt_number` n'est **pas**
+    verrouillé à 1 (correctif AZIZ) — les bornes (nombre maximal de
+    tentatives par action et au total) vivent dans une politique injectable
+    et configurable (`graph.recovery_node_v2.RecoveryPolicy`), jamais dans
+    ce schéma."""
+
+    action: RecoveryAction
+    reason: str = Field(..., min_length=1)
+    source_agent: str = Field(..., min_length=1)
+    attempt_number: int = Field(..., ge=1)
+    result: RecoveryOutcome
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_no_raw_content(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "reason")
+
+
+# ── 4ter. Classification des signaux de risque (remplace le plafonnement sur
+# `risk_level` agrégé — plan de remédiation « autonomie décisionnelle V2 ») ──────
+
+
+class RiskSignalCategory(str, Enum):
+    """Nature et solidité d'un signal, jamais réduites à une seule valeur
+    agrégée (`risk_level`). `confirmed=True` uniquement pour un fait établi
+    par un agent (statut FAIL confirmé, correspondance d'octets, signal
+    clinique critique) — jamais pour une similarité probabiliste ou une
+    donnée manquante/ambiguë. Voir
+    `agents.autonomous_decision_agent.policy.classify_risk_signals`."""
+
+    CONFIRMED_SECURITY_RISK = "CONFIRMED_SECURITY_RISK"
+    CONFIRMED_FRAUD_RISK = "CONFIRMED_FRAUD_RISK"
+    SUSPECTED_FRAUD_RISK = "SUSPECTED_FRAUD_RISK"
+    CONFIRMED_CLINICAL_RISK = "CONFIRMED_CLINICAL_RISK"
+    ELIGIBILITY_FAILURE = "ELIGIBILITY_FAILURE"
+    COMPLETENESS_GAP = "COMPLETENESS_GAP"
+    CONFIDENCE_GAP = "CONFIDENCE_GAP"
+
+
+class ClassifiedRiskSignal(StrictModel):
+    """Un signal déjà calculé par un agent amont, classé par nature et
+    solidité — jamais un nouveau signal calculé ici, uniquement une
+    reclassification d'un fait déjà établi."""
+
+    category: RiskSignalCategory
+    signal_type: str = Field(..., min_length=1)
+    source_agent: str = Field(..., min_length=1)
+    confirmed: bool
+    evidence_ids: list[str] = Field(default_factory=list)
+    description: str = Field(..., min_length=1)
+
+    @field_validator("description")
+    @classmethod
+    def _description_no_raw_content(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "description")
+
+
+# ── 4quater. Explicabilité de la décision (informations manquantes, facteurs,
+# hypothèses, contrefactuels) ────────────────────────────────────────────────
+
+
+class MissingInformationImportance(str, Enum):
+    REQUIRED = "REQUIRED"
+    IMPORTANT = "IMPORTANT"
+    OPTIONAL = "OPTIONAL"
+
+
+class MissingInformationDimension(str, Enum):
+    IDENTITY = "IDENTITY"
+    COVERAGE = "COVERAGE"
+    MEDICAL = "MEDICAL"
+    CODING = "CODING"
+    FRAUD = "FRAUD"
+    DOCUMENT = "DOCUMENT"
+
+
+class MissingInformation(StrictModel):
+    """Une information manquante ou incomplète — jamais une décision en
+    elle-même. Alimente la confiance/les hypothèses, jamais un plafonnement
+    automatique de la décision."""
+
+    code: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    importance: MissingInformationImportance
+    affected_dimension: MissingInformationDimension
+    source_agent: str = Field(..., min_length=1)
+    evidence_ids: list[str] = Field(default_factory=list)
+    impact_on_decision: str = Field(..., min_length=1)
+    impact_on_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @field_validator("description", "impact_on_decision")
+    @classmethod
+    def _no_raw_content(cls, v: str, info) -> str:
+        return _reject_unstructured_content(v, info.field_name)
+
+
+class DecisionFactor(StrictModel):
+    """Un facteur décisif/favorable/défavorable déjà établi — toujours
+    attribué à un agent source et, si possible, à des preuves réelles."""
+
+    code: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    source_agent: str = Field(..., min_length=1)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("description")
+    @classmethod
+    def _description_no_raw_content(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "description")
+
+
+class DecisionAssumption(StrictModel):
+    """Une hypothèse explicitement posée faute de preuve confirmée — jamais
+    une preuve, toujours distinguée d'un fait établi (voir chat V2,
+    étiquetage FACT/ASSUMPTION/SIMULATION)."""
+
+    code: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    confidence_impact: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @field_validator("description")
+    @classmethod
+    def _description_no_raw_content(cls, v: str) -> str:
+        return _reject_unstructured_content(v, "description")
+
+
+class DecisionCounterfactual(StrictModel):
+    """Ce qui aurait changé la décision — mécanique, dérivée des axes déjà
+    évalués par la Phase A, jamais une simulation de champ arbitraire (voir
+    `chat/simulation_engine.py` pour cela)."""
+
+    condition: str = Field(..., min_length=1)
+    current_value: str = Field(..., min_length=1)
+    required_value: str = Field(..., min_length=1)
+    resulting_decision: ClaimDecisionV2
+    explanation: str = Field(..., min_length=1)
+
+    @field_validator("condition", "current_value", "required_value", "explanation")
+    @classmethod
+    def _no_raw_content(cls, v: str, info) -> str:
+        return _reject_unstructured_content(v, info.field_name)
+
+
 # ── 5. autonomous_decision_agent ─────────────────────────────────────────────────
 
 
@@ -317,7 +555,27 @@ class AutonomousDecisionResult(StrictModel):
     evidence_ids: list[str] = Field(default_factory=list)
     llm_trace: LlmMetadata
 
+    # ── Champs additifs — plan de remédiation « autonomie décisionnelle V2 »,
+    # jamais calculés par le LLM (Phase A/C, Python uniquement — voir
+    # `agents/autonomous_decision_agent/policy.py`) ──────────────────────────
+    missing_information: list[MissingInformation] = Field(default_factory=list)
+    assumptions: list[DecisionAssumption] = Field(default_factory=list)
+    decisive_factors: list[DecisionFactor] = Field(default_factory=list)
+    supporting_factors: list[DecisionFactor] = Field(default_factory=list)
+    adverse_factors: list[DecisionFactor] = Field(default_factory=list)
+    counterfactuals: list[DecisionCounterfactual] = Field(default_factory=list)
+    recommended_action: str = Field(default="")
+    evidence_completeness: EvidenceCompleteness = EvidenceCompleteness.COMPLETE
+    risk_signal_classification: list[ClassifiedRiskSignal] = Field(default_factory=list)
+
     @field_validator("justification", "risks", "bounded_by")
     @classmethod
     def _no_raw_content(cls, v: list[str], info) -> list[str]:
         return [_reject_unstructured_content(item, info.field_name) for item in v]
+
+    @field_validator("recommended_action")
+    @classmethod
+    def _recommended_action_no_raw_content(cls, v: str) -> str:
+        if not v:
+            return v
+        return _reject_unstructured_content(v, "recommended_action")

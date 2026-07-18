@@ -283,3 +283,4 @@ du code Python. Aucun LLM ne choisit librement le niveau ou la décision.
 | `SUSPICIOUS_DOCUMENT_CONTENT` | HIGH | Contenu documentaire suspect. |
 | `SUSPICIOUS_CONTENT` | MEDIUM | Contenu suspect non classé plus précisément. |
 | `POLICY_VIOLATION` | MEDIUM | Violation générique de politique de sécurité. |
+| `UNEXPECTED_DOCUMENT_SUBSTITUTION` | HIGH | Contenu différent reçu pour un document déjà présent sans révision déclarée. |

@@ -41,6 +41,58 @@ class TestBuildExplanationFacts:
         assert facts.errors == []
         assert facts.bounded_by == []
 
+    def test_explainability_fields_reused_from_context(self):
+        """Phase 7 (plan de remédiation « autonomie décisionnelle V2 ») —
+        `missing_information`/`assumptions`/`decisive_factors`/
+        `counterfactuals`/`recommended_action`/`evidence_completeness`
+        arrivent comme des dicts JSON déjà sérialisés (réponse API) et sont
+        revalidés par Pydantic à la construction, jamais un nouveau calcul."""
+        context = {
+            "case_id": "CLM-1004",
+            "missing_information": [
+                {
+                    "code": "UNRESOLVED_CODING",
+                    "description": "Codification non résolue.",
+                    "importance": "IMPORTANT",
+                    "affected_dimension": "CODING",
+                    "source_agent": "medical_risk_agent",
+                    "impact_on_decision": "Confiance réduite.",
+                }
+            ],
+            "assumptions": [{"code": "X", "description": "Hypothèse retenue."}],
+            "decisive_factors": [
+                {"code": "IDENTITY_CONFIRMED", "description": "Identité confirmée.", "source_agent": "eligibility_agent"}
+            ],
+            "counterfactuals": [
+                {
+                    "condition": "Code résolu",
+                    "current_value": "Non résolu",
+                    "required_value": "Résolu",
+                    "resulting_decision": "APPROVE",
+                    "explanation": "Un code résolu permettrait une approbation complète.",
+                }
+            ],
+            "recommended_action": "Vérifier la codification.",
+            "evidence_completeness": "PARTIAL",
+        }
+        facts = build_explanation_facts(context)
+        assert len(facts.missing_information) == 1
+        assert facts.missing_information[0].code == "UNRESOLVED_CODING"
+        assert len(facts.assumptions) == 1
+        assert len(facts.decisive_factors) == 1
+        assert len(facts.counterfactuals) == 1
+        assert facts.recommended_action == "Vérifier la codification."
+        assert facts.evidence_completeness.value == "PARTIAL"
+
+    def test_explainability_fields_default_empty(self):
+        facts = build_explanation_facts({"case_id": "CLM-1005"})
+        assert facts.missing_information == []
+        assert facts.assumptions == []
+        assert facts.decisive_factors == []
+        assert facts.counterfactuals == []
+        assert facts.recommended_action == ""
+        assert facts.evidence_completeness is None
+
 
 class TestBuildCorrections:
     def test_payer_name_absent_triggers_recommendation(self):

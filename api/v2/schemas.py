@@ -14,6 +14,13 @@ from datetime import datetime
 from pydantic import Field
 
 from schemas.domain import ClaimDecisionV2, ReaderRole, StrictModel
+from schemas.v2_results import (
+    DecisionAssumption,
+    DecisionCounterfactual,
+    DecisionFactor,
+    EvidenceCompleteness,
+    MissingInformation,
+)
 from services.override_store import OverrideAction
 
 __all__ = [
@@ -38,13 +45,35 @@ class ClaimSubmissionRequestV2(StrictModel):
         default=ReaderRole.ADMINISTRATIVE_MANAGER,
         description="Rôle RBAC pour la vue minimisée produite par document_understanding_agent.",
     )
+    revision_of_case_id: str | None = Field(
+        default=None,
+        pattern=r"^CLM-\d{4,}$",
+        description=(
+            "Déclare explicitement que cette soumission peut contenir une nouvelle "
+            "version légitime d'un document déjà soumis pour ce dossier — doit être "
+            "égal à `case_id` pour avoir un effet (voir "
+            "agents/intake_safety_agent/agent.py::run(revision_of_case_id=...)). "
+            "Un contenu différent reçu sans cette déclaration est traité comme une "
+            "substitution inattendue (mise en quarantaine), jamais un écrasement "
+            "silencieux ni un blocage automatique."
+        ),
+    )
+    revision_note: str | None = Field(default=None, max_length=500)
 
 
 class ClaimStatusResponseV2(StrictModel):
     """État minimisé d'un dossier V2 — jamais de document brut, de texte OCR
     complet ni de donnée personnelle non déjà pseudonymisée. Contrairement à
     V1, toujours un état *terminal* dès la réponse de soumission (le graphe
-    V2 ne s'interrompt jamais)."""
+    V2 ne s'interrompt jamais).
+
+    Champs additifs (plan de remédiation « autonomie décisionnelle V2 »,
+    Phase 7 — « explicabilité chat ») : `missing_information`/`assumptions`/
+    `decisive_factors`/`counterfactuals`/`recommended_action`/
+    `evidence_completeness` reprennent tels quels les champs d'explicabilité
+    de `agents.autonomous_decision_agent` déjà calculés depuis les Phases
+    2/4/5 mais jamais surfacés par l'API jusqu'ici — jamais un nouveau
+    calcul, uniquement une exposition."""
 
     case_id: str
     current_step: str | None = None
@@ -54,6 +83,12 @@ class ClaimStatusResponseV2(StrictModel):
     bounded_by: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     alerts: list[str] = Field(default_factory=list)
+    missing_information: list[MissingInformation] = Field(default_factory=list)
+    assumptions: list[DecisionAssumption] = Field(default_factory=list)
+    decisive_factors: list[DecisionFactor] = Field(default_factory=list)
+    counterfactuals: list[DecisionCounterfactual] = Field(default_factory=list)
+    recommended_action: str = ""
+    evidence_completeness: EvidenceCompleteness | None = None
 
 
 class OverrideRequestBodyV2(StrictModel):

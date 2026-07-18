@@ -13,10 +13,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from agents.medical_risk_agent.agent import _evidence_completeness, node, run
+from agents.medical_risk_agent.agent import _classify_medical_item, _evidence_completeness, node, run
 from agents.medical_risk_agent.schemas import LlmMedicalRiskDecision
 from schemas.domain import VerificationStatus
-from schemas.v2_results import EvidenceCompleteness, RiskLevel
+from schemas.results import FuzzyCodeCandidate
+from schemas.v2_results import EvidenceCompleteness, MedicalItemType, RiskLevel
 from services.duplicate_index import DuplicateIndex
 
 
@@ -368,3 +369,100 @@ class TestNodeIntegration:
         updates = node(state)  # type: ignore[arg-type]
         assert updates["current_step"] == "medical_risk"
         assert updates["medical_risk_result"] is not None
+
+
+class TestClassifyMedicalItem:
+    """Plan de remédiation « autonomie décisionnelle V2 », phase 3 — corrige
+    le repli silencieux vers MEDICATION (point 5 AZIZ). Utilise des libellés
+    réels de `config/rules/medical_codes.yaml` (aucune donnée inventée)."""
+
+    def test_procedure_resolved_by_exact_referential_label(self):
+        item = _classify_medical_item("Consultation dentaire et rapport")
+        assert item.item_type is MedicalItemType.PROCEDURE
+        assert item.classification_method == "referential_match"
+        assert item.resolution_status is VerificationStatus.NEEDS_REVIEW
+        assert item.candidate_codes
+
+    def test_medication_resolved_by_exact_referential_label(self):
+        item = _classify_medical_item("Lisinopril 10 mg comprimé oral")
+        assert item.item_type is MedicalItemType.MEDICATION
+        assert item.classification_method == "referential_match"
+
+    def test_unresolved_description_becomes_unknown_never_medication(self):
+        """Contre-preuve directe du bug corrigé : avant cette phase, tout
+        élément non résolu était classé médicament par défaut."""
+        item = _classify_medical_item("Xyzabc totally unresolved item 999")
+        assert item.item_type is MedicalItemType.UNKNOWN
+        assert item.item_type is not MedicalItemType.MEDICATION
+        assert item.classification_method == "unresolved"
+        assert item.confidence == 0.0
+
+    def test_ambiguous_scores_become_unknown_never_an_arbitrary_choice(self, monkeypatch):
+        def fake_find_fuzzy_candidates(description, section, table=None, *, limit=5, score_cutoff=None):
+            if section == "procedures":
+                return [FuzzyCodeCandidate(code="P1", label="x", system="SNOMED-CT", similarity_score=0.85)]
+            return [FuzzyCodeCandidate(code="M1", label="y", system="RxNorm", similarity_score=0.86)]
+
+        monkeypatch.setattr(
+            "agents.medical_risk_agent.agent.find_fuzzy_candidates", fake_find_fuzzy_candidates
+        )
+        item = _classify_medical_item("item ambigu entre acte et médicament")
+        assert item.item_type is MedicalItemType.UNKNOWN
+        assert item.classification_method == "unresolved"
+        assert len(item.candidate_codes) == 2  # les deux pistes tracées, jamais un choix arbitraire
+
+    def test_clear_winner_beyond_ambiguity_margin_resolves(self, monkeypatch):
+        def fake_find_fuzzy_candidates(description, section, table=None, *, limit=5, score_cutoff=None):
+            if section == "procedures":
+                return [FuzzyCodeCandidate(code="P1", label="x", system="SNOMED-CT", similarity_score=0.95)]
+            return [FuzzyCodeCandidate(code="M1", label="y", system="RxNorm", similarity_score=0.82)]
+
+        monkeypatch.setattr(
+            "agents.medical_risk_agent.agent.find_fuzzy_candidates", fake_find_fuzzy_candidates
+        )
+        item = _classify_medical_item("item tranchable")
+        assert item.item_type is MedicalItemType.PROCEDURE
+        assert item.confidence == 0.95
+
+    def test_never_selects_a_final_code(self):
+        """La classification ne choisit jamais de code final — reste le rôle
+        de code_procedures/code_medications -> tools.medical_coding.lookup_code."""
+        item = _classify_medical_item("Consultation dentaire et rapport")
+        assert item.selected_code is None
+
+
+class TestNodeClassifiesMedicalItemsByReferential:
+    def test_node_splits_procedures_medications_and_unknown(self, monkeypatch):
+        monkeypatch.setattr(
+            "agents.medical_risk_agent.agent._invoke_llm_medical_risk",
+            Mock(return_value=_decision()),
+        )
+        medical_items = [
+            SimpleNamespace(description="Consultation dentaire et rapport"),
+            SimpleNamespace(description="Lisinopril 10 mg comprimé oral"),
+            SimpleNamespace(description="Xyzabc totally unresolved item 999"),
+        ]
+        document_understanding_result = SimpleNamespace(
+            extraction=SimpleNamespace(
+                fields={},
+                confidence_score=0.9,
+                essential_fields=SimpleNamespace(medical_items=medical_items),
+            )
+        )
+        state = {
+            "case_id": "CLM-5060",
+            "document_understanding_result": document_understanding_result,
+        }
+        updates = node(state)  # type: ignore[arg-type]
+        payload = updates["medical_risk_result"].result_payload
+
+        assert len(payload.classified_items) == 3
+        by_description = {item.description: item.item_type for item in payload.classified_items}
+        assert by_description["Consultation dentaire et rapport"] is MedicalItemType.PROCEDURE
+        assert by_description["Lisinopril 10 mg comprimé oral"] is MedicalItemType.MEDICATION
+        assert by_description["Xyzabc totally unresolved item 999"] is MedicalItemType.UNKNOWN
+
+        # Les codings ne sont tentés que sur les items résolus (procedures/medications) —
+        # l'item UNKNOWN n'apparaît dans aucune des deux listes de codification.
+        coded_descriptions = {c.original_description for c in payload.codings}
+        assert "Xyzabc totally unresolved item 999" not in coded_descriptions

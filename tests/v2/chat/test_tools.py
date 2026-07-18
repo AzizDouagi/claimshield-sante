@@ -81,7 +81,7 @@ def wired_app(monkeypatch):
         "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
         Mock(
             return_value=LlmAutonomousDecision(
-                decision="REJECT", summary="Motif de test.", confidence=0.9
+                recommended_decision="REJECT", reasoning_summary="Motif de test."
             )
         ),
     )

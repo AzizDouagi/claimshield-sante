@@ -36,6 +36,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import shutil
 import sys
 import time
 import traceback
@@ -135,6 +137,28 @@ def _reset_storage_for_case(case_id: str) -> None:
     manifest_path = svc.manifests_dir / f"{case_id}.json"
     if manifest_path.exists():
         manifest_path.unlink()
+
+
+def _isolate_benchmark_storage(benchmark_root: Path) -> None:
+    """Isole tout le stockage (`storage/incoming`/`quarantine`/`manifests`)
+    utilisé par CE process de campagne sous `benchmark_root` — jamais le
+    stockage réel (`storage/` partagé avec l'API en production).
+
+    `Settings.claimshield_storage_dir` (alias env `CLAIMSHIELD_STORAGE_DIR`,
+    `config/settings.py`) est le champ exact qui contrôle la racine —
+    positionné ici avant tout premier appel à `get_settings()`/
+    `compile_workflow_v2()` de ce process. `get_settings.cache_clear()` est
+    appelé par prudence si un import antérieur avait déjà mis le singleton
+    en cache (défensif, sans effet en usage normal du script en CLI).
+    Remplace `_reset_storage_for_case()` comme mécanisme principal
+    d'isolation — celle-ci reste disponible (`--no-reset`) comme filet de
+    sécurité secondaire, désormais largement redondant.
+    """
+    from config.settings import get_settings
+
+    benchmark_root.mkdir(parents=True, exist_ok=True)
+    os.environ["CLAIMSHIELD_STORAGE_DIR"] = str(benchmark_root)
+    get_settings.cache_clear()
 
 
 def _evaluate_case(app: Any, case_id: str, *, reset_storage: bool = True) -> CaseEvaluation:
@@ -279,7 +303,28 @@ def main() -> None:
         help=(
             "Désactive le nettoyage automatique de storage/{incoming,quarantine,manifests}/<case_id> "
             "avant chaque dossier (actif par défaut — évite une fausse collision NO_OVERWRITE/"
-            "TECHNICAL_FAILURE sur un case_id déjà traité par un run antérieur)."
+            "TECHNICAL_FAILURE sur un case_id déjà traité par un run antérieur). Largement "
+            "redondant depuis l'isolation du stockage de benchmark (voir --benchmark-root) — "
+            "conservé comme filet de sécurité secondaire."
+        ),
+    )
+    parser.add_argument(
+        "--benchmark-root",
+        type=Path,
+        default=None,
+        help=(
+            "Racine de stockage isolée pour cette campagne (storage/incoming, quarantine, "
+            "manifests) — jamais le stockage réel partagé avec l'API en production. Défaut : "
+            "storage/_benchmark_runs/<horodatage UTC>/, un répertoire neuf par run."
+        ),
+    )
+    parser.add_argument(
+        "--cleanup-benchmark-root",
+        action="store_true",
+        help=(
+            "Supprime le répertoire de stockage de benchmark après écriture du rapport — "
+            "jamais automatique par défaut (le répertoire isolé est conservé pour faciliter "
+            "le diagnostic d'un run en échec)."
         ),
     )
     args = parser.parse_args()
@@ -289,7 +334,17 @@ def main() -> None:
         print("Aucun dossier à évaluer.", file=sys.stderr)
         sys.exit(1)
 
+    benchmark_root = args.benchmark_root or (
+        PROJECT_ROOT / "storage" / "_benchmark_runs" / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    )
+    _isolate_benchmark_storage(benchmark_root)
+    print(f"Stockage de benchmark isolé sous : {benchmark_root}", file=sys.stderr)
+
     evaluations, summary = run_evaluation(case_ids, reset_storage=not args.no_reset)
+
+    if args.cleanup_benchmark_root:
+        shutil.rmtree(benchmark_root, ignore_errors=True)
+        print(f"Répertoire de benchmark supprimé : {benchmark_root}", file=sys.stderr)
 
     if args.format == "table":
         _print_table(evaluations)

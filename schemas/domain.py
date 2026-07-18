@@ -102,6 +102,7 @@ class FindingCode(str, Enum):
     SUSPICIOUS_DOCUMENT_CONTENT = "SUSPICIOUS_DOCUMENT_CONTENT"
     SUSPICIOUS_CONTENT = "SUSPICIOUS_CONTENT"
     POLICY_VIOLATION = "POLICY_VIOLATION"
+    UNEXPECTED_DOCUMENT_SUBSTITUTION = "UNEXPECTED_DOCUMENT_SUBSTITUTION"
 
     # Alias conservés pour compatibilité avec les étapes précédentes.
     PROMPT_INJECTION = "PROMPT_INJECTION_DETECTED"
@@ -136,6 +137,9 @@ SECURITY_CODE_DESCRIPTIONS: dict[FindingCode, str] = {
     FindingCode.SUSPICIOUS_DOCUMENT_CONTENT: "Contenu documentaire suspect.",
     FindingCode.SUSPICIOUS_CONTENT: "Contenu suspect non classé plus précisément.",
     FindingCode.POLICY_VIOLATION: "Violation générique de politique de sécurité.",
+    FindingCode.UNEXPECTED_DOCUMENT_SUBSTITUTION: (
+        "Contenu différent reçu pour un document déjà présent sans révision déclarée."
+    ),
 }
 
 SECURITY_CODE_SEVERITIES: dict[FindingCode, SeverityLevel] = {
@@ -164,6 +168,7 @@ SECURITY_CODE_SEVERITIES: dict[FindingCode, SeverityLevel] = {
     FindingCode.SUSPICIOUS_DOCUMENT_CONTENT: SeverityLevel.HIGH,
     FindingCode.SUSPICIOUS_CONTENT: SeverityLevel.MEDIUM,
     FindingCode.POLICY_VIOLATION: SeverityLevel.MEDIUM,
+    FindingCode.UNEXPECTED_DOCUMENT_SUBSTITUTION: SeverityLevel.HIGH,
 }
 
 

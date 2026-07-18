@@ -213,13 +213,20 @@ class TestLlmFailClosed:
 class TestStorageCollisionIsBlockedNotTechnicalFailure:
     """Correctif post-mesure V2-10 (AZIZ) : une collision de stockage
     (NO_OVERWRITE — fichier déjà committé lors d'un run antérieur pour le
-    même case_id) est une décision de politique (BLOCKED), jamais une panne
-    d'infrastructure (TECHNICAL_FAILURE). `agent.py` ligne ~538 ne doit plus
-    déclencher TECHNICAL_FAILURE sur la seule présence de `errors` (liste
-    brute incluant NO_OVERWRITE) — uniquement sur `errored` (fichiers
-    réellement FileStatus.ERROR, pannes techniques)."""
+    même case_id) n'est jamais une panne d'infrastructure
+    (TECHNICAL_FAILURE). `agent.py` ne déclenche jamais TECHNICAL_FAILURE
+    sur la seule présence de `errors` (liste brute incluant NO_OVERWRITE) —
+    uniquement sur `errored` (fichiers réellement FileStatus.ERROR, pannes
+    techniques).
 
-    def test_resubmitting_same_case_id_is_blocked_not_technical_failure(self, tmp_path, monkeypatch):
+    Plan de remédiation « rejouabilité des dossiers » (phase 1) : un rejeu
+    du même case_id avec un contenu strictement identique est désormais un
+    **rejeu idempotent** (ACCEPTED, jamais BLOCKED) — voir
+    `TestDocumentVersioning` pour les 3 voies (idempotent/révision/
+    substitution) et `test_intake_document_versioning.py` pour la
+    couverture exhaustive."""
+
+    def test_resubmitting_same_case_id_with_identical_content_is_accepted(self, tmp_path, monkeypatch):
         svc = _make_storage(tmp_path)
         source = tmp_path / "input"
         _write_pdf(source, "facture.pdf")
@@ -231,12 +238,134 @@ class TestStorageCollisionIsBlockedNotTechnicalFailure:
         first = run(case_id="CLM-2050", source_path=source, storage=svc)
         assert first.status is IntakeSafetyStatus.ACCEPTED
 
-        # Même case_id, même fichier — build_storage_name est déterministe
-        # (pas d'aléa), donc le second commit collisionne physiquement avec
-        # le premier sous storage/incoming/CLM-2050/.
+        # Même case_id, même fichier (même SHA-256) — rejeu idempotent,
+        # jamais un BLOCKED ni une panne technique.
         second = run(case_id="CLM-2050", source_path=source, storage=svc)
-        assert second.status is IntakeSafetyStatus.BLOCKED
+        assert second.status is IntakeSafetyStatus.ACCEPTED
         assert second.status is not IntakeSafetyStatus.TECHNICAL_FAILURE
+
+
+class TestDocumentVersioning:
+    """Plan de remédiation « rejouabilité des dossiers » (phase 1) — les 3
+    voies de `agents/intake_safety_agent/agent.py` face à un fichier dont le
+    nom déterministe existe déjà pour ce case_id : rejeu idempotent,
+    nouvelle version autorisée (`revision_of_case_id` déclaré), substitution
+    inattendue (aucune déclaration)."""
+
+    def test_idempotent_replay_preserves_document_identity(self, tmp_path, monkeypatch):
+        svc = _make_storage(tmp_path)
+        source = tmp_path / "input"
+        _write_pdf(source, "facture.pdf")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision()),
+        )
+
+        first = run(case_id="CLM-2060", source_path=source, storage=svc)
+        first_file = first.manifest.files[0]
+        assert first_file.document_version == 1
+        assert first_file.is_active is True
+
+        second = run(case_id="CLM-2060", source_path=source, storage=svc)
+        second_file = second.manifest.files[0]
+        assert second.status is IntakeSafetyStatus.ACCEPTED
+        assert second_file.document_id == first_file.document_id
+        assert second_file.document_family_id == first_file.document_family_id
+        assert second_file.document_version == 1
+        assert second_file.is_active is True
+
+    def test_authorized_revision_creates_new_version_and_deactivates_previous(
+        self, tmp_path, monkeypatch
+    ):
+        svc = _make_storage(tmp_path)
+        source = tmp_path / "input"
+        _write_pdf(source, "facture.pdf")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision()),
+        )
+        first = run(case_id="CLM-2061", source_path=source, storage=svc)
+        first_file = first.manifest.files[0]
+
+        # Contenu corrigé — même nom, octets différents, révision déclarée.
+        _write_pdf(source, "facture.pdf", content=_VALID_PDF_BYTES + b"\ncorrige")
+        revised = run(
+            case_id="CLM-2061",
+            source_path=source,
+            storage=svc,
+            revision_of_case_id="CLM-2061",
+        )
+
+        assert revised.status is IntakeSafetyStatus.ACCEPTED
+        active_entries = [f for f in revised.manifest.files if f.original_name == "facture.pdf"]
+        assert len(active_entries) == 2  # nouvelle version + ancienne conservée pour l'audit
+        active = [f for f in active_entries if f.is_active]
+        inactive = [f for f in active_entries if not f.is_active]
+        assert len(active) == 1
+        assert len(inactive) == 1
+        assert active[0].document_version == 2
+        assert active[0].supersedes_document_id == first_file.document_id
+        assert active[0].document_family_id == first_file.document_family_id
+        assert inactive[0].document_id == first_file.document_id
+        assert inactive[0].is_active is False
+        # Les deux fichiers existent bel et bien sur le disque, jamais un écrasement.
+        incoming_dir = svc.incoming_dir / "CLM-2061"
+        assert len(list(incoming_dir.iterdir())) == 2
+
+    def test_unexpected_substitution_is_quarantined_not_blocked(self, tmp_path, monkeypatch):
+        svc = _make_storage(tmp_path)
+        source = tmp_path / "input"
+        _write_pdf(source, "facture.pdf")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision()),
+        )
+        first = run(case_id="CLM-2062", source_path=source, storage=svc)
+        first_file = first.manifest.files[0]
+
+        # Contenu différent, SANS déclaration de révision.
+        _write_pdf(source, "facture.pdf", content=_VALID_PDF_BYTES + b"\ninattendu")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision(status="QUARANTINED", reasons=["Substitution détectée."])),
+        )
+        second = run(case_id="CLM-2062", source_path=source, storage=svc)
+
+        assert second.status is IntakeSafetyStatus.QUARANTINED
+        assert second.status is not IntakeSafetyStatus.BLOCKED
+        substitution_findings = [
+            f for f in second.security_findings if f.code.value == "UNEXPECTED_DOCUMENT_SUBSTITUTION"
+        ]
+        assert len(substitution_findings) == 1
+        new_entries = [
+            f
+            for f in second.manifest.files
+            if f.original_name == "facture.pdf" and f.document_id != first_file.document_id
+        ]
+        assert len(new_entries) == 1
+        assert new_entries[0].is_active is False  # l'ancienne version reste la version active
+
+    def test_revision_declared_for_a_case_id_never_submitted_before_is_treated_as_normal(
+        self, tmp_path, monkeypatch
+    ):
+        svc = _make_storage(tmp_path)
+        source = tmp_path / "input"
+        _write_pdf(source, "facture.pdf")
+        monkeypatch.setattr(
+            "agents.intake_safety_agent.agent._invoke_llm_intake_safety",
+            Mock(return_value=_accepted_llm_decision()),
+        )
+        result = run(
+            case_id="CLM-2063",
+            source_path=source,
+            storage=svc,
+            revision_of_case_id="CLM-2063",
+        )
+        assert result.status is IntakeSafetyStatus.ACCEPTED
+        file_entry = result.manifest.files[0]
+        assert file_entry.document_version == 1
+        assert file_entry.supersedes_document_id is None
+        assert file_entry.is_active is True
 
 
 class TestNodeIntegration:

@@ -87,6 +87,7 @@ storage/rejected/
 storage/processed/
 storage/manifests/
 storage/artifacts/
+storage/_benchmark_runs/
 !storage/incoming/.gitkeep
 !storage/quarantine/.gitkeep
 !storage/temporary/.gitkeep

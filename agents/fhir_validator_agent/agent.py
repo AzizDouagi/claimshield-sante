@@ -21,6 +21,7 @@ from pathlib import Path
 
 from agents.fhir_validator_agent.schemas import FhirValidatorInput, LlmFhirDecision
 from agents.fhir_validator_agent.tools import extraire_types_ressources, valider_bundle_fhir
+from config.settings import get_settings
 from langchain_core.messages import HumanMessage, SystemMessage
 from llm.factory import get_llm
 from llm.metadata import build_llm_metadata
@@ -49,14 +50,24 @@ def _resolve_bundle_path(relative_path: str) -> str:
 
     Stratégie :
       1. Chemin direct (fixtures de test)
-      2. Chemin sous storage/incoming/ (production)
+      2. Chemin sous {storage_dir}/incoming/ (production — `storage_dir` lu
+         via `get_settings().storage_dir`, jamais un `Path("storage")` codé
+         en dur : une racine de stockage isolée, ex.
+         `CLAIMSHIELD_STORAGE_DIR` positionné par
+         `scripts/evaluate_recommendations_v2.py::_isolate_benchmark_storage`,
+         doit être respectée — **bug réel découvert lors de la campagne de
+         mesure Phase 10** : le chemin en dur faisait échouer la vérification
+         SHA-256 du bundle sur les 37 dossiers, forçant `document_understanding_result.status=FAIL`
+         partout et bloquant `APPROVE` systématiquement via
+         `evaluate_acceptance_requirements` — jamais observé avant faute
+         d'avoir exercé une racine de stockage réellement isolée.)
       3. Chemin direct si non trouvé — load_fhir_bundle renverra l'erreur.
     """
     direct = Path(relative_path)
     if direct.exists():
         return str(direct)
 
-    under_storage = Path("storage") / "incoming" / relative_path
+    under_storage = get_settings().storage_dir / "incoming" / relative_path
     if under_storage.exists():
         return str(under_storage)
 

@@ -45,7 +45,11 @@ def _build_status_response(case_id: str, values: dict[str, Any]) -> ClaimStatusR
     ``decision_summary``/``bounded_by`` proviennent de
     ``decision_result.justification``/``.bounded_by`` — déjà des champs
     structurés et rédigés par `agents/autonomous_decision_agent`, jamais un
-    nouveau résumé recalculé ici.
+    nouveau résumé recalculé ici. Les champs d'explicabilité additifs
+    (``missing_information``/``assumptions``/``decisive_factors``/
+    ``counterfactuals``/``recommended_action``/``evidence_completeness``,
+    Phase 7) sont repris de la même façon — une simple exposition de champs
+    déjà calculés, jamais un nouveau calcul.
     """
     decision_result = values.get("decision_result")
     final_decision = values.get("final_decision")
@@ -58,6 +62,12 @@ def _build_status_response(case_id: str, values: dict[str, Any]) -> ClaimStatusR
         bounded_by=list(decision_result.bounded_by) if decision_result is not None else [],
         errors=list(values.get("errors") or []),
         alerts=list(values.get("alerts") or []),
+        missing_information=list(decision_result.missing_information) if decision_result is not None else [],
+        assumptions=list(decision_result.assumptions) if decision_result is not None else [],
+        decisive_factors=list(decision_result.decisive_factors) if decision_result is not None else [],
+        counterfactuals=list(decision_result.counterfactuals) if decision_result is not None else [],
+        recommended_action=decision_result.recommended_action if decision_result is not None else "",
+        evidence_completeness=decision_result.evidence_completeness if decision_result is not None else None,
     )
 
 
@@ -105,6 +115,7 @@ def build_v2_router(
                 "intake_input": {
                     "source_path": payload.source_path,
                     "required_documents": payload.required_documents,
+                    "revision_of_case_id": payload.revision_of_case_id,
                 },
                 "reader_role": payload.role.value,
             }

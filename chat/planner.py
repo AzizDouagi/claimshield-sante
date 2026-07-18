@@ -71,4 +71,5 @@ def plan(nlu_result: NluResult | None) -> ChatPlan:
         case_id=nlu_result.case_id,
         simulation_changes=nlu_result.simulation_changes,
         unsupported_intents=unsupported,
+        resolved_scenario_id=nlu_result.resolved_scenario_id,
     )

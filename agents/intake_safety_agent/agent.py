@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -173,6 +174,45 @@ def _scan_file_security(
     return findings, max_rank
 
 
+# ── Versionnement de document (V2, additif — plan de remédiation LLM ──────────
+# autonome, phase 1 « rejouabilité des dossiers ») ────────────────────────────
+#
+# Distingue, à la réception d'un fichier dont le nom déterministe existe déjà
+# dans le manifeste actif d'un dossier : rejeu idempotent (même contenu),
+# nouvelle version autorisée (contenu différent + révision déclarée par
+# l'appelant) et substitution inattendue (contenu différent sans déclaration —
+# jamais un BLOCKED automatique, jamais un écrasement silencieux). Toute la
+# sémantique vit ici, jamais dans `services/storage.py` ni
+# `tools/file_inspection.py` (partagés V1/V2, non modifiés au-delà de
+# `commit_file(expected_sha256=...)`, additif).
+
+
+def _load_previous_active_files(service: StorageService, case_id: str) -> dict[str, InspectedFile]:
+    """Fichiers actifs (`is_active=True`) du manifeste déjà écrit pour ce
+    dossier, indexés par `original_name` — dict vide si aucun manifeste
+    précédent n'existe ou n'est lisible (première soumission, jamais une
+    erreur)."""
+    try:
+        raw = service.read_intake_manifest(case_id)
+    except FileNotFoundError:
+        return {}
+    try:
+        previous_manifest = ClaimManifest.model_validate_json(raw)
+    except Exception:  # noqa: BLE001 — un manifeste illisible ne bloque jamais une nouvelle soumission
+        return {}
+    return {f.original_name: f for f in previous_manifest.files if f.is_active}
+
+
+def _revisioned_physical_name(storage_name: str, version: int) -> str:
+    """Nom physique distinct pour une nouvelle version d'un document déjà
+    commité — jamais une modification de
+    `tools.file_inspection.build_storage_name` (déterministe, partagée
+    V1/V2). Stocke la nouvelle version à côté de l'ancienne, jamais un
+    écrasement."""
+    p = Path(storage_name)
+    return f"{p.stem}__rev{version}{p.suffix}"
+
+
 # ── Phase B : LLM ─────────────────────────────────────────────────────────────
 
 
@@ -259,6 +299,7 @@ def run(
     depositor_id: str | None = None,
     storage: StorageService | None = None,
     settings: Settings | None = None,
+    revision_of_case_id: str | None = None,
 ) -> IntakeSafetyResult:
     """Exécute l'admission (ingestion + sécurité fusionnées) d'un dossier.
 
@@ -269,6 +310,13 @@ def run(
         depositor_id: identité ou ID du déposant (optionnel, pour le manifest).
         storage: instance StorageService (injectée pour les tests).
         settings: configuration (injectée pour les tests).
+        revision_of_case_id: si égal à `case_id`, déclare explicitement que
+            cette soumission peut contenir une nouvelle version légitime d'un
+            document déjà soumis pour ce dossier — voir
+            `_load_previous_active_files`/le bloc de versionnement plus bas.
+            `None` (défaut) : tout contenu différent d'un document déjà
+            soumis est traité comme une substitution inattendue (jamais un
+            écrasement silencieux, jamais une révision implicite).
 
     Returns:
         IntakeSafetyResult — statut ACCEPTED | QUARANTINED | BLOCKED | TECHNICAL_FAILURE.
@@ -282,6 +330,9 @@ def run(
     reasons: list[str] = []
     errors: list[StructuredError] = []
     security_findings: list[SecurityFinding] = []
+    submission_id = str(uuid4())
+    revision_id = str(uuid4()) if revision_of_case_id == case_id else None
+    previous_active_by_name = _load_previous_active_files(svc, case_id)
 
     # ── Étape 1 : dossier absent/vide — court-circuit sans appel LLM ────────
     # Décision non ambiguë (même rationale que V1 claim_intake_agent) : un
@@ -345,6 +396,11 @@ def run(
     # ── Étape 2 : traitement fichier par fichier — inspection + sécurité ────
 
     inspected_files: list[InspectedFile] = []
+    # Versions désactivées reportées depuis le manifeste précédent (§ versionnement
+    # de document) — jamais comptées dans les statuts/quotas de CETTE soumission
+    # (déjà comptées lors de leur propre soumission), uniquement fusionnées dans
+    # le manifeste final pour l'audit.
+    carried_forward_files: list[InspectedFile] = []
     folder_file_count, folder_bytes = compute_folder_totals(svc.incoming_dir / case_id)
     seen_sha256: dict[str, str] = {}
 
@@ -459,12 +515,126 @@ def run(
             else:
                 seen_sha256[inspected.sha256] = fpath.name
 
+        # ── Versionnement de document (V2, additif) — voir docstring du bloc
+        # `_load_previous_active_files`/`_revisioned_physical_name` plus haut.
+        # Ne s'applique qu'aux fichiers ayant passé les contrôles de base
+        # (ACCEPTED) — un fichier déjà QUARANTINED/BLOCKED/DUPLICATE au sein
+        # de cette soumission suit son propre traitement, indépendant.
+        superseded_inactive_copy: InspectedFile | None = None
+        physical_name_to_commit = inspected.storage_name
+
+        if inspected.status == FileStatus.ACCEPTED:
+            previous_entry = previous_active_by_name.get(fpath.name)
+
+            if previous_entry is None:
+                new_document_id = str(uuid4())
+                inspected = inspected.model_copy(
+                    update={
+                        "document_id": new_document_id,
+                        "document_family_id": new_document_id,
+                        "document_version": 1,
+                        "supersedes_document_id": None,
+                        "is_active": True,
+                        "submission_id": submission_id,
+                        "revision_id": revision_id,
+                    }
+                )
+            elif inspected.sha256 is not None and inspected.sha256 == previous_entry.sha256:
+                # Rejeu idempotent — même identité, même famille, même version.
+                inspected = inspected.model_copy(
+                    update={
+                        "document_id": previous_entry.document_id,
+                        "document_family_id": previous_entry.document_family_id
+                        or previous_entry.document_id,
+                        "document_version": previous_entry.document_version,
+                        "supersedes_document_id": previous_entry.supersedes_document_id,
+                        "is_active": True,
+                        "submission_id": submission_id,
+                        "revision_id": revision_id,
+                        "storage_name": previous_entry.storage_name,
+                    }
+                )
+                physical_name_to_commit = previous_entry.storage_name
+            elif revision_of_case_id == case_id:
+                # Nouvelle version autorisée — stockée à côté de l'ancienne,
+                # jamais un écrasement. L'ancienne version est conservée pour
+                # l'audit mais désactivée (is_active=False).
+                family_id = previous_entry.document_family_id or previous_entry.document_id
+                new_document_id = str(uuid4())
+                new_version = previous_entry.document_version + 1
+                physical_name_to_commit = _revisioned_physical_name(
+                    inspected.storage_name, new_version
+                )
+                inspected = inspected.model_copy(
+                    update={
+                        "document_id": new_document_id,
+                        "document_family_id": family_id,
+                        "document_version": new_version,
+                        "supersedes_document_id": previous_entry.document_id,
+                        "is_active": True,
+                        "submission_id": submission_id,
+                        "revision_id": revision_id,
+                        "storage_name": physical_name_to_commit,
+                    }
+                )
+                superseded_inactive_copy = previous_entry.model_copy(update={"is_active": False})
+            else:
+                # Substitution inattendue — jamais un BLOCKED direct, jamais un
+                # écrasement silencieux : mise en quarantaine pour revue
+                # humaine, l'ancienne version reste la version active tant
+                # que l'anomalie n'est pas résolue par un humain.
+                family_id = previous_entry.document_family_id or previous_entry.document_id
+                new_document_id = str(uuid4())
+                new_version = previous_entry.document_version + 1
+                physical_name_to_commit = _revisioned_physical_name(
+                    inspected.storage_name, new_version
+                )
+                security_findings.append(
+                    SecurityFinding(
+                        code=FindingCode.UNEXPECTED_DOCUMENT_SUBSTITUTION,
+                        severity=SeverityLevel.HIGH,
+                        description=(
+                            f"Contenu différent reçu pour '{fpath.name}', déjà soumis pour ce "
+                            "dossier, sans révision déclarée."
+                        ),
+                        detection_source="document_versioning",
+                        affected_element="file_content",
+                        evidence=f"supersedes={previous_entry.document_id}",
+                    )
+                )
+                inspected = inspected.model_copy(
+                    update={
+                        "status": FileStatus.QUARANTINED,
+                        "reasons": inspected.reasons
+                        + [
+                            StructuredError(
+                                code="UNEXPECTED_DOCUMENT_SUBSTITUTION",
+                                message=(
+                                    f"'{fpath.name}' diffère de la version déjà soumise pour ce "
+                                    "dossier sans révision déclarée — mis en quarantaine pour "
+                                    "revue humaine."
+                                ),
+                                field=fpath.name,
+                            )
+                        ],
+                        "document_id": new_document_id,
+                        "document_family_id": family_id,
+                        "document_version": new_version,
+                        "supersedes_document_id": previous_entry.document_id,
+                        "is_active": False,
+                        "submission_id": submission_id,
+                        "revision_id": revision_id,
+                        "storage_name": physical_name_to_commit,
+                    }
+                )
+
         try:
             dest = svc.commit_file(
                 temp_path=temp_path,
                 case_id=case_id,
-                physical_name=inspected.storage_name,
+                physical_name=physical_name_to_commit,
                 status=inspected.status,
+                expected_sha256=inspected.sha256,
             )
         except StorageError as exc:
             errors.append(exc.structured)
@@ -515,6 +685,11 @@ def run(
                 folder_bytes += file_size
 
         inspected_files.append(inspected)
+        if superseded_inactive_copy is not None:
+            # Ancienne version désactivée mais conservée pour l'audit — ne
+            # compte jamais dans les statuts/quotas ci-dessous (déjà comptée
+            # lors de sa propre soumission) ni dans `file_count`/`total_size_bytes`.
+            carried_forward_files.append(superseded_inactive_copy)
 
     # ── Étape 3 : documents obligatoires ────────────────────────────────────
 
@@ -565,7 +740,7 @@ def run(
         depositor_id=depositor_id,
         file_count=len(inspected_files),
         total_size_bytes=sum(f.actual_size for f in inspected_files),
-        files=inspected_files,
+        files=[*inspected_files, *carried_forward_files],
         status=_to_intake_status(global_status),
         alerts=alerts,
     )
@@ -593,19 +768,22 @@ def node(state: ClaimStateV2) -> dict:
 
     Attend dans le state :
         case_id       : identifiant du dossier
-        intake_input  : dict { source_path, required_documents?, depositor_id? }
+        intake_input  : dict { source_path, required_documents?, depositor_id?,
+                               revision_of_case_id? }
     """
     case_id: str = state.get("case_id", "")  # type: ignore[assignment]
     intake_input: dict = state.get("intake_input") or {}
     source_path = Path(intake_input.get("source_path", ""))
     required_documents: list[str] = intake_input.get("required_documents", [])
     depositor_id: str | None = intake_input.get("depositor_id")
+    revision_of_case_id: str | None = intake_input.get("revision_of_case_id")
 
     result = run(
         case_id=case_id,
         source_path=source_path,
         required_documents=required_documents,
         depositor_id=depositor_id,
+        revision_of_case_id=revision_of_case_id,
     )
 
     updates: dict = {

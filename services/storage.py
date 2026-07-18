@@ -19,6 +19,7 @@ from pathlib import Path
 from config.settings import Settings, get_settings
 from schemas.domain import FileStatus
 from schemas.results import StructuredError
+from tools.file_inspection import compute_sha256
 
 _UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9._-]")
 
@@ -186,6 +187,7 @@ class StorageService:
         case_id: str,
         physical_name: str,
         status: FileStatus,
+        expected_sha256: str | None = None,
     ) -> Path | None:
         """Déplace atomiquement temp_path vers la zone définitive selon le statut.
 
@@ -198,6 +200,19 @@ class StorageService:
         Le déplacement est atomique (Path.rename → rename(2) POSIX sur même partition).
         En cas d'erreur IO, le fichier temporaire est supprimé avant de lever
         StorageError. Aucun fichier existant n'est écrasé.
+
+        `expected_sha256` (optionnel, additif — plan de remédiation
+        « rejouabilité des dossiers », phase 1) : si fourni et que la
+        destination existe déjà avec exactement ce contenu (même hash), le
+        commit est traité comme un **rejeu idempotent** — `temp_path` est
+        supprimé (contenu déjà en place), `dest` est retourné normalement,
+        aucune exception n'est levée. Si le hash diffère, ou si
+        `expected_sha256` n'est pas fourni (comportement historique,
+        inchangé — jamais appelé par V1), `NO_OVERWRITE` est levée comme
+        auparavant. Ne distingue jamais elle-même une révision autorisée
+        d'une substitution suspecte — cette sémantique appartient à
+        l'appelant (`agents/intake_safety_agent/agent.py`), pas à ce service
+        générique partagé V1/V2.
         """
         if status in (FileStatus.BLOCKED, FileStatus.ERROR):
             temp_path.unlink(missing_ok=True)
@@ -211,13 +226,17 @@ class StorageService:
         dest = self._safe_resolve(dest_dir, physical_name)
 
         if dest.exists():
+            if expected_sha256 is not None and compute_sha256(dest) == expected_sha256:
+                temp_path.unlink(missing_ok=True)
+                return dest
             temp_path.unlink(missing_ok=True)
             raise StorageError(
                 StructuredError(
                     code="NO_OVERWRITE",
                     message=(
                         f"'{physical_name}' existe déjà dans "
-                        f"{zone_label}/{case_id}/ — écrasement silencieux refusé"
+                        f"{zone_label}/{case_id}/ avec un contenu différent — "
+                        "écrasement silencieux refusé"
                     ),
                     field=physical_name,
                 )

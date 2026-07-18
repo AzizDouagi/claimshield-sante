@@ -36,6 +36,7 @@ from schemas.v2_results import (
     EligibilityResult,
     IntakeSafetyResult,
     MedicalRiskResult,
+    RecoveryAttempt,
 )
 
 __all__ = ["ClaimStateV2", "validate_claim_state_v2", "validate_state_update_v2"]
@@ -111,9 +112,13 @@ class ClaimStateV2(TypedDict, total=False):
     # version légère de schemas.results.AuditEvent ────────────────────────
     audit_trail: Annotated[list[AuditEvent], operator.add]
 
-    # ── Compteur de resoumissions (REQUEST_MORE_INFO → nouvelle invocation
-    # complète depuis START, jamais une reprise — voir plan V2, Phase V2-8) ─
-    correction_attempts: int
+    # ── Récupération autonome bornée (append-only) — un nœud technique
+    # unique (`graph.recovery_node_v2`, Phase 6 du plan de remédiation
+    # « autonomie décisionnelle V2 »), jamais une boucle LangGraph. Remplace
+    # l'ancien `correction_attempts: int` (compteur de resoumissions
+    # REQUEST_MORE_INFO, jamais câblé — REQUEST_MORE_INFO est désormais
+    # structurellement improductible depuis la Phase 4 du plan) ─────────────
+    recovery_attempts: Annotated[list[RecoveryAttempt], operator.add]
 
     # ── Décision finale ───────────────────────────────────────────────────
     final_decision: ClaimDecisionV2 | None
@@ -244,8 +249,10 @@ def validate_claim_state_v2(state: Mapping[str, Any]) -> None:
         errors.append("schema_version : type invalide, attendu str")
     if "current_step" in state and not isinstance(state["current_step"], str):
         errors.append("current_step : type invalide, attendu str")
-    if "correction_attempts" in state and not isinstance(state["correction_attempts"], int):
-        errors.append("correction_attempts : type invalide, attendu int")
+    if "recovery_attempts" in state and not _is_list_of(
+        state["recovery_attempts"], RecoveryAttempt, allow_dict_items=True
+    ):
+        errors.append("recovery_attempts : type invalide, attendu list[RecoveryAttempt]")
     if "completed_steps" in state and not _is_list_of(state["completed_steps"], str):
         errors.append("completed_steps : type invalide, attendu list[str]")
     if "errors" in state and not _is_list_of(state["errors"], str):

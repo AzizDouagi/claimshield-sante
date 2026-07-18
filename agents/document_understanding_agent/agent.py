@@ -110,7 +110,13 @@ def _looks_like_fhir_bundle(f: InspectedFile) -> bool:
 
 
 def _select_document_candidate(files: list[InspectedFile]) -> InspectedFile | None:
-    accepted = [f for f in files if f.status == FileStatus.ACCEPTED]
+    # `is_active` (V2, additif — plan « rejouabilité des dossiers ») : une
+    # version de document désactivée (remplacée par une révision plus
+    # récente, ou une substitution suspecte encore en attente de revue
+    # humaine) ne doit jamais être traitée par le pipeline — seul le point
+    # unique de sélection du manifeste applique ce filtre, jamais dupliqué
+    # agent par agent.
+    accepted = [f for f in files if f.status == FileStatus.ACCEPTED and f.is_active]
     non_fhir = [f for f in accepted if not _looks_like_fhir_bundle(f)]
     if not non_fhir:
         return None
@@ -127,13 +133,13 @@ def _select_secondary_candidates(
     traité par `_select_document_candidate` — correctif post-mesure V2-10
     (AZIZ), Phase 4. Comparaison par identité d'objet (`is not primary`),
     jamais par nom — `primary` provient toujours de ce même `files`."""
-    accepted = [f for f in files if f.status == FileStatus.ACCEPTED]
+    accepted = [f for f in files if f.status == FileStatus.ACCEPTED and f.is_active]
     non_fhir = [f for f in accepted if not _looks_like_fhir_bundle(f)]
     return [f for f in non_fhir if f is not primary]
 
 
 def _select_fhir_bundle_candidate(files: list[InspectedFile]) -> InspectedFile | None:
-    accepted = [f for f in files if f.status == FileStatus.ACCEPTED]
+    accepted = [f for f in files if f.status == FileStatus.ACCEPTED and f.is_active]
     candidates = [f for f in accepted if _looks_like_fhir_bundle(f)]
     if len(candidates) != 1:
         return None

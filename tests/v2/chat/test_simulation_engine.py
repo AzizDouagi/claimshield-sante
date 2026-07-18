@@ -96,7 +96,7 @@ def deterministic_v2_llm(monkeypatch):
         "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
         Mock(
             return_value=LlmAutonomousDecision(
-                decision="REJECT", summary="Motif de test.", confidence=0.9
+                recommended_decision="REJECT", reasoning_summary="Motif de test."
             )
         ),
     )
@@ -266,7 +266,9 @@ class TestSimulationNeverMutatesRealState:
 
 class TestGraphAccessExceptionIsDocumentedAndUnique:
     """`chat/simulation_engine.py` est le SEUL module de `chat/` autorisé à
-    importer `graph.*` (exception documentée, voir sa docstring) — verrouille
+    importer `graph.*`/`agents.*` directement (deux exceptions documentées,
+    voir sa docstring — `run_simulation` pour `graph.*`, `run_targeted_simulation`
+    pour `agents.autonomous_decision_agent.agent`, Phase 9) — verrouille
     cette garantie architecturale au lieu de la laisser purement
     déclarative."""
 
@@ -280,6 +282,10 @@ class TestGraphAccessExceptionIsDocumentedAndUnique:
         "schemas.py",
         "prompt.py",
         "tools.py",
+        "answer_mode.py",
+        "memory_schemas.py",
+        "conversation_store.py",
+        "semantic_summarizer.py",
     )
 
     def test_only_simulation_engine_imports_graph_directly(self):

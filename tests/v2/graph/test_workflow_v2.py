@@ -89,7 +89,7 @@ def deterministic_v2_llm(monkeypatch):
         "agents.autonomous_decision_agent.agent._invoke_llm_autonomous_decision",
         Mock(
             return_value=LlmAutonomousDecision(
-                decision="APPROVE", summary="Dossier conforme.", confidence=0.95
+                recommended_decision="APPROVE", reasoning_summary="Dossier conforme."
             )
         ),
     )
@@ -97,10 +97,10 @@ def deterministic_v2_llm(monkeypatch):
 
 
 class TestNominalPath:
-    def test_full_pipeline_reaches_finalize_through_all_seven_nodes(
+    def test_full_pipeline_reaches_finalize_through_all_eight_nodes(
         self, deterministic_v2_llm, tmp_path
     ):
-        """Un dossier accepté à l'admission traverse réellement les 7 nœuds
+        """Un dossier accepté à l'admission traverse réellement les 8 nœuds
         du graphe (aucun raccourci) et atteint `finalize` avec une décision
         parmi les 6 valides — sans présumer laquelle : les données
         synthétiques de ce test (aucun contrat, identité non appariable)
@@ -132,6 +132,7 @@ class TestNominalPath:
             "document_understanding",
             "eligibility",
             "medical_risk",
+            "recovery",
             "autonomous_decision",
             "audit_service",
             "finalize",
@@ -181,6 +182,7 @@ class TestBlockedShortCircuit:
         assert "document_understanding" not in state["completed_steps"]
         assert "eligibility" not in state["completed_steps"]
         assert "medical_risk" not in state["completed_steps"]
+        assert "recovery" not in state["completed_steps"]
         assert "autonomous_decision" not in state["completed_steps"]
         assert "audit_service" in state["completed_steps"]
         assert "finalize" in state["completed_steps"]
@@ -205,13 +207,14 @@ class TestBlockedShortCircuit:
 
 
 class TestTopology:
-    def test_build_workflow_v2_has_seven_nodes(self):
+    def test_build_workflow_v2_has_eight_nodes(self):
         graph = build_workflow_v2()
         assert set(graph.nodes) == {
             "intake_safety",
             "document_understanding",
             "eligibility",
             "medical_risk",
+            "recovery",
             "autonomous_decision",
             "audit_service",
             "finalize",

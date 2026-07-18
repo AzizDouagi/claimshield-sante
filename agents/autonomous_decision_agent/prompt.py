@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-PROMPT_VERSION = "1.0.0"
+PROMPT_VERSION = "2.0.0"
 _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "autonomous_decision_agent.yaml"
 
 
