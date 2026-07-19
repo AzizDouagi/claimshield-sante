@@ -68,12 +68,14 @@ class TestParseCheckedDate:
         assert evidence.field == "care_date"
         assert evidence.document_reference == "INVOICE"
 
-    def test_ambiguous_date_produces_signal(self):
-        """Format ambigu (jour/mois inversibles) — non fiable, signalé."""
+    def test_both_components_under_12_resolved_never_signaled(self):
+        """Correctif Phase 10 (mesure V2) : un format `JJ/MM/AAAA` où jour et
+        mois sont tous deux ≤ 12 n'est plus jamais rejeté comme ambigu —
+        résolu par convention jour-mois (`prefer_day_first`, défaut du
+        projet), jamais un signal `IMPOSSIBLE_DATE` sur une date valide."""
         parsed, signal = parse_checked_date("03/04/2024", field_name="care_date")
-        assert parsed is None
-        assert signal is not None
-        assert signal.signal_type == "IMPOSSIBLE_DATE"
+        assert parsed == date(2024, 4, 3)
+        assert signal is None
 
 
 # ── check_prescription_before_care ──────────────────────────────────────────

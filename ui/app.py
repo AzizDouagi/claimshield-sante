@@ -1,6 +1,7 @@
 """Point d'entrée Chainlit — UI conversationnelle minimale pour ClaimShield
-Santé. Trois fonctionnalités : soumission d'un dossier, consultation de
-statut, décision humaine (HITL). Client HTTP pur de l'API (``ui/api_client.py``)
+Santé (pipeline V2 uniquement). Trois fonctionnalités : soumission d'un
+dossier, consultation de statut, correction post-décision (override), plus
+le chat conversationnel. Client HTTP pur de l'API (``ui/api_client_v2.py``)
 — n'importe jamais ``graph.*``/``agents.*``, aucun accès direct au pipeline.
 
 Lancer (API déjà démarrée séparément, voir ``api/main.py``) ::
@@ -36,8 +37,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from config.settings import get_settings  # noqa: E402
-from ui import api_client, api_client_v2  # noqa: E402
-from ui.forms import form_from_pending_review, render_for_chainlit_actions  # noqa: E402
+from ui import api_client_v2  # noqa: E402
 from ui.uploads import stage_uploaded_files  # noqa: E402
 
 # `.chainlit/config.toml` auto-généré au premier lancement fixe
@@ -88,171 +88,22 @@ async def _ask_case_id(prompt: str) -> str | None:
     return None
 
 
-def _format_status(body: dict[str, Any]) -> str:
-    lines = [
-        f"**Dossier {body['case_id']}**",
-        f"- Étape courante : `{body.get('current_step')}`",
-        f"- Étapes complétées : {', '.join(body.get('completed_steps') or []) or '—'}",
-        f"- Recommandation finale : {body.get('final_recommendation') or '—'}",
-        f"- Interrompu (revue humaine) : {'oui' if body.get('interrupted') else 'non'}",
-    ]
-    if body.get("errors"):
-        lines.append(f"- Erreurs : {'; '.join(body['errors'])}")
-    if body.get("alerts"):
-        lines.append(f"- Alertes : {'; '.join(body['alerts'])}")
-    return "\n".join(lines)
-
-
-async def _show_status_and_maybe_decision(body: dict[str, Any]) -> None:
-    await cl.Message(content=_format_status(body)).send()
-    if body.get("interrupted") and body.get("pending_review"):
-        await _show_decision_form(body["case_id"], body["pending_review"])
-
-
-async def _show_decision_form(case_id: str, pending_review: dict[str, Any]) -> None:
-    form = form_from_pending_review(pending_review)
-    lines = [f"**Revue humaine requise — {case_id}**"]
-    if form.summary:
-        lines.append("Résumé : " + "; ".join(form.summary))
-    if form.evidence:
-        preuves = ", ".join(f"{k}={v}" for k, v in form.evidence.items())
-        lines.append("Preuves : " + preuves)
-
-    actions = [
-        cl.Action(name=item["name"], payload={"case_id": case_id}, label=item["label"])
-        for item in render_for_chainlit_actions(form)
-    ]
-    await cl.Message(content="\n".join(lines), actions=actions).send()
-
-
-async def _submit_flow() -> None:
-    case_id = await _ask_case_id("Identifiant du dossier à soumettre (ex. CLM-0001) :")
-    if case_id is None:
-        await cl.Message(content="Soumission annulée.").send()
-        return
-    cl.user_session.set("last_case_id", case_id)
-
-    files = await cl.AskFileMessage(
-        content="Déposez les documents du dossier (PDF/image/JSON) :",
-        accept=_allowed_mime_types(),
-        max_files=10,
-        max_size_mb=20,
-        timeout=300,
-    ).send()
-    if not files:
-        await cl.Message(content="Aucun fichier reçu — soumission annulée.").send()
-        return
-
-    source_path = stage_uploaded_files(case_id, files)
-    response = await api_client.submit_claim(case_id, source_path)
-    if response.status_code >= 400:
-        await cl.Message(content=f"Échec de la soumission ({response.status_code}) : {response.text}").send()
-        return
-
-    await _show_status_and_maybe_decision(response.json())
-
-
-async def _status_flow() -> None:
-    case_id = await _ask_case_id("Identifiant du dossier à consulter (ex. CLM-0001) :")
-    if case_id is None:
-        await cl.Message(content="Consultation annulée.").send()
-        return
-    cl.user_session.set("last_case_id", case_id)
-
-    response = await api_client.get_status(case_id)
-    if response.status_code == 404:
-        await cl.Message(content=f"Dossier {case_id!r} introuvable.").send()
-        return
-    if response.status_code >= 400:
-        await cl.Message(content=f"Erreur ({response.status_code}) : {response.text}").send()
-        return
-
-    await _show_status_and_maybe_decision(response.json())
-
-
-async def _decision_flow(case_id: str, action: str) -> None:
-    cl.user_session.set("last_case_id", case_id)
-    actor = cl.user_session.get("actor")
-    if not actor:
-        actor = await _ask_text("Votre identifiant (acteur, pour l'audit) :")
-        if not actor:
-            await cl.Message(content="Décision annulée (acteur requis).").send()
-            return
-        cl.user_session.set("actor", actor)
-
-    justification = await _ask_text("Justification (obligatoire) :")
-    if not justification:
-        await cl.Message(content="Décision annulée (justification requise).").send()
-        return
-
-    target_node = None
-    if action == "RETRY":
-        target_node = await _ask_text("Étape à relancer (target_node, obligatoire pour RETRY) :")
-        if not target_node:
-            await cl.Message(content="Décision annulée (target_node requis pour RETRY).").send()
-            return
-
-    response = await api_client.submit_human_decision(
-        case_id, actor=actor, action=action, justification=justification, target_node=target_node
-    )
-    if response.status_code >= 400:
-        await cl.Message(content=f"Décision refusée ({response.status_code}) : {response.text}").send()
-        return
-
-    await _show_status_and_maybe_decision(response.json())
-
-
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    up = await api_client.healthz()
+    up = await api_client_v2.healthz()
     status = "en ligne" if up else "**injoignable** — vérifiez que l'API tourne"
     await cl.Message(
         content=f"ClaimShield Santé — API {status}.",
         actions=[
-            cl.Action(name="menu_submit", payload={}, label="Soumettre un dossier"),
-            cl.Action(name="menu_status", payload={}, label="Consulter un dossier"),
-            cl.Action(name="menu_submit_v2", payload={}, label="Soumettre un dossier (V2 autonome)"),
-            cl.Action(name="menu_status_v2", payload={}, label="Consulter un dossier (V2)"),
-            cl.Action(name="menu_override_v2", payload={}, label="Corriger une décision (V2)"),
+            cl.Action(name="menu_submit_v2", payload={}, label="Soumettre un dossier"),
+            cl.Action(name="menu_status_v2", payload={}, label="Consulter un dossier"),
+            cl.Action(name="menu_override_v2", payload={}, label="Corriger une décision"),
         ],
     ).send()
 
 
-@cl.action_callback("menu_submit")
-async def on_menu_submit(action: cl.Action) -> None:
-    await _submit_flow()
-
-
-@cl.action_callback("menu_status")
-async def on_menu_status(action: cl.Action) -> None:
-    await _status_flow()
-
-
-@cl.action_callback("APPROVE")
-async def on_approve(action: cl.Action) -> None:
-    await _decision_flow(action.payload["case_id"], "APPROVE")
-
-
-@cl.action_callback("MODIFY")
-async def on_modify(action: cl.Action) -> None:
-    await _decision_flow(action.payload["case_id"], "MODIFY")
-
-
-@cl.action_callback("REJECT")
-async def on_reject(action: cl.Action) -> None:
-    await _decision_flow(action.payload["case_id"], "REJECT")
-
-
-@cl.action_callback("RETRY")
-async def on_retry(action: cl.Action) -> None:
-    await _decision_flow(action.payload["case_id"], "RETRY")
-
-
-# ── Pipeline V2 (autonome, sans revue humaine bloquante) — bloc additif ──────
-#
-# Flux isolés (plan de refonte V2, Phase V2-9, §0 : `ui/app.py` reçoit
-# uniquement des enregistrements additifs, les callbacks V1 ci-dessus ne sont
-# jamais modifiés). Client HTTP dédié : `ui/api_client_v2.py`.
+# ── Pipeline V2 (autonome, sans revue humaine bloquante) ─────────────────────
+# Client HTTP dédié : `ui/api_client_v2.py`.
 
 
 def _format_status_v2(body: dict[str, Any]) -> str:

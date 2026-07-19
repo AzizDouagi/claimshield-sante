@@ -64,42 +64,12 @@ def mock_llm(request):
 @pytest.fixture(autouse=True)
 def deterministic_agent_llm(monkeypatch) -> None:
     """Donne aux tests hérités une réponse LLM stable et alignée sur la Phase A."""
-    from agents.audit_agent.schemas import LlmAuditNormalizedEvent
-    from agents.case_reviewer_agent.schemas import LlmCaseReviewDecision
-    from agents.claim_intake_agent.schemas import LlmIntakeDecision
     from agents.clinical_consistency_agent.schemas import LlmClinicalDecision
     from agents.document_ocr_agent.schemas import LlmOcrDecision
     from agents.fhir_validator_agent.schemas import LlmFhirDecision
     from agents.fraud_detection_agent.schemas import LlmFraudDecision
     from agents.identity_coverage_agent.schemas import LlmIdentityCoverageDecision
     from agents.medical_coding_agent.schemas import LlmCodingDecision
-    from agents.privacy_agent.schemas import LlmPrivacyDecision
-    from agents.security_gate_agent.schemas import LlmSecurityDecision
-    from schemas.audit import AuditEventType, RedactionStatus
-    from schemas.domain import DataClassification, Recommendation
-
-    def intake_decision(**kwargs):
-        status = str(kwargs["global_status"]).upper()
-        reasons = list(kwargs.get("alerts") or [])
-        if not reasons:
-            reasons = [f"Décision d'ingestion déterministe conservée : {status}."]
-        return LlmIntakeDecision(
-            status=status,
-            reasons=reasons,
-        )
-
-    def security_decision(**kwargs):
-        decision = kwargs["deterministic_decision"]
-        findings = kwargs.get("findings") or []
-        reasons = [
-            f.get("description", "Anomalie de sécurité détectée.")
-            for f in findings
-        ] or ["Aucune menace détectée — dossier autorisé"]
-        return LlmSecurityDecision(
-            decision=decision,
-            reasons=reasons,
-            explanation=f"Décision LLM de test alignée sur la Phase A : {decision}.",
-        )
 
     def fhir_decision(**kwargs):
         status = kwargs["deterministic_status"]
@@ -107,14 +77,6 @@ def deterministic_agent_llm(monkeypatch) -> None:
             recommended_status=status,
             clinical_context="Décision FHIR de test alignée sur la validation structurelle.",
             reasons=[f"Statut structurel conservé : {status}."],
-        )
-
-    def privacy_decision(data):
-        return LlmPrivacyDecision(
-            audit_justification="Justification privacy de test alignée sur RBAC.",
-            data_classification_reason=(
-                f"Classification conservée : {data.get('data_classification', 'UNKNOWN')}."
-            ),
         )
 
     def ocr_decision(data):
@@ -148,54 +110,13 @@ def deterministic_agent_llm(monkeypatch) -> None:
             reasons=[],
         )
 
-    def case_review_decision(data):
-        recommendation = data.get("deterministic_pre_recommendation", "PENDING")
-        return LlmCaseReviewDecision(
-            recommendation=Recommendation(recommendation),
-            summary="Synthèse reviewer de test alignée sur les résultats agents.",
-            reasons=["Pré-recommandation LLM de test non finale."],
-            human_review_reasons=["Validation humaine obligatoire en test."],
-        )
-
-    def audit_decision(event):
-        event_type_value = (
-            event.get("event_type") or event.get("candidate_event_type") or "agent_called"
-        )
-        try:
-            event_type = AuditEventType(event_type_value)
-        except ValueError:
-            event_type = AuditEventType.AGENT_CALLED
-        actor = str(
-            event.get("affected_agent")
-            or event.get("actor")
-            or event.get("agent_name")
-            or "system"
-        )
-        return LlmAuditNormalizedEvent(
-            event_type=event_type,
-            actor=actor,
-            outcome=str(event.get("outcome") or "OK"),
-            summary="Résumé d'audit de test aligné sur l'événement structuré.",
-            redaction_status=RedactionStatus.FULLY_REDACTED,
-            classification=DataClassification.SYNTHETIC_TEST_DATA,
-        )
-
-    monkeypatch.setattr("agents.claim_intake_agent.agent._invoke_llm_intake", intake_decision)
-    monkeypatch.setattr("agents.security_gate_agent.agent._invoke_llm_security", security_decision)
     monkeypatch.setattr("agents.fhir_validator_agent.agent._invoke_llm_fhir", fhir_decision)
     monkeypatch.setattr(
         "agents.identity_coverage_agent.agent._invoke_llm_identity_coverage",
         identity_coverage_decision,
     )
     monkeypatch.setattr("agents.medical_coding_agent.agent._invoke_llm_react", coding_decision)
-    monkeypatch.setattr("agents.privacy_agent.agent._invoke_llm_privacy", privacy_decision)
     monkeypatch.setattr("agents.document_ocr_agent.agent._invoke_llm_ocr", ocr_decision)
     monkeypatch.setattr("agents.clinical_consistency_agent.agent._invoke_llm_clinical", clinical_decision)
     monkeypatch.setattr("agents.fraud_detection_agent.agent._invoke_llm_fraud", fraud_decision)
-    monkeypatch.setattr("agents.case_reviewer_agent.agent._invoke_llm_case_review", case_review_decision)
-    def audit_batch_decision(events):
-        return [audit_decision(e) for e in events]
-
-    monkeypatch.setattr("agents.audit_agent.agent._invoke_llm_audit", audit_decision)
-    monkeypatch.setattr("agents.audit_agent.agent._invoke_llm_audit_batch", audit_batch_decision)
     yield

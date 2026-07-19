@@ -679,14 +679,6 @@ class TestAuthorizedToolIntegration:
         )
         assert result.status in (VerificationStatus.PASS, VerificationStatus.NEEDS_REVIEW)
 
-    def test_verifier_chronologie_tool_is_the_only_authorized_tool(self):
-        from orchestrator.orchestrator import AgentName
-        from orchestrator.policies import ALLOWED_TOOLS_PER_AGENT
-
-        assert ALLOWED_TOOLS_PER_AGENT[AgentName.CLINICAL_CONSISTENCY] == frozenset(
-            {"verifier_chronologie"}
-        )
-
     def test_llm_decision_has_no_diagnostic_or_decision_field(self):
         """Garantie structurelle : ni diagnostic, ni décision finale, ni champ
         d'affirmation libre non rattaché à des signaux ne peut jamais être

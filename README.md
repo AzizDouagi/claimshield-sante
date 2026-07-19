@@ -118,10 +118,12 @@ python scripts/import_synthea_claimshield_cases.py --validate-only
 
 ## Lancer l'API et l'interface Chainlit
 
-L'API expose le graphe compilé (`POST /claims`, `GET /claims/{case_id}`,
-`POST /claims/{case_id}/human-decision`, `GET /healthz`). L'UI Chainlit
-(`ui/`) est un client HTTP séparé de cette API — les deux se lancent
-indépendamment (ports différents), l'UI a besoin de l'API déjà démarrée.
+L'API expose le pipeline autonome V2 sous `/v2` (`POST /v2/claims`,
+`GET /v2/claims/{case_id}`, `POST /v2/claims/{case_id}/override`,
+`POST /v2/chat`) ainsi que `GET /healthz` (liveness, sans authentification).
+L'UI Chainlit (`ui/`) est un client HTTP séparé de cette API — les deux se
+lancent indépendamment (ports différents), l'UI a besoin de l'API déjà
+démarrée.
 
 ```bash
 # 1. Démarrer l'API (nécessite Ollama lancé séparément — gemma4:latest)
@@ -170,27 +172,31 @@ docker compose up --build
 
 ```
 claimshield-sante/
-├── agents/                  # 11 agents spécialisés (stubs → implémentations)
-│   ├── claim_intake_agent/
-│   ├── security_gate_agent/
+├── agents/                  # Agents V2 autonomes + agents réutilisés (OCR, FHIR, codage, identité, cohérence clinique, fraude, privacy)
+│   ├── intake_safety_agent/
+│   ├── document_understanding_agent/
+│   ├── eligibility_agent/
+│   ├── medical_risk_agent/
+│   ├── autonomous_decision_agent/
 │   ├── document_ocr_agent/
-│   ├── identity_coverage_agent/
 │   ├── fhir_validator_agent/
+│   ├── identity_coverage_agent/
 │   ├── medical_coding_agent/
 │   ├── clinical_consistency_agent/
 │   ├── fraud_detection_agent/
-│   ├── privacy_agent/
-│   ├── case_reviewer_agent/
-│   └── audit_agent/
-├── graph/                   # Workflow LangGraph (nodes, edges, checkpoints)
-├── orchestrator/            # Routage et politiques d'appel
-├── state/                   # ClaimState partagé
-├── schemas/                 # Modèles Pydantic communs
+│   └── privacy_agent/       # schémas/vues RBAC réutilisées (pas d'agent LLM autonome)
+├── api/v2/                  # Routeur FastAPI V2 (claims, override, chat)
+├── chat/                    # Chat Reasoning Agent (explicabilité, simulation, mémoire)
+├── graph/                   # Workflow LangGraph V2 (nodes, edges, recovery, checkpoints, topology)
+├── human_review/            # Modèles/service d'override post-décision (V2)
+├── state/                   # ClaimStateV2 partagé
+├── schemas/                 # Modèles Pydantic communs (V2 + agents réutilisés)
 ├── security/                # Allowlists, scanners, politiques
-├── services/                # Stockage, audit, notifications
-├── tools/                   # Fonctions déterministes (hash, OCR, parsing)
+├── services/                # Stockage, audit, override, privacy (V2)
+├── tools/                   # Fonctions déterministes (hash, OCR, parsing, matching flou)
+├── ui/                      # UI Chainlit (client HTTP pur de l'API V2)
 ├── datasets/fixtures/       # 37 dossiers CLM-0001 … CLM-0037
-├── tests/                   # Unitaires, agents, graph, sécurité, E2E
+├── tests/                   # Unitaires, agents, graph, sécurité, tests/v2, e2e V2
 ├── .env.example             # Modèle de configuration
 ├── requirements.txt         # Dépendances Python
 └── pyproject.toml           # Métadonnées et configuration ruff/pytest

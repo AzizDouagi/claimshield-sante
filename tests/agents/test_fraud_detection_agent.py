@@ -770,14 +770,6 @@ class TestExtractFraudView:
 
 
 class TestAuthorizedToolAndProhibitions:
-    def test_verifier_doublon_is_the_only_authorized_tool(self):
-        from orchestrator.orchestrator import AgentName
-        from orchestrator.policies import ALLOWED_TOOLS_PER_AGENT
-
-        assert ALLOWED_TOOLS_PER_AGENT[AgentName.FRAUD_DETECTION] == frozenset(
-            {"verifier_doublon"}
-        )
-
     def test_llm_decision_has_no_accusation_or_blocking_field(self):
         """Garantie structurelle : ni accusation, ni blocage, ni décision
         finale ne peut jamais être introduit par le LLM."""

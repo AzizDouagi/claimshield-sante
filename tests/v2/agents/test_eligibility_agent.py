@@ -287,9 +287,12 @@ class TestServiceDateNormalization:
             VerificationStatus.FAIL,
         )
 
-    def test_ambiguous_date_dropped_not_invented(self):
+    def test_both_components_under_12_resolved_day_first(self):
+        """Correctif Phase 10 (mesure V2) : `JJ/MM/AAAA` avec jour et mois
+        tous deux ≤ 12 est désormais résolu par convention jour-mois
+        (`tools.text_normalizer.normalize_date_value`), jamais retiré."""
         normalized = _normalize_extracted_fields({"service_date": "05/06/2026"})
-        assert "service_date" not in normalized
+        assert normalized["service_date"] == "2026-06-05"
 
     def test_iso_date_passes_through_unaffected(self):
         normalized = _normalize_extracted_fields({"service_date": "2026-06-15"})

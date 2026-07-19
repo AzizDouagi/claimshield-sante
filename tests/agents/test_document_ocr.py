@@ -353,11 +353,23 @@ class TestTextNormalizer:
         result = normalize_date_value("28/06/2026")
         assert result.normalized_value == date(2026, 6, 28)
 
-    def test_normalize_date_ambigue_signalee(self):
+    def test_normalize_date_les_deux_composantes_sous_12_resolue_jour_mois(self):
+        """Correctif Phase 10 : `prefer_day_first=True` (défaut, convention
+        du projet) tranche désormais déterministiquement — jamais un rejet
+        pour ambiguïté quand aucune composante n'est hors [1,12]."""
+        from datetime import date
+
         result = normalize_date_value("03/04/2026")
-        assert result.normalized_value is None
-        assert "date ambiguë" in result.warnings
-        assert "date ambiguë" in result.errors
+        assert result.normalized_value == date(2026, 4, 3)
+        assert result.errors == []
+        assert result.warnings
+
+    def test_normalize_date_prefer_month_first_when_disabled(self):
+        from datetime import date
+
+        result = normalize_date_value("03/04/2026", prefer_day_first=False)
+        assert result.normalized_value == date(2026, 3, 4)
+        assert result.errors == []
 
     def test_normalize_amount_negatif_impossible(self):
         result = normalize_amount("-12.50 USD")

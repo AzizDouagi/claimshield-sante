@@ -68,10 +68,13 @@ class TestImpossibleDates:
         result = agent.run("CLM-0001", ocr_result=ocr, coding_result=_coding_result(1))
         assert any(s.signal_type == "IMPOSSIBLE_DATE" for s in result.result_payload.signals)
 
-    def test_ambiguous_date_format_produces_impossible_date_signal(self):
+    def test_both_components_under_12_never_produces_impossible_date_signal(self):
+        """Correctif Phase 10 (mesure V2) : `JJ/MM/AAAA` avec jour et mois
+        tous deux ≤ 12 est résolu par convention jour-mois, jamais rejeté
+        comme ambigu — voir `tools.text_normalizer.normalize_date_value`."""
         ocr = _ocr_result(procedure_count="1", care_date="03/04/2024", service_date="2024-01-10")
         result = agent.run("CLM-0001", ocr_result=ocr, coding_result=_coding_result(1))
-        assert any(s.signal_type == "IMPOSSIBLE_DATE" for s in result.result_payload.signals)
+        assert not any(s.signal_type == "IMPOSSIBLE_DATE" for s in result.result_payload.signals)
 
     def test_impossible_date_signal_is_critical_and_attributed(self):
         ocr = _ocr_result(procedure_count="1", care_date="2024-02-30", service_date="2024-01-10")

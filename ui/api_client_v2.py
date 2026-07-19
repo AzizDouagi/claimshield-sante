@@ -21,7 +21,13 @@ from config.settings import get_settings
 # (V1), pour la même raison (LLM local, matériel modeste).
 _PIPELINE_TIMEOUT_SECONDS = 600.0
 
-__all__ = ["get_status_v2", "send_chat_message_v2", "submit_claim_v2", "submit_override_v2"]
+__all__ = [
+    "get_status_v2",
+    "healthz",
+    "send_chat_message_v2",
+    "submit_claim_v2",
+    "submit_override_v2",
+]
 
 
 def _base_url() -> str:
@@ -30,6 +36,18 @@ def _base_url() -> str:
 
 def _auth_headers() -> dict[str, str]:
     return {"X-API-Key": get_settings().claimshield_api_key.get_secret_value()}
+
+
+async def healthz() -> bool:
+    """``GET /healthz`` — endpoint racine partagé, non préfixé par ``/v2``
+    (voir ``api/main.py``), sans authentification."""
+    base = get_settings().claimshield_api_base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(base_url=base, timeout=5.0) as client:
+            response = await client.get("/healthz")
+        return response.status_code == 200
+    except httpx.HTTPError:
+        return False
 
 
 async def submit_claim_v2(

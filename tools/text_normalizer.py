@@ -181,7 +181,24 @@ def normalize_amount(raw: str, *, default_currency: str | None = None) -> Normal
 
 
 def normalize_date_value(raw: str, *, prefer_day_first: bool = True) -> NormalizedDate:
-    """Convertit une date en date Python et signale les formats ambigus."""
+    """Convertit une date en date Python — jamais un rejet pour ambiguïté sur
+    un format `JJ/MM/AAAA` ou `MM/JJ/AAAA` plausible : `prefer_day_first`
+    (jour-mois, convention française utilisée dans tout le projet — voir
+    `tools/dataset_builder/generate_case_documents.py`, qui génère toutes
+    les dates au format `%d/%m/%Y`) tranche déterministiquement quand les
+    deux composantes sont ≤ 12, exactement comme il le fait déjà quand une
+    composante > 12 force sans ambiguïté l'ordre jour/mois.
+
+    **Correctif (Phase 10, mesure V2)** : l'ancienne version rejetait
+    systématiquement toute date où jour et mois étaient tous deux ≤ 12
+    (~39 % des jours d'un mois) comme « ambiguë », en contradiction directe
+    avec `prefer_day_first` — jamais consulté dans ce cas précis. Sur la
+    campagne de mesure réelle (37 dossiers), ce rejet déclenchait à tort un
+    signal clinique `IMPOSSIBLE_DATE` (`tools/date_checks.py`) sur ~40 % des
+    dossiers, forçant `QUARANTINE` sur des dates parfaitement valides dans
+    la convention du projet. Seule une date réellement invalide (calendrier
+    impossible, ex. jour 31 dans un mois à 30 jours) ou un format non
+    reconnu produisent désormais une erreur."""
     raw_value = raw
     cleaned = normalize_ocr_text(raw)
     if not cleaned:
@@ -199,15 +216,20 @@ def normalize_date_value(raw: str, *, prefer_day_first: bool = True) -> Normaliz
         return NormalizedDate(raw_value, None, errors=["format de date non reconnu"])
 
     first, second, year = map(int, slash.groups())
-    if first <= 12 and second <= 12:
-        return NormalizedDate(raw_value, None, warnings=["date ambiguë"], errors=["date ambiguë"])
-
-    day, month = (first, second) if first > 12 or prefer_day_first else (second, first)
-    if second > 12 and first <= 12:
-        month, day = first, second
+    warnings: list[str] = []
+    if first > 12:
+        day, month = first, second
+    elif second > 12:
+        day, month = second, first
+    elif prefer_day_first:
+        day, month = first, second
+        warnings = ["jour/mois inférés par convention JJ/MM (aucune composante hors [1,12])"]
+    else:
+        day, month = second, first
+        warnings = ["jour/mois inférés par convention MM/JJ (aucune composante hors [1,12])"]
 
     try:
-        return NormalizedDate(raw_value, date(year, month, day))
+        return NormalizedDate(raw_value, date(year, month, day), warnings=warnings)
     except ValueError:
         return NormalizedDate(raw_value, None, errors=["date invalide"])
 

@@ -52,7 +52,7 @@ from graph.edges_v2 import route_intake_safety
 from graph.nodes_v2 import make_audit_service_node
 from graph.recovery_node_v2 import RecoveryPolicy, make_recovery_node
 from graph.technical_nodes_v2 import node_finalize_v2
-from graph.workflow import _assert_workflow_topology_is_sound
+from graph.topology import assert_workflow_topology_is_sound
 from services.audit_service import AuditService
 from state.claim_state_v2 import ClaimStateV2
 
@@ -65,8 +65,8 @@ def build_workflow_v2(
     recovery_policy: RecoveryPolicy | None = None,
 ) -> StateGraph:
     """Construit (sans compiler) le `StateGraph` V2 complet et vérifie sa
-    topologie (réutilise `graph.workflow._assert_workflow_topology_is_sound`,
-    générique, import en lecture seule — aucune modification de V1)."""
+    topologie (réutilise `graph.topology.assert_workflow_topology_is_sound`,
+    module partagé générique, sans dépendance V1)."""
     graph: StateGraph = StateGraph(ClaimStateV2)
 
     graph.add_node("intake_safety", _intake_safety.node)
@@ -92,7 +92,7 @@ def build_workflow_v2(
     graph.add_edge("audit_service", "finalize")
     graph.add_edge("finalize", END)
 
-    _assert_workflow_topology_is_sound(graph)
+    assert_workflow_topology_is_sound(graph)
     return graph
 
 
