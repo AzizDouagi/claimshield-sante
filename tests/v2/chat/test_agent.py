@@ -11,11 +11,12 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from chat.agent import handle_message
+from chat.agent import handle_message, handle_message_streaming
 from chat.conversation_store import ConversationAccessError, ConversationStore
 from chat.memory_schemas import ConversationSemanticState, ConversationTurn, DiscussedScenario
 from chat.schemas import (
     ChatIntent,
+    ChatStepStatus,
     ExplanationFacts,
     LlmIntentDecision,
     SimulationChangeRequest,
@@ -545,3 +546,121 @@ class TestCallerCaseIdWinsOverMessage:
         monkeypatch.setattr("chat.agent.explain_claim", spy)
         await handle_message("Explique-moi le dossier CLM-9999", case_id="CLM-2007")
         spy.assert_called_once_with("CLM-2007")
+
+
+class TestStreamingStepEvents:
+    """Visibilité temps réel des étapes/tokens (demandée par AZIZ, « comme
+    Claude Code ») — `handle_message_streaming`/`_run_turn(on_step=...)`.
+    `handle_message` (sans callback) reste inchangée, déjà couverte par
+    toutes les classes ci-dessus sans aucune modification."""
+
+    async def test_comprehension_step_started_then_completed(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-3001")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-3001", final_decision="APPROVE")),
+        )
+        events = []
+
+        async def on_step(event):
+            events.append(event)
+
+        await handle_message_streaming("Pourquoi ce dossier ?", case_id="CLM-3001", on_step=on_step)
+
+        comprehension_events = [e for e in events if e.step_name == "comprehension"]
+        assert [e.status for e in comprehension_events] == [ChatStepStatus.STARTED, ChatStepStatus.COMPLETED]
+
+    async def test_tool_and_composition_steps_emitted_in_order(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-3002")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-3002", final_decision="APPROVE")),
+        )
+        events = []
+
+        async def on_step(event):
+            events.append(event)
+
+        await handle_message_streaming("Explique.", case_id="CLM-3002", on_step=on_step)
+
+        step_names_in_order = [e.step_name for e in events]
+        assert step_names_in_order == [
+            "comprehension",
+            "comprehension",
+            "outil_explain",
+            "outil_explain",
+            "composition",
+            "composition",
+        ]
+
+    async def test_failed_comprehension_step_when_llm_unavailable(self, monkeypatch):
+        monkeypatch.setattr("chat.nlu._invoke_llm_intent", Mock(return_value=None))
+        events = []
+
+        async def on_step(event):
+            events.append(event)
+
+        reply = await handle_message_streaming("n'importe quoi", on_step=on_step)
+
+        assert reply  # message de clarification, comportement inchangé
+        assert len(events) == 2
+        assert events[0].status == ChatStepStatus.STARTED
+        assert events[1].status == ChatStepStatus.FAILED
+
+    async def test_composition_step_never_emitted_when_case_not_found(self, monkeypatch):
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-3003")
+        monkeypatch.setattr("chat.agent.explain_claim", AsyncMock(return_value=None))
+        events = []
+
+        async def on_step(event):
+            events.append(event)
+
+        await handle_message_streaming("Explique.", case_id="CLM-3003", on_step=on_step)
+
+        assert "composition" not in [e.step_name for e in events]
+
+    async def test_no_callback_reproduces_handle_message_exactly(self, monkeypatch):
+        """`on_step=None` (donc `handle_message`) ne doit strictement rien
+        changer au comportement — même résultat qu'avant cette
+        fonctionnalité, sans jamais construire le moindre `ChatStepEvent`."""
+        _mock_intent(monkeypatch, [ChatIntent.EXPLAIN], case_id="CLM-3004")
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.explain_claim",
+            AsyncMock(return_value=ExplanationFacts(case_id="CLM-3004", final_decision="APPROVE")),
+        )
+        reply = await handle_message("Explique.", case_id="CLM-3004")
+        assert reply == "Réponse groundée de test."
+
+    async def test_simulate_step_labelled_targeted_vs_full(self, monkeypatch):
+        _mock_intent(
+            monkeypatch,
+            [ChatIntent.SIMULATE],
+            case_id="CLM-3005",
+            simulation_changes=SimulationChangeRequest(remove_document="ordonnance"),
+        )
+        _mock_compose_passthrough(monkeypatch)
+        monkeypatch.setattr(
+            "chat.agent.simulate_changes",
+            AsyncMock(
+                return_value=SimulationResult(
+                    case_id="CLM-3005", applied=True, original_decision="APPROVE", simulated_decision="APPROVE"
+                )
+            ),
+        )
+        events = []
+
+        async def on_step(event):
+            events.append(event)
+
+        await handle_message_streaming(
+            "Et si on retirait l'ordonnance ?", case_id="CLM-3005", on_step=on_step
+        )
+
+        simulate_events = [e for e in events if e.step_name == "outil_simulate"]
+        assert len(simulate_events) == 2
+        assert "complète" in simulate_events[0].label.lower()
+        assert simulate_events[0].input_tokens is None
+        assert simulate_events[0].output_tokens is None

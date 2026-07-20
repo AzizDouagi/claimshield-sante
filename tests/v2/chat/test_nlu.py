@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from chat.memory_schemas import ConversationSemanticState
-from chat.nlu import extract_intent
+from chat.nlu import _invoke_llm_intent, extract_intent
 from chat.schemas import ChatIntent, LlmIntentDecision, SimulationChangeRequest
 
 
@@ -174,3 +175,87 @@ class TestScenarioReferenceResolution:
         )
         assert result is not None
         assert result.resolved_scenario_id is None
+
+
+class _FakeStructured:
+    def __init__(self, raw_result: dict):
+        self._raw_result = raw_result
+
+    def invoke(self, messages):
+        return self._raw_result
+
+
+class _FakeLlm:
+    """Simule `ChatOllama.with_structured_output(..., include_raw=True)` —
+    voir `chat/llm_usage.py` (visibilité temps réel des tokens, AZIZ)."""
+
+    def __init__(self, raw_result: dict):
+        self._raw_result = raw_result
+        self.last_kwargs: dict = {}
+
+    def with_structured_output(self, model, **kwargs):
+        self.last_kwargs = kwargs
+        return _FakeStructured(self._raw_result)
+
+
+class TestUsageCapture:
+    """`_invoke_llm_intent`/`extract_intent` capturent les tokens via
+    `include_raw=True` — voir `chat/llm_usage.py`."""
+
+    def test_include_raw_is_requested(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(usage_metadata=None, response_metadata={}),
+                "parsed": LlmIntentDecision(intents=[ChatIntent.EXPLAIN]),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.nlu.get_llm", lambda: fake_llm)
+        _invoke_llm_intent("Pourquoi ce dossier est rejeté ?", None)
+        assert fake_llm.last_kwargs.get("include_raw") is True
+
+    def test_usage_sink_populated_on_success(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 36, "output_tokens": 25, "total_tokens": 61},
+                    response_metadata={"model_name": "gemma4:latest"},
+                ),
+                "parsed": LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-6001"),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.nlu.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = _invoke_llm_intent("Explique-moi le dossier CLM-6001", None, usage_sink=sink)
+        assert result is not None
+        assert result.case_id == "CLM-6001"
+        assert sink == {"input_tokens": 36, "output_tokens": 25, "model_name": "gemma4:latest"}
+
+    def test_usage_sink_stays_empty_on_parsing_error(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 10, "output_tokens": 3}, response_metadata={}
+                ),
+                "parsed": None,
+                "parsing_error": ValueError("sortie non conforme"),
+            }
+        )
+        monkeypatch.setattr("chat.nlu.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = _invoke_llm_intent("bonjour", None, usage_sink=sink)
+        assert result is None
+        assert sink == {}
+
+    def test_usage_sink_none_by_default_never_raises(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(usage_metadata={"input_tokens": 1, "output_tokens": 1}, response_metadata={}),
+                "parsed": LlmIntentDecision(intents=[ChatIntent.EXPLAIN]),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.nlu.get_llm", lambda: fake_llm)
+        result = _invoke_llm_intent("Pourquoi ?", None)
+        assert result is not None

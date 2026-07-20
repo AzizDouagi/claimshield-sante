@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from chat.llm_usage import record_usage
 from chat.prompt import load_chat_intent_extraction_prompt
 from chat.schemas import LlmIntentDecision, NluResult
 from llm.factory import get_llm
@@ -32,12 +33,22 @@ __all__ = ["extract_intent"]
 
 
 def _invoke_llm_intent(
-    message: str, case_id: str | None, *, recent_turns: list[ConversationTurn] | None = None
+    message: str,
+    case_id: str | None,
+    *,
+    recent_turns: list[ConversationTurn] | None = None,
+    usage_sink: dict | None = None,
 ) -> LlmIntentDecision | None:
+    """`usage_sink` (optionnel, `None` par défaut — aucun changement de
+    comportement pour les appelants existants) : dict mutable rempli avec
+    `model_name`/`input_tokens`/`output_tokens` (via `include_raw=True`,
+    seul moyen d'obtenir l'`AIMessage` brut — donc `usage_metadata` — tout
+    en gardant la sortie structurée déjà parsée) si l'appel réussit — voir
+    `chat/agent.py` (visibilité temps réel des tokens, AZIZ)."""
     try:
         prompt = load_chat_intent_extraction_prompt()
         llm = get_llm()
-        structured = llm.with_structured_output(LlmIntentDecision, method="json_schema")
+        structured = llm.with_structured_output(LlmIntentDecision, method="json_schema", include_raw=True)
         data = {
             "message_utilisateur": message,
             "case_id_deja_connu": case_id,
@@ -50,12 +61,16 @@ def _invoke_llm_intent(
                 else []
             ),
         }
-        result = structured.invoke(
+        raw_result = structured.invoke(
             [
                 SystemMessage(content=prompt.system_prompt),
                 HumanMessage(content=json.dumps(data, ensure_ascii=False)),
             ]
         )
+        if raw_result.get("parsing_error") is not None:
+            return None
+        record_usage(raw_result.get("raw"), usage_sink)
+        result = raw_result.get("parsed")
         if isinstance(result, dict):
             result = LlmIntentDecision(**result)
         if isinstance(result, LlmIntentDecision):
@@ -87,6 +102,7 @@ def extract_intent(
     *,
     recent_turns: list[ConversationTurn] | None = None,
     semantic_state: ConversationSemanticState | None = None,
+    usage_sink: dict | None = None,
 ) -> NluResult | None:
     """Classe `message` en une ou plusieurs `ChatIntent` — `case_id` fourni
     par l'appelant (contexte de conversation déjà connu, ex. dossier
@@ -97,8 +113,10 @@ def extract_intent(
 
     `recent_turns`/`semantic_state` sont optionnels (mémoire conversationnelle,
     Phase 8) — `None` reproduit exactement le comportement d'avant cette
-    phase (aucune mémoire, aucune résolution de référence)."""
-    result = _invoke_llm_intent(message, case_id, recent_turns=recent_turns)
+    phase (aucune mémoire, aucune résolution de référence). `usage_sink`
+    optionnel (`None` par défaut, aucun changement de comportement) — voir
+    `chat/llm_usage.py`."""
+    result = _invoke_llm_intent(message, case_id, recent_turns=recent_turns, usage_sink=usage_sink)
     if result is None:
         return None
     resolved_case_id = case_id or result.case_id

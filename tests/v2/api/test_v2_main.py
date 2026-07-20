@@ -302,6 +302,85 @@ class TestChatEndpoint:
         assert "introuvable" in response.json()["reply"].lower()
 
 
+def _parse_sse_events(response_text: str) -> list[dict]:
+    import json
+
+    events = []
+    for line in response_text.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[len("data: ") :]))
+    return events
+
+
+class TestChatStreamEndpoint:
+    """``POST /v2/chat/stream`` — visibilité temps réel des étapes/tokens
+    (demandée par AZIZ, « comme Claude Code »). ``POST /chat`` ci-dessus
+    reste strictement inchangé — voir `TestChatEndpoint`."""
+
+    def test_chat_stream_requires_api_key(self, v2_client: TestClient):
+        response = v2_client.post("/chat/stream", json={"message": "test"})
+        assert response.status_code == 401
+
+    def test_chat_stream_emits_step_events_then_a_final_event(self, v2_client: TestClient, monkeypatch):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id="CLM-8099")),
+        )
+        response = v2_client.post(
+            "/chat/stream",
+            json={"message": "Pourquoi ?", "case_id": "CLM-8099"},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        events = _parse_sse_events(response.text)
+        assert events, "au moins un événement doit être émis"
+        assert events[0]["type"] == "step"
+        assert events[0]["step_name"] == "comprehension"
+        assert events[0]["status"] == "STARTED"
+
+        final_events = [e for e in events if e["type"] == "final"]
+        assert len(final_events) == 1
+        assert "introuvable" in final_events[0]["reply"].lower()
+
+    def test_chat_stream_final_event_reflects_composed_reply(
+        self, v2_client: TestClient, tmp_path, monkeypatch
+    ):
+        from chat.schemas import ChatIntent, LlmIntentDecision
+
+        case_id = "CLM-8011"
+        _submit(v2_client, case_id, _stage_deposit_folder(tmp_path))
+
+        monkeypatch.setattr(
+            "chat.nlu._invoke_llm_intent",
+            Mock(return_value=LlmIntentDecision(intents=[ChatIntent.EXPLAIN], case_id=case_id)),
+        )
+        monkeypatch.setattr(
+            "chat.response_composer._invoke_llm_compose",
+            Mock(return_value=f"Le dossier {case_id} a été traité."),
+        )
+
+        response = v2_client.post(
+            "/chat/stream",
+            json={"message": "Pourquoi cette décision ?", "case_id": case_id},
+            headers={"X-API-Key": _API_KEY},
+        )
+        assert response.status_code == 200
+        events = _parse_sse_events(response.text)
+
+        step_names = [e["step_name"] for e in events if e["type"] == "step"]
+        assert "comprehension" in step_names
+        assert "outil_explain" in step_names
+        assert "composition" in step_names
+
+        final_event = next(e for e in events if e["type"] == "final")
+        assert final_event["reply"] == f"Le dossier {case_id} a été traité."
+        assert final_event["step_count"] == len(events) - 1
+
+
 class TestChatMemoryWiring:
     """Phase 8 (plan de remédiation « autonomie décisionnelle V2 », §6) —
     mémoire conversationnelle opt-in au niveau HTTP : `thread_id`/`actor`."""

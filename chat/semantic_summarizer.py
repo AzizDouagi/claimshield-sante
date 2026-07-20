@@ -26,6 +26,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from chat.llm_usage import record_usage
 from chat.memory_schemas import ConversationSemanticState, DiscussedScenario, LlmSemanticSummaryProposal
 from chat.prompt import load_chat_semantic_summary_prompt
 from llm.factory import get_llm
@@ -39,17 +40,27 @@ générique de rédaction (300), appliquée en plus pour ne jamais violer le
 schéma final."""
 
 
-def _invoke_llm_semantic_summary(data: dict[str, Any]) -> LlmSemanticSummaryProposal | None:
+def _invoke_llm_semantic_summary(
+    data: dict[str, Any], usage_sink: dict | None = None
+) -> LlmSemanticSummaryProposal | None:
+    """`usage_sink` optionnel (`None` par défaut, aucun changement de
+    comportement) — voir `chat/llm_usage.py`."""
     try:
         prompt = load_chat_semantic_summary_prompt()
         llm = get_llm()
-        structured = llm.with_structured_output(LlmSemanticSummaryProposal, method="json_schema")
-        result = structured.invoke(
+        structured = llm.with_structured_output(
+            LlmSemanticSummaryProposal, method="json_schema", include_raw=True
+        )
+        raw_result = structured.invoke(
             [
                 SystemMessage(content=prompt.system_prompt),
                 HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str)),
             ]
         )
+        if raw_result.get("parsing_error") is not None:
+            return None
+        record_usage(raw_result.get("raw"), usage_sink)
+        result = raw_result.get("parsed")
         if isinstance(result, LlmSemanticSummaryProposal):
             return result
         if isinstance(result, dict):
@@ -109,6 +120,7 @@ def update_semantic_state(
     real_decision: str | None,
     simulation_decisions: set[str],
     counterfactual_decisions: set[str],
+    usage_sink: dict | None = None,
 ) -> ConversationSemanticState:
     """Calcule le nouvel état sémantique conversationnel.
 
@@ -124,6 +136,8 @@ def update_semantic_state(
         simulation_decisions/counterfactual_decisions: décisions déjà
             calculées par une simulation/un contrefactuel réel — seules
             valeurs citables pour `kind="SIMULATION"`/`"COUNTERFACTUAL"`.
+        usage_sink: optionnel (`None` par défaut, aucun changement de
+            comportement) — voir `chat/llm_usage.py`.
 
     Returns:
         Un `ConversationSemanticState` toujours valide — jamais une
@@ -139,7 +153,7 @@ def update_semantic_state(
         "known_simulation_decisions": sorted(simulation_decisions),
         "known_counterfactual_decisions": sorted(counterfactual_decisions),
     }
-    proposal = _invoke_llm_semantic_summary(payload)
+    proposal = _invoke_llm_semantic_summary(payload, usage_sink)
     now = datetime.now(UTC)
 
     if proposal is None:

@@ -3,10 +3,11 @@ décisionnelle V2 », Phase 8, §6.3."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from chat.memory_schemas import ConversationSemanticState, DiscussedScenario, LlmSemanticSummaryProposal
-from chat.semantic_summarizer import update_semantic_state
+from chat.semantic_summarizer import _invoke_llm_semantic_summary, update_semantic_state
 
 
 def _previous() -> ConversationSemanticState:
@@ -209,3 +210,93 @@ class TestTextSafety:
         )
         assert "api_key" not in result.conversation_summary
         assert result.conversation_summary == ""
+
+
+class _FakeStructured:
+    def __init__(self, raw_result: dict):
+        self._raw_result = raw_result
+
+    def invoke(self, messages):
+        return self._raw_result
+
+
+class _FakeLlm:
+    def __init__(self, raw_result: dict):
+        self._raw_result = raw_result
+        self.last_kwargs: dict = {}
+
+    def with_structured_output(self, model, **kwargs):
+        self.last_kwargs = kwargs
+        return _FakeStructured(self._raw_result)
+
+
+class TestUsageCapture:
+    """Visibilité temps réel des tokens (demandée par AZIZ, « comme Claude
+    Code ») — voir `chat/llm_usage.py`."""
+
+    def test_include_raw_is_requested(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(usage_metadata=None, response_metadata={}),
+                "parsed": LlmSemanticSummaryProposal(),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.semantic_summarizer.get_llm", lambda: fake_llm)
+        _invoke_llm_semantic_summary({})
+        assert fake_llm.last_kwargs.get("include_raw") is True
+
+    def test_usage_sink_populated_on_success(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 500, "output_tokens": 90},
+                    response_metadata={"model_name": "gemma4:latest"},
+                ),
+                "parsed": LlmSemanticSummaryProposal(conversation_summary="résumé"),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.semantic_summarizer.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = _invoke_llm_semantic_summary({}, sink)
+        assert result is not None
+        assert sink == {"input_tokens": 500, "output_tokens": 90, "model_name": "gemma4:latest"}
+
+    def test_usage_sink_stays_empty_on_parsing_error(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(usage_metadata={"input_tokens": 5, "output_tokens": 2}, response_metadata={}),
+                "parsed": None,
+                "parsing_error": ValueError("sortie non conforme"),
+            }
+        )
+        monkeypatch.setattr("chat.semantic_summarizer.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = _invoke_llm_semantic_summary({}, sink)
+        assert result is None
+        assert sink == {}
+
+    def test_update_semantic_state_propagates_usage_sink(self, monkeypatch):
+        fake_llm = _FakeLlm(
+            {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 12, "output_tokens": 4},
+                    response_metadata={"model_name": "gemma4:latest"},
+                ),
+                "parsed": LlmSemanticSummaryProposal(conversation_summary="résumé"),
+                "parsing_error": None,
+            }
+        )
+        monkeypatch.setattr("chat.semantic_summarizer.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        update_semantic_state(
+            previous=None,
+            turn_summary={},
+            known_evidence_ids=set(),
+            real_decision=None,
+            simulation_decisions=set(),
+            counterfactual_decisions=set(),
+            usage_sink=sink,
+        )
+        assert sink == {"input_tokens": 12, "output_tokens": 4, "model_name": "gemma4:latest"}

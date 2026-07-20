@@ -3,9 +3,10 @@ garde-fou anti-hallucination sont couverts ici ; le corpus de formulations
 libres EXPLAIN/CORRECT/ANALYZE bout en bout vit dans `test_agent.py`."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import Mock
 
-from chat.response_composer import compose
+from chat.response_composer import _invoke_llm_compose, compose
 from chat.schemas import ChatIntent, CorrectionRecommendation, ExplanationFacts
 from schemas.domain import ClaimDecisionV2
 from schemas.v2_results import DecisionAssumption, DecisionCounterfactual, MissingInformation, MissingInformationDimension, MissingInformationImportance
@@ -140,3 +141,50 @@ class TestAnswerModeWiring:
             },
         )
         assert "[SIMULATION]" in result
+
+
+class TestUsageCapture:
+    """`compose(..., usage_sink=...)` — visibilité temps réel des tokens
+    demandée par AZIZ (« comme Claude Code »), voir `chat/llm_usage.py`."""
+
+    def test_compose_populates_usage_sink_on_success(self, monkeypatch):
+        fake_llm = Mock()
+        fake_llm.invoke.return_value = SimpleNamespace(
+            content="Le dossier CLM-2001 a été rejeté pour motif X.",
+            usage_metadata={"input_tokens": 300, "output_tokens": 60, "total_tokens": 360},
+            response_metadata={"model_name": "gemma4:latest"},
+        )
+        monkeypatch.setattr("chat.response_composer.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = compose(
+            case_id="CLM-2001",
+            intents=[ChatIntent.EXPLAIN],
+            tool_results={"context": {"case_id": "CLM-2001", "final_decision": "REJECT"}},
+            usage_sink=sink,
+        )
+        assert result == "Le dossier CLM-2001 a été rejeté pour motif X."
+        assert sink == {"input_tokens": 300, "output_tokens": 60, "model_name": "gemma4:latest"}
+
+    def test_compose_usage_sink_none_by_default_never_raises(self, monkeypatch):
+        fake_llm = Mock()
+        fake_llm.invoke.return_value = SimpleNamespace(
+            content="Le dossier CLM-2002 a été rejeté.",
+            usage_metadata={"input_tokens": 1, "output_tokens": 1},
+            response_metadata={},
+        )
+        monkeypatch.setattr("chat.response_composer.get_llm", lambda: fake_llm)
+        result = compose(
+            case_id="CLM-2002",
+            intents=[ChatIntent.EXPLAIN],
+            tool_results={"context": {"case_id": "CLM-2002", "final_decision": "REJECT"}},
+        )
+        assert result == "Le dossier CLM-2002 a été rejeté."
+
+    def test_usage_sink_untouched_on_llm_failure(self, monkeypatch):
+        fake_llm = Mock()
+        fake_llm.invoke.side_effect = RuntimeError("Ollama indisponible")
+        monkeypatch.setattr("chat.response_composer.get_llm", lambda: fake_llm)
+        sink: dict = {}
+        result = _invoke_llm_compose({"case_id": "CLM-2003"}, sink)
+        assert result is None
+        assert sink == {}

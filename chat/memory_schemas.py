@@ -20,14 +20,17 @@ de toute mémoire conversationnelle).
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from chat.answer_mode import AnswerMode
 from chat.schemas import ChatIntent, SimulationPatch
 from schemas.domain import StrictModel
+
+_SCENARIO_ID_RE = re.compile(r"^SCENARIO-\d+$")
 
 __all__ = [
     "ConversationContext",
@@ -75,11 +78,25 @@ class DiscussedScenario(StrictModel):
     `kind` — vérifié par `chat/semantic_summarizer.py`, jamais laissé au
     seul LLM."""
 
-    scenario_id: str = Field(..., pattern=r"^SCENARIO-\d+$")
+    scenario_id: str = Field(...)
     description: str = Field(..., max_length=300)
     kind: Literal["REAL_DECISION", "SIMULATION", "COUNTERFACTUAL"]
     related_decision: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("scenario_id")
+    @classmethod
+    def _scenario_id_matches_pattern(cls, value: str) -> str:
+        """Validation Python pure — voir `chat/schemas.py::LlmIntentDecision._case_id_matches_pattern`
+        pour la raison : un `Field(pattern=...)` sur un champ envoyé au LLM
+        via `with_structured_output(method="json_schema")` (ce schéma est
+        imbriqué dans `LlmSemanticSummaryProposal.discussed_scenarios`,
+        `chat/semantic_summarizer.py`) fait échouer la compilation de
+        grammaire GBNF d'Ollama pour tout le lot d'appels. Même garantie de
+        format, sans apparaître dans le schéma JSON transmis au LLM."""
+        if not _SCENARIO_ID_RE.match(value):
+            raise ValueError(f"scenario_id doit matcher {_SCENARIO_ID_RE.pattern!r}, reçu : {value!r}")
+        return value
 
 
 class ConversationSemanticState(StrictModel):

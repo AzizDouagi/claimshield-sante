@@ -13,10 +13,25 @@ supplémentaire). Les trois doivent être fournis ensemble pour activer la
 mémoire — jamais un état partiel silencieusement actif. Le texte intégral du
 message/de la réponse n'est **jamais** conservé (`chat.memory_schemas.ConversationTurn.message_digest`/
 `reply_digest`, empreintes SHA-256 non réversibles calculées par `_digest`).
-"""
+
+Visibilité temps réel des étapes + tokens (demandé par AZIZ, « comme Claude
+Code ») — `_run_turn` accepte un callback optionnel `on_step` qui reçoit un
+`ChatStepEvent` à chaque frontière d'étape (compréhension, outil dispatché,
+composition, mémoire). `handle_message` (inchangée, utilisée par tous les
+appelants existants) appelle `_run_turn(..., on_step=None)` — un `on_step`
+absent ne modifie strictement rien au comportement ni à la performance.
+Seuls les 4 appels LLM propres à ce module (NLU/composition/message
+patient/résumé sémantique) rapportent des tokens réels
+(`chat/llm_usage.py`) ; l'intention `SIMULATE` peut ré-invoquer jusqu'à 5
+agents V2 en interne (`chat/simulation_engine.py`) — leurs tokens ne sont
+**pas** comptabilisés ici (limite assumée, chantier séparé), l'étape
+correspondante est émise avec `input_tokens`/`output_tokens=None` explicite,
+jamais un zéro trompeur."""
 from __future__ import annotations
 
 import hashlib
+import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -35,6 +50,8 @@ from chat.schemas import (
     ChatIntent,
     ChatPlan,
     ChatPlanAction,
+    ChatStepEvent,
+    ChatStepStatus,
     ExplanationFacts,
     SimulationPatch,
     SimulationResult,
@@ -50,7 +67,9 @@ from chat.tools import (
 )
 from config.logging import get_logger
 
-__all__ = ["handle_message"]
+__all__ = ["handle_message", "handle_message_streaming"]
+
+OnStepCallback = Callable[[ChatStepEvent], Awaitable[None]]
 
 logger = get_logger(__name__)
 
@@ -74,6 +93,40 @@ def _digest(text: str) -> str:
     """Empreinte SHA-256 non réversible — jamais le texte intégral conservé
     en mémoire conversationnelle (plan V2 §6.2)."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+async def _emit(
+    on_step: OnStepCallback | None,
+    *,
+    step_name: str,
+    label: str,
+    status: ChatStepStatus,
+    model_name: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    duration_ms: int | None = None,
+    detail: str = "",
+) -> None:
+    """N'émet rien si `on_step is None` — coût et comportement strictement
+    nuls pour `handle_message()` (aucun callback fourni)."""
+    if on_step is None:
+        return
+    await on_step(
+        ChatStepEvent(
+            step_name=step_name,
+            label=label,
+            status=status,
+            model_name=model_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            duration_ms=duration_ms,
+            detail=detail,
+        )
+    )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.monotonic() - started_at) * 1000)
 
 
 def _collect_known_evidence_ids(tool_results: dict) -> set[str]:
@@ -133,6 +186,17 @@ def _merge_simulation_patches(
     return list(merged.values())
 
 
+_TOOL_STEP_LABELS: dict[ChatIntent, tuple[str, str]] = {
+    ChatIntent.ANALYZE: ("outil_analyze", "Récupération du contexte du dossier"),
+    ChatIntent.EXPLAIN: ("outil_explain", "Explication de la décision"),
+    ChatIntent.CORRECT: ("outil_correct", "Recommandations de correction"),
+    ChatIntent.AUDIT: ("outil_audit", "Résumé d'audit"),
+    ChatIntent.DRAFT_MESSAGE: ("outil_draft_message", "Rédaction du message patient"),
+}
+"""Slug/libellé d'étape par intention exécutable — `SIMULATE` en est
+volontairement absent (libellé dynamique ciblée/complète, voir `_run_turn`)."""
+
+
 async def handle_message(
     message: str,
     case_id: str | None = None,
@@ -148,13 +212,73 @@ async def handle_message(
     `thread_id`/`user_id`/`conversation_store` (Phase 8) activent la mémoire
     conversationnelle uniquement si les trois sont fournis ensemble —
     reproduit sinon exactement le comportement d'avant cette phase.
-    """
+
+    Wrapper fin sur `_run_turn(..., on_step=None)` — voir `handle_message_streaming`
+    pour la variante avec visibilité temps réel des étapes/tokens."""
+    return await _run_turn(
+        message,
+        case_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        conversation_store=conversation_store,
+        on_step=None,
+    )
+
+
+async def handle_message_streaming(
+    message: str,
+    case_id: str | None = None,
+    *,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+    conversation_store: ConversationStore | None = None,
+    on_step: OnStepCallback,
+) -> str:
+    """Identique à `handle_message`, avec émission d'un `ChatStepEvent` à
+    chaque frontière d'étape via `on_step` (obligatoire ici — voir
+    `api/v2/chat.py::chat_v2_stream` pour l'usage réel via une file
+    asyncio consommée par un générateur SSE)."""
+    return await _run_turn(
+        message,
+        case_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        conversation_store=conversation_store,
+        on_step=on_step,
+    )
+
+
+async def _run_turn(
+    message: str,
+    case_id: str | None = None,
+    *,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+    conversation_store: ConversationStore | None = None,
+    on_step: OnStepCallback | None,
+) -> str:
     memory_enabled = thread_id is not None and user_id is not None and conversation_store is not None
     context = conversation_store.get(user_id=user_id, thread_id=thread_id) if memory_enabled else None
     recent_turns = context.turns if context is not None else None
     semantic_state = context.semantic_state if context is not None else None
 
-    nlu_result = extract_intent(message, case_id, recent_turns=recent_turns, semantic_state=semantic_state)
+    started_at = time.monotonic()
+    nlu_usage: dict = {}
+    await _emit(on_step, step_name="comprehension", label="Compréhension de la demande", status=ChatStepStatus.STARTED)
+    nlu_result = extract_intent(
+        message, case_id, recent_turns=recent_turns, semantic_state=semantic_state, usage_sink=nlu_usage
+    )
+    await _emit(
+        on_step,
+        step_name="comprehension",
+        label="Compréhension de la demande",
+        status=ChatStepStatus.COMPLETED if nlu_result is not None else ChatStepStatus.FAILED,
+        model_name=nlu_usage.get("model_name"),
+        input_tokens=nlu_usage.get("input_tokens"),
+        output_tokens=nlu_usage.get("output_tokens"),
+        duration_ms=_elapsed_ms(started_at),
+        detail="" if nlu_result is not None else "LLM indisponible ou réponse invalide",
+    )
     chat_plan = plan(nlu_result)
 
     reply: str
@@ -174,12 +298,28 @@ async def handle_message(
         elif ChatIntent.SIMULATE in chat_plan.intents and chat_plan.simulation_changes is None:
             reply = _SIMULATE_MISSING_CHANGES_MESSAGE
         else:
-            if ChatIntent.ANALYZE in chat_plan.intents:
-                tool_results["context"] = await get_claim_context(resolved_case_id)
-            if ChatIntent.EXPLAIN in chat_plan.intents:
-                tool_results["explanation"] = await explain_claim(resolved_case_id)
-            if ChatIntent.CORRECT in chat_plan.intents:
-                tool_results["corrections"] = await recommend_corrections(resolved_case_id)
+            for intent, (step_name, label) in _TOOL_STEP_LABELS.items():
+                if intent not in chat_plan.intents:
+                    continue
+                tool_started_at = time.monotonic()
+                await _emit(on_step, step_name=step_name, label=label, status=ChatStepStatus.STARTED)
+                if intent is ChatIntent.ANALYZE:
+                    tool_results["context"] = await get_claim_context(resolved_case_id)
+                elif intent is ChatIntent.EXPLAIN:
+                    tool_results["explanation"] = await explain_claim(resolved_case_id)
+                elif intent is ChatIntent.CORRECT:
+                    tool_results["corrections"] = await recommend_corrections(resolved_case_id)
+                elif intent is ChatIntent.AUDIT:
+                    tool_results["audit_summary"] = await get_audit_summary(resolved_case_id)
+                elif intent is ChatIntent.DRAFT_MESSAGE:
+                    tool_results["patient_message_context"] = await generate_patient_message(resolved_case_id)
+                await _emit(
+                    on_step,
+                    step_name=step_name,
+                    label=label,
+                    status=ChatStepStatus.COMPLETED,
+                    duration_ms=_elapsed_ms(tool_started_at),
+                )
             if ChatIntent.SIMULATE in chat_plan.intents and chat_plan.simulation_changes is not None:
                 effective_changes = chat_plan.simulation_changes
                 # Simulation ciblée (Phase 9) — accumule avec les patches
@@ -193,11 +333,25 @@ async def handle_message(
                     effective_changes = effective_changes.model_copy(
                         update={"field_patches": merged_simulation_patches}
                     )
+                simulate_label = (
+                    "Simulation ciblée : autonomous_decision"
+                    if effective_changes.field_patches
+                    else "Simulation complète : pipeline entier"
+                )
+                # Jusqu'à 5 appels LLM internes aux agents V2 ré-invoqués —
+                # tokens non comptabilisés ici (limite assumée, voir
+                # docstring de module), `input_tokens`/`output_tokens`
+                # explicitement absents plutôt qu'un zéro trompeur.
+                simulate_started_at = time.monotonic()
+                await _emit(on_step, step_name="outil_simulate", label=simulate_label, status=ChatStepStatus.STARTED)
                 tool_results["simulation"] = await simulate_changes(resolved_case_id, effective_changes)
-            if ChatIntent.AUDIT in chat_plan.intents:
-                tool_results["audit_summary"] = await get_audit_summary(resolved_case_id)
-            if ChatIntent.DRAFT_MESSAGE in chat_plan.intents:
-                tool_results["patient_message_context"] = await generate_patient_message(resolved_case_id)
+                await _emit(
+                    on_step,
+                    step_name="outil_simulate",
+                    label=simulate_label,
+                    status=ChatStepStatus.COMPLETED,
+                    duration_ms=_elapsed_ms(simulate_started_at),
+                )
 
             if semantic_state is not None:
                 resolved_scenario = _find_resolved_scenario(
@@ -209,10 +363,34 @@ async def handle_message(
             if not tool_results or all(value in (None, [], {}) for value in tool_results.values()):
                 reply = _CASE_NOT_FOUND_MESSAGE
             else:
-                reply = compose(case_id=resolved_case_id, intents=chat_plan.intents, tool_results=tool_results)
+                compose_started_at = time.monotonic()
+                compose_usage: dict = {}
+                await _emit(
+                    on_step, step_name="composition", label="Composition de la réponse", status=ChatStepStatus.STARTED
+                )
+                reply = compose(
+                    case_id=resolved_case_id,
+                    intents=chat_plan.intents,
+                    tool_results=tool_results,
+                    usage_sink=compose_usage,
+                )
+                await _emit(
+                    on_step,
+                    step_name="composition",
+                    label="Composition de la réponse",
+                    status=ChatStepStatus.COMPLETED,
+                    model_name=compose_usage.get("model_name"),
+                    input_tokens=compose_usage.get("input_tokens"),
+                    output_tokens=compose_usage.get("output_tokens"),
+                    duration_ms=_elapsed_ms(compose_started_at),
+                )
 
     if memory_enabled:
         assert thread_id is not None and user_id is not None and conversation_store is not None
+        memory_started_at = time.monotonic()
+        memory_usage: dict = {}
+        await _emit(on_step, step_name="memoire", label="Mise à jour de la mémoire conversationnelle", status=ChatStepStatus.STARTED)
+        memory_failed = False
         try:
             _record_turn_and_update_memory(
                 message=message,
@@ -225,16 +403,46 @@ async def handle_message(
                 previous_semantic_state=semantic_state,
                 previous_simulations_count=len(context.simulations) if context is not None else 0,
                 merged_simulation_patches=merged_simulation_patches,
+                usage_sink=memory_usage,
             )
         except ConversationAccessError:
             # Réutilisation frauduleuse d'un thread_id — doit rester visible
             # à l'appelant, jamais avalée silencieusement.
+            memory_failed = True
+            await _emit(
+                on_step,
+                step_name="memoire",
+                label="Mise à jour de la mémoire conversationnelle",
+                status=ChatStepStatus.FAILED,
+                duration_ms=_elapsed_ms(memory_started_at),
+                detail="Accès mémoire refusé",
+            )
             raise
         except Exception:
             # Une panne de la couche mémoire (bug, LLM de résumé, etc.) ne
             # doit jamais faire échouer une réponse déjà composée et déjà
             # envoyée à l'utilisateur — journalisée, jamais propagée.
+            memory_failed = True
             logger.warning("chat_memory_recording_failed", thread_id=thread_id)
+            await _emit(
+                on_step,
+                step_name="memoire",
+                label="Mise à jour de la mémoire conversationnelle",
+                status=ChatStepStatus.FAILED,
+                duration_ms=_elapsed_ms(memory_started_at),
+                detail="Panne de la couche mémoire",
+            )
+        if not memory_failed:
+            await _emit(
+                on_step,
+                step_name="memoire",
+                label="Mise à jour de la mémoire conversationnelle",
+                status=ChatStepStatus.COMPLETED,
+                model_name=memory_usage.get("model_name"),
+                input_tokens=memory_usage.get("input_tokens"),
+                output_tokens=memory_usage.get("output_tokens"),
+                duration_ms=_elapsed_ms(memory_started_at),
+            )
 
     return reply
 
@@ -251,13 +459,15 @@ def _record_turn_and_update_memory(
     previous_semantic_state: ConversationSemanticState | None,
     previous_simulations_count: int,
     merged_simulation_patches: list[SimulationPatch] | None,
+    usage_sink: dict | None = None,
 ) -> None:
     """Enregistre le tour courant et met à jour le résumé sémantique — ne
     lève jamais d'exception qui interromprait la réponse déjà composée à
     l'utilisateur (une panne de mémoire ne doit jamais faire échouer la
     conversation elle-même), à l'exception explicite de
     `ConversationAccessError` (réutilisation frauduleuse d'un `thread_id`,
-    qui doit rester visible à l'appelant)."""
+    qui doit rester visible à l'appelant). `usage_sink` optionnel (`None`
+    par défaut, aucun changement de comportement) — voir `chat/llm_usage.py`."""
     answer_modes = detect_answer_modes(intents=chat_plan.intents, tool_results=tool_results) if tool_results else []
     known_evidence_ids = _collect_known_evidence_ids(tool_results)
 
@@ -315,6 +525,7 @@ def _record_turn_and_update_memory(
         real_decision=_collect_real_decision(tool_results),
         simulation_decisions=_collect_simulation_decisions(tool_results),
         counterfactual_decisions=_collect_counterfactual_decisions(tool_results),
+        usage_sink=usage_sink,
     )
     conversation_store.update_semantic_state(
         user_id=user_id, thread_id=thread_id, semantic_state=new_semantic_state

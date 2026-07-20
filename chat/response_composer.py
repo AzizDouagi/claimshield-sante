@@ -24,6 +24,7 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from chat.answer_mode import detect_answer_modes
+from chat.llm_usage import record_usage
 from chat.memory_schemas import DiscussedScenario
 from chat.prompt import load_chat_patient_message_prompt, load_chat_reasoning_prompt
 from chat.schemas import (
@@ -56,7 +57,7 @@ def _grounded_tokens(tool_results: dict) -> set[str]:
     return _extract_number_like_tokens(blob)
 
 
-def _invoke_llm_compose(data: dict) -> str | None:
+def _invoke_llm_compose(data: dict, usage_sink: dict | None = None) -> str | None:
     try:
         prompt = load_chat_reasoning_prompt()
         llm = get_llm()
@@ -66,13 +67,14 @@ def _invoke_llm_compose(data: dict) -> str | None:
                 HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str)),
             ]
         )
+        record_usage(result, usage_sink)
         content = getattr(result, "content", None)
         return content if isinstance(content, str) and content.strip() else None
     except Exception:
         return None
 
 
-def _invoke_llm_patient_message(data: dict) -> str | None:
+def _invoke_llm_patient_message(data: dict, usage_sink: dict | None = None) -> str | None:
     try:
         prompt = load_chat_patient_message_prompt()
         llm = get_llm()
@@ -82,6 +84,7 @@ def _invoke_llm_patient_message(data: dict) -> str | None:
                 HumanMessage(content=json.dumps(data, ensure_ascii=False, default=str)),
             ]
         )
+        record_usage(result, usage_sink)
         content = getattr(result, "content", None)
         return content if isinstance(content, str) and content.strip() else None
     except Exception:
@@ -191,7 +194,13 @@ def _serialize(value: object) -> object:
     return value
 
 
-def compose(*, case_id: str | None, intents: list[ChatIntent], tool_results: dict) -> str:
+def compose(
+    *,
+    case_id: str | None,
+    intents: list[ChatIntent],
+    tool_results: dict,
+    usage_sink: dict | None = None,
+) -> str:
     """Compose la réponse finale — jamais de fait hors des données déjà
     calculées par `chat/tools.py` (`context`/`explanation`/`corrections`/
     `simulation`/`audit_summary`/`patient_message_context`).
@@ -200,7 +209,13 @@ def compose(*, case_id: str | None, intents: list[ChatIntent], tool_results: dic
     (`_invoke_llm_patient_message`) — priorité sur toute autre intention
     mélangée dans le même message (rédiger un message cohérent pour le
     patient prime, jamais un mélange de tons) ; le post-check
-    anti-hallucination qui suit reste identique dans les deux cas."""
+    anti-hallucination qui suit reste identique dans les deux cas.
+
+    `usage_sink` (optionnel, `None` par défaut — aucun changement de
+    comportement pour les appelants existants) : dict mutable rempli par
+    `_invoke_llm_compose`/`_invoke_llm_patient_message` avec
+    `model_name`/`input_tokens`/`output_tokens` si l'appel LLM réussit —
+    voir `chat/agent.py` (visibilité temps réel des tokens, AZIZ)."""
     has_data = any(value not in (None, [], {}) for value in tool_results.values())
     if not has_data:
         return "Information non disponible pour ce dossier."
@@ -216,7 +231,7 @@ def compose(*, case_id: str | None, intents: list[ChatIntent], tool_results: dic
         **serialized,
     }
     invoke = _invoke_llm_patient_message if ChatIntent.DRAFT_MESSAGE in intents else _invoke_llm_compose
-    llm_text = invoke(llm_data)
+    llm_text = invoke(llm_data, usage_sink)
     if llm_text is None:
         return _fallback_compose(case_id=case_id, tool_results=tool_results)
 

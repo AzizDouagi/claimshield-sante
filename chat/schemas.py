@@ -9,9 +9,10 @@ sûr, voir `chat/tools.py`).
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from schemas.domain import ReaderRole, StrictModel
 from schemas.v2_results import (
@@ -22,11 +23,16 @@ from schemas.v2_results import (
     MissingInformation,
 )
 
+_CASE_ID_RE = re.compile(r"^CLM-\d{4,}$")
+
 __all__ = [
     "AuditSummary",
     "ChatIntent",
     "ChatPlan",
     "ChatPlanAction",
+    "ChatStepEvent",
+    "ChatStepStatus",
+    "ChatTurnSummary",
     "CorrectionRecommendation",
     "ExplanationFacts",
     "LlmIntentDecision",
@@ -145,9 +151,26 @@ class LlmIntentDecision(StrictModel):
     `SimulationChangeRequest` — jamais un changement de champ arbitraire."""
 
     intents: list[ChatIntent] = Field(..., min_length=1)
-    case_id: str | None = Field(default=None, pattern=r"^CLM-\d{4,}$")
+    case_id: str | None = Field(default=None)
     simulation_changes: SimulationChangeRequest | None = None
     reasoning: str = Field(default="", max_length=500)
+
+    @field_validator("case_id")
+    @classmethod
+    def _case_id_matches_pattern(cls, value: str | None) -> str | None:
+        """Validation Python pure (jamais un `Field(pattern=...)`) —
+        un contrainte `pattern` dans le schéma JSON envoyé à
+        `with_structured_output(method="json_schema")` fait échouer la
+        compilation de grammaire GBNF d'Ollama (`Failed to initialize
+        samplers: failed to parse grammar`), reproduit et confirmé : tout
+        appel LLM utilisant ce schéma échouait silencieusement (exception
+        avalée par `chat/nlu.py::_invoke_llm_intent`), rendant le chat
+        totalement inopérant quel que soit le message. Même garantie de
+        validation qu'un `pattern=`, sans jamais apparaître dans le schéma
+        JSON transmis au LLM."""
+        if value is not None and not _CASE_ID_RE.match(value):
+            raise ValueError(f"case_id doit matcher {_CASE_ID_RE.pattern!r}, reçu : {value!r}")
+        return value
 
 
 class AuditSummary(StrictModel):
@@ -258,3 +281,59 @@ class SimulationResult(StrictModel):
     decision_changed: bool = False
     simulated_reasons: list[str] = Field(default_factory=list)
     error: str | None = None
+
+
+class ChatStepStatus(str, Enum):
+    """Statut d'une étape de traitement d'un tour de chat — voir
+    `ChatStepEvent`. `FAILED` ne signifie jamais une panne du tour entier :
+    le repli déterministe existant (`chat/response_composer.py::_fallback_compose`,
+    etc.) continue de s'appliquer inchangé, cette étape est simplement
+    signalée comme telle à l'utilisateur plutôt que masquée."""
+
+    STARTED = "STARTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ChatStepEvent(StrictModel):
+    """Un événement d'étape émis pendant le traitement d'un message par
+    `chat/agent.py::handle_message` (visibilité temps réel, demandée par
+    AZIZ — « comme Claude Code »). Émis uniquement si un `on_step` est
+    fourni à `chat.agent._run_turn` — `handle_message()` (sans callback)
+    n'en émet jamais, comportement 100% inchangé pour les appelants
+    existants.
+
+    `label`/`detail` sont toujours des textes courts déjà minimisés
+    (jamais un prompt complet, un document brut ou une trace d'exception
+    intégrale — même discipline que `schemas.audit.AuditEvent`).
+    `input_tokens`/`output_tokens` : uniquement peuplés pour les 4 appels
+    LLM propres à `chat/` (NLU, composition, message patient, résumé
+    sémantique) via `raw.usage_metadata` (`include_raw=True`) — jamais
+    inventés. Pour les agents ré-invoqués pendant une simulation (`chat/
+    simulation_engine.py`, jusqu'à 5 appels LLM internes aux agents V2),
+    ces deux champs restent explicitement `None` (limite assumée,
+    documentée dans `chat/agent.py` — pas un chantier de cette étape,
+    jamais un zéro trompeur)."""
+
+    step_name: str = Field(..., min_length=1, max_length=60)
+    label: str = Field(..., min_length=1, max_length=200)
+    status: ChatStepStatus
+    model_name: str | None = Field(default=None, max_length=120)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
+    detail: str = Field(default="", max_length=300)
+
+
+class ChatTurnSummary(StrictModel):
+    """Événement final d'un tour de chat streamé (`POST /v2/chat/stream`)
+    — agrège les tokens/durée des étapes déjà émises, jamais un nouveau
+    calcul indépendant. `reply`/`thread_id` : même contenu que la réponse
+    non-streamée `api.v2.chat.ChatResponseV2`."""
+
+    reply: str
+    thread_id: str | None = None
+    total_input_tokens: int = Field(default=0, ge=0)
+    total_output_tokens: int = Field(default=0, ge=0)
+    total_duration_ms: int = Field(default=0, ge=0)
+    step_count: int = Field(default=0, ge=0)

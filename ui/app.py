@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 # `DATABASE_URL` (chargée par Chainlit depuis notre .env — non lié à cette
 # UI) est aussi le nom conventionnel que Chainlit utilise lui-même pour
 # activer sa propre couche de persistance de conversations (postgres via
@@ -235,6 +237,27 @@ async def on_menu_override_v2(action: cl.Action) -> None:
 # il prime sur un identifiant que le NLU croirait détecter dans le texte
 # (voir `chat.agent.handle_message`), mais un identifiant explicite dans le
 # message reste toujours possible si aucun dossier n'a encore été consulté.
+def _format_step_output(event: dict) -> str:
+    """Résumé court affiché dans un `cl.Step` une fois l'étape terminée —
+    modèle/tokens/durée si connus (visibilité temps réel demandée par
+    AZIZ, « comme Claude Code »). `input_tokens`/`output_tokens` restent
+    `None` pour les étapes de simulation (agents V2 ré-invoqués, tokens non
+    comptabilisés — limite assumée, voir `chat/agent.py`) : jamais affichés
+    comme un zéro trompeur dans ce cas."""
+    parts: list[str] = []
+    if event.get("model_name"):
+        parts.append(str(event["model_name"]))
+    if event.get("input_tokens") is not None and event.get("output_tokens") is not None:
+        parts.append(f"{event['input_tokens']} in / {event['output_tokens']} out tokens")
+    if event.get("duration_ms") is not None:
+        parts.append(f"{event['duration_ms']} ms")
+    if event.get("detail"):
+        parts.append(str(event["detail"]))
+    if parts:
+        return " — ".join(parts)
+    return "Échec" if event.get("status") == "FAILED" else "Terminé"
+
+
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     text = (message.content or "").strip()
@@ -242,18 +265,48 @@ async def on_message(message: cl.Message) -> None:
         return
 
     case_id = cl.user_session.get("last_case_id")
-    # Mémoire conversationnelle (Phase 8) — entièrement opt-in côté API :
-    # `thread_id` (session Chainlit, stable pour toute la conversation) et
-    # `actor` (déjà demandé/caché en session par les flux de décision
-    # humaine/override ci-dessus, jamais redemandé ici) activent la mémoire
-    # uniquement si `actor` est déjà connu — sinon comportement inchangé.
-    thread_id = cl.context.session.id
-    actor = cl.user_session.get("actor")
-    response = await api_client_v2.send_chat_message_v2(
-        text, case_id=case_id, thread_id=thread_id, actor=actor
-    )
-    if response.status_code >= 400:
-        await cl.Message(content=f"Erreur chat ({response.status_code}) : {response.text}").send()
+    # Mémoire conversationnelle (Phase 8) — désactivée délibérément pour
+    # l'instant côté UI (décision AZIZ) : `thread_id`/`actor` restent `None`
+    # dans l'appel au chat ci-dessous, quel que soit l'état de la session
+    # Chainlit ou un `actor` déjà connu par ailleurs (flux override) — le
+    # chat reste donc sans mémoire tant que ce choix n'est pas révisé.
+    # L'infrastructure (`chat.agent`/`ConversationStore`/`api/v2/chat.py`)
+    # n'est pas retirée, uniquement non sollicitée depuis l'UI.
+
+    # Visibilité temps réel des actions du chat + tokens consommés (demandé
+    # par AZIZ, « comme Claude Code ») — chaque étape (compréhension, outil
+    # dispatché, composition, mémoire) s'affiche progressivement via un
+    # `cl.Step` dédié, ouvert à son `STARTED` et complété à son
+    # `COMPLETED`/`FAILED`, avant que la réponse finale n'arrive.
+    open_steps: dict[str, cl.Step] = {}
+    reply_text: str | None = None
+    error_detail: str | None = None
+    try:
+        async for event in api_client_v2.stream_chat_message_v2(text, case_id=case_id):
+            event_type = event.get("type")
+            if event_type == "step":
+                step_name = event["step_name"]
+                if event["status"] == "STARTED":
+                    step = cl.Step(name=event["label"], type="tool")
+                    await step.send()
+                    open_steps[step_name] = step
+                else:
+                    step = open_steps.pop(step_name, cl.Step(name=event["label"], type="tool"))
+                    step.is_error = event["status"] == "FAILED"
+                    step.output = _format_step_output(event)
+                    await step.update()
+            elif event_type == "final":
+                reply_text = event.get("reply")
+            elif event_type == "error":
+                error_detail = event.get("detail")
+    except httpx.HTTPStatusError as exc:
+        await cl.Message(
+            content=f"Erreur chat ({exc.response.status_code}) : {exc.response.text}"
+        ).send()
         return
 
-    await cl.Message(content=response.json()["reply"]).send()
+    if error_detail is not None:
+        await cl.Message(content=f"Erreur chat : {error_detail}").send()
+        return
+
+    await cl.Message(content=reply_text or "").send()

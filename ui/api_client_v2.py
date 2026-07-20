@@ -11,6 +11,9 @@ par construction).
 """
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
+
 import httpx
 
 from config.settings import get_settings
@@ -25,6 +28,7 @@ __all__ = [
     "get_status_v2",
     "healthz",
     "send_chat_message_v2",
+    "stream_chat_message_v2",
     "submit_claim_v2",
     "submit_override_v2",
 ]
@@ -89,6 +93,39 @@ async def send_chat_message_v2(
             json={"case_id": case_id, "message": message, "thread_id": thread_id, "actor": actor},
             headers=_auth_headers(),
         )
+
+
+async def stream_chat_message_v2(
+    message: str,
+    *,
+    case_id: str | None = None,
+    thread_id: str | None = None,
+    actor: str | None = None,
+) -> AsyncIterator[dict]:
+    """``POST /v2/chat/stream`` — variante streaming de `send_chat_message_v2`
+    (visibilité temps réel des étapes/tokens, demandée par AZIZ — « comme
+    Claude Code »). Yield un dict par ligne SSE reçue, au fur et à mesure :
+    ``{"type": "step", ...ChatStepEvent}``, puis un seul
+    ``{"type": "final", ...ChatTurnSummary}`` (ou ``{"type": "error", "detail": ...}``
+    si la mémoire refuse l'accès en cours de route) — voir
+    ``ui/app.py::on_message`` pour la consommation (affichage progressif via
+    ``cl.Step``). Lève ``httpx.HTTPStatusError`` si la requête elle-même est
+    refusée avant même le premier événement (ex. 401/422)."""
+    async with httpx.AsyncClient(base_url=_base_url(), timeout=_PIPELINE_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST",
+            "/chat/stream",
+            json={"case_id": case_id, "message": message, "thread_id": thread_id, "actor": actor},
+            headers=_auth_headers(),
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[len("data: ") :]
+                if not payload:
+                    continue
+                yield json.loads(payload)
 
 
 async def submit_override_v2(
